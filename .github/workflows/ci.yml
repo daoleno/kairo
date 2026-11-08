@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux · check, unit, e2e, TUN e2e
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+      - name: A mihomo core for the e2e tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/core"
+          gh release download -R MetaCubeX/mihomo --pattern 'mihomo-linux-amd64-v1.*.gz' -D "$RUNNER_TEMP/core"
+          gunzip -c "$RUNNER_TEMP"/core/*.gz > "$RUNNER_TEMP/core/mihomo"
+          chmod +x "$RUNNER_TEMP/core/mihomo"
+          echo "KAIRO_TEST_CORE=$RUNNER_TEMP/core/mihomo" >> "$GITHUB_ENV"
+      - name: Unit and e2e tests (a real core on free ports)
+        run: cargo test --workspace
+      - name: TUN e2e in a user + network namespace
+        run: |
+          # Ubuntu 24.04 confines unprivileged user namespaces by default.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          scripts/tun-e2e.sh
+
+  macos:
+    name: macOS · check and unit tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+      - run: cargo test -p kairo-core --lib

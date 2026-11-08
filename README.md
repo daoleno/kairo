@@ -37,6 +37,20 @@ calm, with one accent colour, and it follows the system's light or dark appearan
 - **Tray / menu bar**: status and speeds, mode, system proxy, TUN, node quick switch, start/stop the core,
   show the window, and quit.
 
+## Install
+
+Download the latest release from [Releases](https://github.com/daoleno/kairo/releases/latest), or from the
+[website](https://daoleno.github.io/kairo/).
+
+- **macOS 11+** (Apple silicon and Intel): open the `.dmg` and drag Kairo to Applications. The app is ad hoc
+  signed but not notarized, so the first time you open it, right-click Kairo in Applications, choose
+  **Open**, then **Open** again. Alternatively, run `xattr -dr com.apple.quarantine /Applications/Kairo.app`.
+- **Debian / Ubuntu 24.04+**: `sudo apt install ./kairo_<version>_amd64.deb` (or `_arm64`).
+- **Other Linux** (GTK 4.14+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
+  to `~/.local`; `./install.sh /usr/local` installs system-wide with sudo.
+
+Check downloads against `SHA256SUMS` in the release.
+
 ## Build and run
 
 Rust (stable) and the platform's development libraries are needed: GTK 4 on Linux, Xcode's command line tools
@@ -47,8 +61,9 @@ cargo run                      # the app (GTK 4 on Linux, AppKit on macOS)
 nsh check                      # cargo check of every crate
 KAIRO_TEST_CORE=/path/to/mihomo scripts/ui-test.sh    # nsh test: all unit, e2e and headless UI tests
 KAIRO_TEST_CORE=/path/to/mihomo scripts/tun-e2e.sh    # TUN end to end, in a network namespace
-scripts/package-linux.sh       # dist/: a tarball with the binary, .desktop file and icon
-scripts/package-macos.sh       # dist/: Kairo.app and Kairo.dmg (run on a Mac)
+scripts/package-linux.sh       # dist/: a tarball with the binary, .desktop file, icons and install.sh
+scripts/package-deb.sh         # dist/: a .deb from that tree
+scripts/package-macos.sh       # dist/: Kairo.app, .dmg and .zip, universal, ad hoc signed (run on a Mac)
 ```
 
 Kairo keeps its data in `~/.local/share/kairo` on Linux and `~/Library/Application Support/Kairo` on macOS.
@@ -107,6 +122,9 @@ alone, once:
   and the core can then run TUN as your user. A core update replaces the binary, which drops the capability,
   so Kairo asks again. If Kairo runs as root, or as uid 0 inside a user namespace, nothing is needed.
 - **macOS**: the core is made setuid root through the system's administrator prompt.
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a `vX.Y.Z` tag is pushed. The
+notes come from `docs/releases/vX.Y.Z.md`.
 
 ## Licence
 

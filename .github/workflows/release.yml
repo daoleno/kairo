@@ -1,0 +1,112 @@
+name: Release
+
+# Push a tag vX.Y.Z (matching Cargo.toml's version, with notes in
+# docs/releases/vX.Y.Z.md) to build the packages and publish the release.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match Cargo.toml $version"; exit 1; }
+          test -s "docs/releases/$GITHUB_REF_NAME.md" || { echo "missing docs/releases/$GITHUB_REF_NAME.md"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: verify
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+          - runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev librsvg2-bin
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/package-linux.sh
+      - run: scripts/package-deb.sh
+      - name: The .deb installs and its dependencies resolve
+        run: |
+          sudo apt-get install -y ./dist/kairo_*.deb
+          dpkg -L kairo | grep -q /usr/bin/kairo
+          test -x /usr/bin/kairo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-${{ runner.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+
+  macos:
+    needs: verify
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/package-macos.sh
+      - name: The app is universal and signed
+        run: |
+          lipo -archs dist/Kairo.app/Contents/MacOS/Kairo
+          codesign -dv dist/Kairo.app 2>&1 | grep -E "Identifier|Signature"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+
+  windows:
+    # Not released yet: no tray, system proxy or TUN on Windows. Kept building.
+    needs: verify
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+
+  publish:
+    needs: [verify, linux, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Kairo ${{ needs.verify.outputs.version }}" \
+            --notes-file "docs/releases/$GITHUB_REF_NAME.md"
