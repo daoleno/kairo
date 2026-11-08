@@ -2,9 +2,11 @@ name: Release
 
 # Push a tag vX.Y.Z (matching Cargo.toml's version, with notes in
 # docs/releases/vX.Y.Z.md) to build the packages and publish the release.
+# Run it by hand (workflow_dispatch) to build every package without publishing.
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,8 +24,10 @@ jobs:
       - id: v
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match Cargo.toml $version"; exit 1; }
-          test -s "docs/releases/$GITHUB_REF_NAME.md" || { echo "missing docs/releases/$GITHUB_REF_NAME.md"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match Cargo.toml $version"; exit 1; }
+          fi
+          test -s "docs/releases/v$version.md" || { echo "missing docs/releases/v$version.md"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   linux:
@@ -90,6 +94,7 @@ jobs:
 
   publish:
     needs: [verify, linux, macos]
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

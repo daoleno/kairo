@@ -249,8 +249,9 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
       </div>
     </div>
     <p class="note">
-      On macOS, Kairo is not notarized yet. The first time, right-click it in Applications and choose <b>Open</b>,
-      or run <code>xattr -dr com.apple.quarantine /Applications/Kairo.app</code>.
+      On macOS, Kairo is not notarized yet, so macOS stops it the first time. Open it once, then click
+      <b>Open Anyway</b> in System Settings → Privacy &amp; Security, or run
+      <code>xattr -dr com.apple.quarantine /Applications/Kairo.app</code> first.
       Kairo downloads the mihomo core on first run. Checksums are in <a data-asset="SHA256SUMS" href="https://github.com/daoleno/kairo/releases/latest">SHA256SUMS</a>.
     </p>
   </section>

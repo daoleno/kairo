@@ -43,8 +43,9 @@ Download the latest release from [Releases](https://github.com/daoleno/kairo/rel
 [website](https://daoleno.github.io/kairo/).
 
 - **macOS 11+** (Apple silicon and Intel): open the `.dmg` and drag Kairo to Applications. The app is ad hoc
-  signed but not notarized, so the first time you open it, right-click Kairo in Applications, choose
-  **Open**, then **Open** again. Alternatively, run `xattr -dr com.apple.quarantine /Applications/Kairo.app`.
+  signed but not notarized, so macOS stops it the first time. Open Kairo once, then go to System Settings →
+  Privacy & Security and click **Open Anyway** next to Kairo. Or run
+  `xattr -dr com.apple.quarantine /Applications/Kairo.app` before opening it.
 - **Debian / Ubuntu 24.04+**: `sudo apt install ./kairo_<version>_amd64.deb` (or `_arm64`).
 - **Other Linux** (GTK 4.14+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
   to `~/.local`; `./install.sh /usr/local` installs system-wide with sudo.
