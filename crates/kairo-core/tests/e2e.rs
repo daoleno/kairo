@@ -83,7 +83,7 @@ async fn connect_proxy(listener: TcpListener, count: Arc<AtomicUsize>) {
                 let _ = client.write_all(b"HTTP/1.1 405 Method Not Allowed\r\n\r\n").await;
                 return;
             }
-            let target = parts.next().unwrap_or("").to_owned();
+            let target = loopback_for_test_names(parts.next().unwrap_or(""));
             let Ok(mut upstream) = TcpStream::connect(&target).await else {
                 let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
                 return;
@@ -92,6 +92,15 @@ async fn connect_proxy(listener: TcpListener, count: Arc<AtomicUsize>) {
             let _ = client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
             let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
         });
+    }
+}
+
+/// The nodes reach the documentation range 203.0.113.0/24 and `*.test` on
+/// loopback, so traffic captured by TUN has somewhere to go.
+fn loopback_for_test_names(target: &str) -> String {
+    match target.rsplit_once(':') {
+        Some((host, port)) if host.starts_with("203.0.113.") || host.ends_with(".test") => format!("127.0.0.1:{port}"),
+        _ => target.to_owned(),
     }
 }
 
@@ -235,6 +244,10 @@ rules:
     assert_eq!(rules[0].kind, "Domain");
     wait_for("log lines", Duration::from_secs(5), || (!svc.logs().is_empty()).then_some(())).await;
 
+    // 6b. The DNS tool asks the core's resolver (the system's, as the profile has no `dns`).
+    let answer = svc.dns_query("localhost".into(), "A".into()).await.expect("the DNS API is on");
+    assert!((0..=5).contains(&answer.status), "a DNS status: {answer:?}");
+
     // 7. Modes: Direct skips the nodes.
     svc.set_mode(Mode::Direct).await.expect("mode");
     assert_eq!(svc.settings().mode, Mode::Direct);
@@ -285,4 +298,87 @@ unsafe fn libc_kill(pid: i32) {
 
 fn env_logger_init() -> Option<()> {
     None
+}
+
+/// TUN, for real, without touching the machine: run the test binary in a user
+/// and network namespace of its own, where it is uid 0 and only `lo` exists.
+///
+///   cargo test -p kairo-core --test e2e --no-run
+///   KAIRO_TEST_TUN=1 unshare -rn target/debug/deps/e2e-<hash> tun_in_a_network_namespace
+///
+/// Before TUN nothing but loopback is reachable; with TUN on, a request to
+/// 203.0.113.10 (and to a name, through the DNS hijack and fake IPs) goes
+/// through the core and a node; with TUN off it fails again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tun_in_a_network_namespace() {
+    if std::env::var_os("KAIRO_TEST_TUN").is_none() {
+        eprintln!("skipped: set KAIRO_TEST_TUN=1 and run under `unshare -rn`");
+        return;
+    }
+    unsafe { std::env::set_var("KAIRO_NO_SYSPROXY", "1") };
+    let _ = env_logger_init();
+    let up = std::process::Command::new("ip").args(["link", "set", "lo", "up"]).status().expect("ip");
+    assert!(up.success(), "bring lo up (run under `unshare -rn`)");
+    let home = tempfile::tempdir().unwrap();
+    let core = std::env::var_os("KAIRO_TEST_CORE").map(std::path::PathBuf::from).expect("KAIRO_TEST_CORE (no network in here)");
+    assert_eq!(kairo_core::tun::status(&core), kairo_core::tun::Privilege::Granted, "uid 0 in the namespace");
+
+    let origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_port = origin_listener.local_addr().unwrap().port();
+    let node = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let node_port = node.local_addr().unwrap().port();
+    let count = Arc::new(AtomicUsize::new(0));
+    tokio::spawn(connect_proxy(node, count.clone()));
+    let subscription = format!(
+        "proxies:\n  - {{name: node, type: http, server: 127.0.0.1, port: {node_port}}}\nproxy-groups:\n  - {{name: Proxy, type: select, proxies: [node]}}\nrules:\n  - MATCH,Proxy\n"
+    );
+    tokio::spawn(origin(origin_listener, Arc::new(subscription)));
+
+    let paths = Paths::new(home.path());
+    paths.ensure().unwrap();
+    let mut settings = Settings::default();
+    settings.mixed_port = free_port();
+    settings.controller_port = free_port();
+    settings.core_path = Some(core.to_string_lossy().into_owned());
+    settings.save(&paths).unwrap();
+    let svc = Service::start(paths.clone());
+    let state = svc.state();
+    svc.add_remote(format!("http://127.0.0.1:{origin_port}/sub"), None).await.expect("add the profile");
+    wait_for("the core running", Duration::from_secs(20), || state.borrow().core.is_running().then_some(())).await;
+
+    let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
+    let ip_url = format!("http://203.0.113.10:{origin_port}/hello");
+    assert!(client.get(&ip_url).send().await.is_err(), "no route before TUN");
+
+    svc.set_tun(true).await.expect("TUN on");
+    wait_for("the TUN device", Duration::from_secs(10), || {
+        let out = std::process::Command::new("ip").args(["-br", "addr"]).output().ok()?;
+        String::from_utf8_lossy(&out.stdout).contains("198.18.0.1").then_some(())
+    })
+    .await;
+    let before = count.load(Ordering::SeqCst);
+    let body = client.get(&ip_url).send().await.expect("through TUN").text().await.unwrap();
+    assert_eq!(body, "kairo-ok");
+    assert!(count.load(Ordering::SeqCst) > before, "the node carried it");
+    let conns = svc.connections();
+    let body = {
+        let client = client.clone();
+        let url = format!("http://tun-e2e.kairo.test:{origin_port}/slow");
+        tokio::spawn(async move { client.get(url).timeout(Duration::from_secs(10)).send().await.ok()?.bytes().await.ok().map(|b| b.len()) })
+    };
+    let seen = wait_for("a TUN connection", Duration::from_secs(5), || {
+        conns.borrow().list.iter().find(|c| c.host.starts_with("tun-e2e.kairo.test")).cloned()
+    })
+    .await;
+    assert!(seen.inbound.starts_with("Tun"), "inbound {}", seen.inbound);
+    assert_eq!(body.await.unwrap(), Some(300000), "a name, through the DNS hijack");
+
+    svc.set_tun(false).await.expect("TUN off");
+    wait_for("the TUN device gone", Duration::from_secs(10), || {
+        let out = std::process::Command::new("ip").args(["-br", "addr"]).output().ok()?;
+        (!String::from_utf8_lossy(&out.stdout).contains("198.18.0.1")).then_some(())
+    })
+    .await;
+    assert!(client.get(&ip_url).send().await.is_err(), "no route after TUN");
+    svc.stop_core().await;
 }
