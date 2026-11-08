@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "kairo-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "flate2",
@@ -2406,7 +2406,7 @@ dependencies = [
 
 [[package]]
 name = "kairo-tray"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dispatch2",
  "kairo-core",
@@ -2717,7 +2717,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-app-kairo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dispatch2",
  "env_logger",

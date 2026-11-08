@@ -377,39 +377,25 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
     if errors.len() == total { Err(errors.join("; ")) } else { Ok(()) }
 }
 
-/// Puts back the settings saved by [`enable`]; with none saved, turns the proxy off.
+/// Puts back the settings saved by [`enable`]. With none saved it does nothing:
+/// [`enable`] saves before it changes anything, so Kairo has nothing of its own to
+/// undo, and the proxy as it is (perhaps another app's) is the user's.
 pub fn disable(paths: &Paths) -> Result<(), String> {
+    let Some(saved) = load_saved(paths) else {
+        // An unreadable state file would otherwise stick around forever.
+        let _ = std::fs::remove_file(paths.sysproxy_state());
+        return Ok(());
+    };
     let b = backends();
-    let saved = load_saved(paths);
     let mut errors = Vec::new();
-    match &saved {
-        Some(saved) => {
-            if let Some(g) = &saved.gnome && let Err(e) = gnome_restore(g) {
-                errors.push(e);
-            }
-            if let (Some(v), Some(k)) = (b.kde, &saved.kde) && let Err(e) = kde_restore(v, k) {
-                errors.push(e);
-            }
-            if let Some(m) = &saved.mac && let Err(e) = mac_restore(m) {
-                errors.push(e);
-            }
-        }
-        None => {
-            if b.gnome {
-                let _ = gs_set("org.gnome.system.proxy", "mode", "none");
-            }
-            if let Some(v) = b.kde {
-                let _ = kde_set(v, "ProxyType", "0");
-                kde_reload();
-            }
-            if b.mac && let Ok(services) = mac_read() {
-                for s in services {
-                    for kind in ["webproxystate", "securewebproxystate", "socksfirewallproxystate"] {
-                        let _ = ns(&[&format!("-set{kind}"), &s.name, "off"]);
-                    }
-                }
-            }
-        }
+    if let Some(g) = &saved.gnome && let Err(e) = gnome_restore(g) {
+        errors.push(e);
+    }
+    if let (Some(v), Some(k)) = (b.kde, &saved.kde) && let Err(e) = kde_restore(v, k) {
+        errors.push(e);
+    }
+    if let Some(m) = &saved.mac && let Err(e) = mac_restore(m) {
+        errors.push(e);
     }
     if errors.is_empty() {
         let _ = std::fs::remove_file(paths.sysproxy_state());
@@ -440,6 +426,21 @@ pub fn points_to(spec: &ProxySpec) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With nothing saved, Kairo never changed the proxy, so quitting must not
+    /// touch it (0.1.0 switched another app's proxy off here). Returning before
+    /// any backend is consulted is what keeps this test from touching the machine.
+    #[test]
+    fn disable_without_saved_state_changes_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::new(home.path());
+        paths.ensure().unwrap();
+        assert!(disable(&paths).is_ok());
+        assert!(!paths.sysproxy_state().exists());
+        std::fs::write(paths.sysproxy_state(), b"not json").unwrap();
+        assert!(disable(&paths).is_ok());
+        assert!(!paths.sysproxy_state().exists(), "an unreadable state file is dropped, nothing restored");
+    }
 
     #[test]
     fn parses_networksetup() {

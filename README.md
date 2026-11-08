@@ -24,7 +24,8 @@ calm, with one accent colour, and it follows the system's light or dark appearan
 - **Modes**: Rule, Global and Direct. Switch from the Overview or the tray; the sidebar shows the current mode.
 - **System proxy**: works on macOS (`networksetup`), GNOME (gsettings) and KDE (kioslaverc). The previous
   settings are put back on quit, on SIGTERM or SIGINT, on a panic, and even after a SIGKILL or crash, thanks to
-  a small guardian process. The next start also recovers any leftover state.
+  a small guardian process. The next start also recovers any leftover state. Kairo only puts back what it
+  changed: if its System Proxy was never on, another app's proxy settings are left alone.
 - **TUN**: one switch. The core alone gets the one-time privilege it needs: `cap_net_admin` through
   `pkexec setcap` on Linux, setuid through the administrator prompt on macOS. Kairo itself never runs
   privileged. See [TUN and privileges](#tun-and-privileges).
