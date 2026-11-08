@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [workspace]
 members = [".", "crates/kairo-core", "crates/kairo-tray"]
+default-members = [".", "crates/kairo-core", "crates/kairo-tray"]
 resolver = "3"
 
 [workspace.package]

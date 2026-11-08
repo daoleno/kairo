@@ -207,7 +207,7 @@ pub fn page() -> impl IntoElement {
                             ui::setting_row(
                                 "Proxy port",
                                 Some("HTTP and SOCKS5 on one port; the system proxy points here."),
-                                text_field(|d| d.mixed_port.clone(), |d, v| d.mixed_port = v, "7897", 90.0).text_right(),
+                                text_field(|d| d.mixed_port.clone(), |d, v| d.mixed_port = v, "7897", 90.0).text_right().test_id("mixed-port"),
                             )
                             .into_element(),
                             ui::setting_row(

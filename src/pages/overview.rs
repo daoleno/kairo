@@ -65,7 +65,10 @@ fn status_card() -> impl IntoElement {
                 parts.join(" · ").into()
             }
             CoreStatus::Missing => "Kairo downloads the official build for this computer and verifies its checksum.".into(),
-            _ => s.profiles.active_profile().map(|p| p.name.clone()).unwrap_or_default().into(),
+            _ => match s.profiles.active_profile() {
+                Some(p) => p.name.clone().into(),
+                None => "A subscription URL or a config file from your provider.".into(),
+            },
         }
     };
     let tone = move || match core() {
