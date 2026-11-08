@@ -1,0 +1,421 @@
+//! Kairo's styled component layer over `nsh_base`: tokens, the type scale and
+//! the controls every page composes. Pages never restyle base components.
+
+pub mod icons;
+
+use nsh_base::{button, input, switch, theme, ButtonElement as Button, Input};
+
+use nsh_core::prelude::*;
+
+pub use icons::{Icon, icon};
+
+// --- Tokens ------------------------------------------------------------------------
+
+fn token(name: &str, fallback: AdaptiveColor) -> AdaptiveColor {
+    theme().color(name).unwrap_or(fallback)
+}
+
+pub fn success() -> AdaptiveColor {
+    token("success", theme().primary)
+}
+pub fn warning() -> AdaptiveColor {
+    token("warning", theme().destructive)
+}
+pub fn track() -> AdaptiveColor {
+    token("track", theme().muted)
+}
+pub fn selection() -> AdaptiveColor {
+    token("selection", theme().accent)
+}
+pub fn graph_up() -> AdaptiveColor {
+    token("graph-up", theme().muted_foreground)
+}
+pub fn subtle() -> AdaptiveColor {
+    token("subtle", theme().muted)
+}
+
+pub fn radius_control() -> Points {
+    px(theme().number("radius-control").unwrap_or(6.0))
+}
+pub fn radius_small() -> Points {
+    px(theme().number("radius-small").unwrap_or(4.0))
+}
+
+/// The type scale (points). Body text is 13, the native size of desktop UI.
+pub mod size {
+    pub const CAPTION: f32 = 11.0;
+    pub const SMALL: f32 = 12.0;
+    pub const BODY: f32 = 13.0;
+    pub const LARGE: f32 = 15.0;
+    pub const TITLE: f32 = 20.0;
+    pub const DISPLAY: f32 = 26.0;
+}
+
+/// The height of a toolbar / page header.
+pub const HEADER_HEIGHT: f32 = 52.0;
+/// The height of a dense table row.
+pub const ROW_HEIGHT: f32 = 30.0;
+
+// --- Text --------------------------------------------------------------------------
+
+/// Body text.
+pub fn body(content: impl IntoReactive<SharedString>) -> Text {
+    text(content).text_size(px(size::BODY))
+}
+
+/// Secondary text in the muted color.
+pub fn muted(content: impl IntoReactive<SharedString>) -> Text {
+    text(content).text_size(px(size::SMALL)).text_color(move || theme().muted_foreground)
+}
+
+/// A small section label above a group.
+pub fn section_label(content: impl IntoReactive<SharedString>) -> Text {
+    text(content)
+        .text_size(px(size::SMALL))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(move || theme().muted_foreground)
+        .role(AccessibilityRole::Header)
+}
+
+/// A page title.
+pub fn title(content: impl IntoReactive<SharedString>) -> Text {
+    text(content).text_size(px(size::TITLE)).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header)
+}
+
+/// Numbers that line up.
+pub fn figure(content: impl IntoReactive<SharedString>, pts: f32) -> Text {
+    text(content).text_size(px(pts)).tabular_nums()
+}
+
+// --- Buttons -----------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variant {
+    Primary,
+    Secondary,
+    Ghost,
+    Destructive,
+}
+
+fn base_button(variant: Variant) -> Button {
+    let b = button()
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .gap_1p5()
+        .h(px(28.0))
+        .px_3()
+        .rounded(radius_control())
+        .cursor_pointer()
+        .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .disabled_style(|s| s.opacity(0.45));
+    match variant {
+        Variant::Primary => b
+            .bg(move || theme().primary)
+            .text_color(move || theme().primary_foreground)
+            .hover(|s| s.opacity(0.92))
+            .active(|s| s.opacity(0.8)),
+        Variant::Secondary => b
+            .bg(move || theme().secondary)
+            .border_1()
+            .border_color(move || theme().border)
+            .text_color(move || theme().secondary_foreground)
+            .hover(|s| s.bg(move || theme().accent))
+            .active(|s| s.opacity(0.75)),
+        Variant::Ghost => b
+            .text_color(move || theme().foreground)
+            .hover(|s| s.bg(move || theme().accent))
+            .active(|s| s.opacity(0.7)),
+        Variant::Destructive => b
+            .bg(move || theme().secondary)
+            .border_1()
+            .border_color(move || theme().border)
+            .text_color(move || theme().destructive)
+            .hover(|s| s.bg(move || theme().accent))
+            .active(|s| s.opacity(0.75)),
+    }
+}
+
+/// A text button.
+pub fn btn(label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
+    base_button(variant).child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+}
+
+/// A button with an icon before its label.
+pub fn btn_icon(glyph: Icon, label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
+    base_button(variant)
+        .child(icon(glyph, 14.0))
+        .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+}
+
+/// A button whose icon and label follow state.
+pub fn btn_icon_dyn(glyph: impl Fn() -> Icon + 'static, label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
+    base_button(variant)
+        .child(svg(move || icons::uri(glyph())).size(px(14.0)).flex_shrink_0())
+        .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+}
+
+/// An icon-only button; `label` names it for screen readers and tests.
+pub fn icon_btn(glyph: Icon, label: &'static str) -> Button {
+    button()
+        .accessibility_label(label)
+        .items_center()
+        .justify_center()
+        .size(px(28.0))
+        .rounded(radius_control())
+        .cursor_pointer()
+        .text_color(move || theme().muted_foreground)
+        .hover(|s| s.bg(move || theme().accent).text_color(move || theme().foreground))
+        .active(|s| s.opacity(0.7))
+        .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .disabled_style(|s| s.opacity(0.4))
+        .child(icon(glyph, 16.0))
+}
+
+// --- Controls ----------------------------------------------------------------------
+
+/// An on/off switch in the platform's proportions.
+pub fn toggle(checked: impl Fn() -> bool + 'static, label: &'static str, on_change: impl Fn(bool) + 'static) -> impl IntoElement {
+    switch()
+        .checked(checked)
+        .accessibility_label(label)
+        .on_change(move |v: &bool| on_change(*v))
+        .cursor_pointer()
+        .track_style(|s| {
+            s.w(px(34.0))
+                .h(px(20.0))
+                .p(px(2.0))
+                .rounded_full()
+                .bg(move || track())
+                .transition_colors()
+                .checked(|s| s.bg(move || theme().primary))
+        })
+        .thumb_style(|s| {
+            s.size(px(16.0))
+                .rounded_full()
+                .bg(move || AdaptiveColor::from(white()))
+                .shadow_sm()
+                .transition_transform()
+                .checked(|s| s.translate_x(px(14.0)))
+        })
+}
+
+/// A segmented control: one of `options`, the selected one raised.
+pub fn segmented<T: Copy + PartialEq + 'static>(
+    options: Vec<(T, &'static str)>,
+    selected: impl Fn() -> T + Copy + 'static,
+    on_select: impl Fn(T) + Copy + 'static,
+) -> View {
+    view()
+        .flex_row()
+        .p(px(2.0))
+        .gap(px(2.0))
+        .rounded(radius_control())
+        .bg(move || theme().muted)
+        .border_1()
+        .border_color(move || theme().border)
+        .children(options.into_iter().map(move |(value, label)| {
+            let is = move || selected() == value;
+            button()
+                .selected(is)
+                .role(AccessibilityRole::Tab)
+                .on_press(move || on_select(value))
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .h(px(24.0))
+                .px_3()
+                .rounded(radius_small())
+                .cursor_pointer()
+                .text_color(move || theme().muted_foreground)
+                .hover(|s| s.text_color(move || theme().foreground))
+                .style_when(is, |s| s.bg(move || theme().background).shadow_sm().text_color(move || theme().foreground))
+                .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+        }))
+}
+
+/// A single-line text field bound to `value`.
+pub fn field(value: Signal<String>, placeholder: &'static str) -> Input {
+    input()
+        .value(move || value.get())
+        .on_change(move |t: &str| value.set(t.to_owned()))
+        .placeholder(placeholder)
+        .placeholder_color(|| color(theme().muted_foreground))
+        .caret_color(|| color(theme().primary))
+        .h(px(28.0))
+        .px_2()
+        .text_size(px(size::BODY))
+        .rounded(radius_control())
+        .border_1()
+        .border_color(move || theme().input)
+        .bg(move || theme().background)
+        .focus(|s| s.border_color(move || theme().primary))
+}
+
+/// A search field with its glyph.
+pub fn search_field(value: Signal<String>, placeholder: &'static str) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_1p5()
+        .h(px(28.0))
+        .px_2()
+        .rounded(radius_control())
+        .border_1()
+        .border_color(move || theme().input)
+        .bg(move || theme().background)
+        .focus_within(|s| s.border_color(move || theme().primary))
+        .child(icon(Icon::Search, 14.0).text_color(move || theme().muted_foreground))
+        .child(
+            input()
+                .value(move || value.get())
+                .on_change(move |t: &str| value.set(t.to_owned()))
+                .placeholder(placeholder)
+                .placeholder_color(|| color(theme().muted_foreground))
+                .caret_color(|| color(theme().primary))
+                .flex_1()
+                .min_w(px(0.0))
+                .text_size(px(size::BODY)),
+        )
+        .child(when(
+            move || value.with(|v| !v.is_empty()),
+            move || {
+                button()
+                    .accessibility_label("Clear")
+                    .on_press(move || value.set(String::new()))
+                    .cursor_pointer()
+                    .text_color(move || theme().muted_foreground)
+                    .child(icon(Icon::Close, 12.0))
+            },
+        ))
+}
+
+// --- Surfaces ----------------------------------------------------------------------
+
+/// A grouped surface with a hairline border.
+pub fn card() -> View {
+    view()
+        .rounded(move || theme().radius)
+        .border_1()
+        .border_color(move || theme().border)
+        .bg(move || theme().card)
+        .overflow_hidden()
+}
+
+/// A hairline separator.
+pub fn divider() -> View {
+    view().h(px(1.0)).bg(move || theme().border)
+}
+
+/// A row of a settings group: title and description on the left, a control on the right.
+pub fn setting_row(
+    label: impl IntoReactive<SharedString>,
+    detail: Option<&'static str>,
+    control: impl IntoElement,
+) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_4()
+        .px_4()
+        .py_2p5()
+        .min_h(px(44.0))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap_0p5()
+                .child(body(label))
+                .child(detail.map(|d| muted(d))),
+        )
+        .child(control)
+}
+
+/// A settings group: a label above a card of rows separated by hairlines.
+pub fn group(label: Option<&'static str>, rows: Vec<AnyElement>) -> View {
+    let count = rows.len();
+    let mut inner = card();
+    for (i, row) in rows.into_iter().enumerate() {
+        inner = inner.child(row);
+        if i + 1 < count {
+            inner = inner.child(view().h(px(1.0)).ml_4().bg(move || theme().border));
+        }
+    }
+    view().gap_2().child(label.map(|l| section_label(l).px_1())).child(inner)
+}
+
+/// A short, neutral state or count.
+pub fn badge(content: impl IntoReactive<SharedString>) -> View {
+    view()
+        .px_1p5()
+        .py(px(1.0))
+        .rounded(radius_small())
+        .bg(move || theme().muted)
+        .border_1()
+        .border_color(move || theme().border)
+        .child(text(content).text_size(px(size::CAPTION)).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground))
+}
+
+/// A small status dot.
+pub fn dot(tone: impl Fn() -> AdaptiveColor + 'static) -> View {
+    view().size(px(8.0)).rounded_full().bg(tone)
+}
+
+/// The color that says how good a delay is.
+pub fn delay_tone(delay: Option<u32>) -> AdaptiveColor {
+    match delay {
+        None => theme().muted_foreground,
+        Some(0) => theme().destructive,
+        Some(d) if d < 300 => success(),
+        Some(d) if d < 800 => warning(),
+        Some(_) => theme().destructive,
+    }
+}
+
+pub fn delay_text(delay: Option<u32>) -> SharedString {
+    match delay {
+        None => "—".into(),
+        Some(0) => "Timeout".into(),
+        Some(d) => format!("{d} ms").into(),
+    }
+}
+
+/// A thin bar showing `fraction` (0..=1).
+pub fn meter(fraction: impl Fn() -> f32 + 'static) -> View {
+    view()
+        .h(px(4.0))
+        .rounded_full()
+        .bg(move || track())
+        .overflow_hidden()
+        .child(view().h_full().rounded_full().bg(move || theme().primary).w(move || percentage(fraction().clamp(0.0, 1.0))))
+}
+
+/// What a page shows when it has nothing: a glyph, a title, a line and an action.
+pub fn empty_state(glyph: Icon, heading: &'static str, detail: impl IntoReactive<SharedString>, action: Option<AnyElement>) -> View {
+    view()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .p_8()
+        .child(icon(glyph, 32.0).text_color(move || theme().muted_foreground).mb_1())
+        .child(text(heading).text_size(px(size::LARGE)).font_weight(FontWeight::SEMIBOLD))
+        .child(muted(detail).text_center().max_w(px(360.0)))
+        .child(action.map(|a| view().mt_2().child(a)))
+}
+
+/// A page's header: its title on the left, its actions on the right.
+pub fn page_header(heading: impl IntoReactive<SharedString>, actions: Vec<AnyElement>) -> View {
+    view()
+        .h(px(HEADER_HEIGHT))
+        .flex_shrink_0()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .px_5()
+        .border_b_1()
+        .border_color(move || theme().border)
+        .window_drag(true)
+        .child(title(heading).text_size(px(size::LARGE + 2.0)).flex_1().number_of_lines(1))
+        .children(actions)
+}

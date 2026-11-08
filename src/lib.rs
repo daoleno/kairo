@@ -1,49 +1,137 @@
-//! The app's Rust UI: its root component, which `nsh run`, `nsh package`
-//! and `cargo run` mount.
+//! Kairo: a native mihomo client. This crate is the UI, written with Native
+//! Shell (NSH) in Rust; `kairo-core` is the engine and `kairo-tray` the tray.
 
-use nsh_core::prelude::*;
+mod pages;
+mod shell;
+pub mod store;
+pub mod ui;
+
+use kairo_core::{Service, Theme};
 use nsh_base::theme;
+use nsh_core::element::desktop::{MenuItem, set_application_menu};
+use nsh_core::platform::{Appearance, Os};
+use nsh_core::prelude::*;
 
-/// The app's UI set (`nsh.json` `"rust"`): what a TSX entry may import from
-/// `kairo/native` (`README.md`, "Adding a TSX entry").
+use crate::store::{Page, Store};
+
+/// The app's theme (`theme.json`, also named by `nsh.json`).
+pub const THEME: &str = include_str!("../theme.json");
+
+/// The design tokens of [`THEME`], for runners that mount the root themselves.
+pub fn tokens() -> nsh_core::element::Tokens {
+    nsh_base::tokens_of(Some(THEME)).expect("theme.json is a valid theme")
+}
+
+/// Kairo's UI set (`nsh.json` `"rust"`).
 #[native_module("kairo/native")]
 fn native(registry: &mut Registry) {
     registry.register::<App>();
 }
 
-/// The application's root component.
+/// The application's root.
 #[component]
 pub fn App() -> impl IntoElement {
-    let count = signal(0_u32);
+    let store = Store::new(Service::global());
+    provide_context(store);
+
+    // The app's appearance follows the setting (System follows the desktop).
+    let chosen = computed(move || store.state.with(|s| s.settings.theme));
+    effect(move || {
+        set_color_scheme(match chosen.get() {
+            Theme::System => Appearance::System,
+            Theme::Light => Appearance::Light,
+            Theme::Dark => Appearance::Dark,
+        })
+    });
+
+    if os() == Os::MacOs {
+        nsh_core::element::desktop::set_title_bar(nsh_core::desktop::TitleBarStyle::Hidden, Some(px(ui::HEADER_HEIGHT)));
+    }
+    // macOS has a menu bar; GTK apps on Linux keep their window free of one.
+    if os() == Os::MacOs {
+        menus(store);
+    }
+    for (i, page) in [Page::Overview, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns]
+        .into_iter()
+        .enumerate()
+    {
+        on_key(&format!("mod+{}", i + 1), move |_| store.page.set(page));
+    }
+
     view()
         .flex_1()
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
-        .child(
-            view()
-                .flex_1()
-                .p_safe_area()
-                .child(
-                    view()
-                        .flex_1()
-                        .items_center()
-                        .justify_center()
-                        .gap_4()
-                        .child(text(move || format!("Count: {}", count.get())).text_size(px(28.0)))
-                        .child(
-                            view()
-                                .px_5()
-                                .py_3()
-                                .rounded(px(10.0))
-                                .bg(move || theme().primary)
-                                .active(|s| s.opacity(0.6))
-                                .on_press(move || count.update(|value| *value += 1))
-                                .child(
-                                    text("Tap")
-                                        .text_size(px(17.0))
-                                        .text_color(move || theme().primary_foreground),
-                                ),
-                        ),
-                ),
-        )
+        .child(shell::shell())
+}
+
+fn menus(store: Store) {
+    use nsh_core::desktop::MenuRole;
+    let mac = os() == Os::MacOs;
+    effect(move || {
+        let mode = store.state.with(|s| s.settings.mode);
+        let running = store.state.with(|s| s.core.is_running());
+        let svc = store.svc();
+        let mut menus = Vec::new();
+        if mac {
+            menus.push(MenuItem::submenu(
+                "Kairo",
+                [
+                    MenuItem::role(MenuRole::About),
+                    MenuItem::separator(),
+                    MenuItem::new("Settings…").shortcut("mod+,").on_select(move || store.page.set(Page::Settings)),
+                    MenuItem::separator(),
+                    MenuItem::role(MenuRole::Hide),
+                    MenuItem::role(MenuRole::HideOthers),
+                    MenuItem::separator(),
+                    MenuItem::role(MenuRole::Quit),
+                ],
+            ));
+        }
+        let mut core = vec![
+            MenuItem::new(if running { "Stop Core" } else { "Start Core" }).on_select({
+                let svc = svc.clone();
+                move || {
+                    if running {
+                        let f = svc.stop_core();
+                        spawn(f);
+                    } else {
+                        store.run(svc.start_core());
+                    }
+                }
+            }),
+            MenuItem::new("Restart Core").disabled(!running).on_select({
+                let svc = svc.clone();
+                move || store.run(svc.restart_core())
+            }),
+            MenuItem::separator(),
+        ];
+        for m in kairo_core::Mode::ALL {
+            let svc = svc.clone();
+            core.push(MenuItem::new(format!("{} Mode", m.title())).checked(mode == m).on_select(move || store.run(svc.set_mode(m))));
+        }
+        if !mac {
+            core.push(MenuItem::separator());
+            core.push(MenuItem::new("Settings…").shortcut("mod+,").on_select(move || store.page.set(Page::Settings)));
+            core.push(MenuItem::role(MenuRole::Quit));
+        }
+        menus.push(MenuItem::submenu("Core", core));
+        menus.push(MenuItem::submenu(
+            "Edit",
+            [
+                MenuItem::role(MenuRole::Undo),
+                MenuItem::role(MenuRole::Redo),
+                MenuItem::separator(),
+                MenuItem::role(MenuRole::Cut),
+                MenuItem::role(MenuRole::Copy),
+                MenuItem::role(MenuRole::Paste),
+                MenuItem::role(MenuRole::SelectAll),
+            ],
+        ));
+        menus.push(MenuItem::submenu(
+            "Window",
+            [MenuItem::role(MenuRole::Minimize), MenuItem::role(MenuRole::Zoom), MenuItem::role(MenuRole::Close)],
+        ));
+        set_application_menu(menus);
+    });
 }

@@ -222,6 +222,22 @@ impl Service {
         &self.0.paths
     }
 
+    /// The service's runtime, for work that belongs with it (the tray).
+    pub fn runtime(&self) -> tokio::runtime::Handle {
+        self.0.rt.clone()
+    }
+
+    /// Runs a command's future on the service runtime and reports a failure to
+    /// the user (for callers with no place to show it: the tray).
+    pub fn fire<T: Send + 'static>(&self, f: impl Future<Output = Result<T, String>> + Send + 'static) {
+        let svc = self.clone();
+        self.0.rt.spawn(async move {
+            if let Err(e) = f.await {
+                svc.notify(e, true);
+            }
+        });
+    }
+
     /// Runs `f` on the service's runtime; the future resolves on any executor.
     fn run<T: Send + 'static>(
         &self,

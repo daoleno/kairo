@@ -27,6 +27,9 @@ log = "0.4"
 kairo-core = { path = "crates/kairo-core" }
 kairo-tray = { path = "crates/kairo-tray" }
 
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 nsh-platform-linux = { version = "0.4.0", default-features = false }
 

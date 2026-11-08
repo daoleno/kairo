@@ -15,6 +15,7 @@ pub mod supervisor;
 pub mod sysproxy;
 pub mod tun;
 
+pub use tokio;
 pub use service::{CoreStatus, Live, Notice, Proxies, Service, State, Task};
 pub use settings::{LogLevel, Mode, Settings, Theme};
 
