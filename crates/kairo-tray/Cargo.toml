@@ -1,0 +1,11 @@
+[package]
+name = "kairo-tray"
+description = "Kairo's tray / menu bar item: StatusNotifierItem on Linux, NSStatusItem on macOS."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+log = "0.4"
+kairo-core = { path = "../kairo-core" }
