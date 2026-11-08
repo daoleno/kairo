@@ -146,6 +146,17 @@ pub fn glyph_rgba(size: u32) -> Vec<u8> {
     render(include_str!("../../../assets/glyph.svg"), size)
 }
 
+/// Renders an SVG to a PNG of `size` × `size` pixels.
+pub fn render_png(svg: &str, size: u32) -> Vec<u8> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).expect("the bundled svg parses");
+    let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("pixmap");
+    let s = tree.size();
+    let scale = size as f32 / s.width().max(s.height());
+    resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    pixmap.encode_png().expect("png")
+}
+
 /// Renders an SVG to straight (not premultiplied) RGBA.
 pub fn render(svg: &str, size: u32) -> Vec<u8> {
     use resvg::{tiny_skia, usvg};
@@ -186,6 +197,14 @@ pub fn start(svc: Service, hooks: Hooks) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn renders_a_png() {
+        let png = super::render_png(include_str!("../../../assets/glyph.svg"), 36);
+        assert_eq!(&png[1..4], b"PNG");
+        let dim = super::render_png(&include_str!("../../../assets/glyph.svg").replacen("<svg ", "<svg opacity=\"0.45\" ", 1), 36);
+        assert_ne!(png, dim);
+    }
+
     #[test]
     fn renders_the_icon() {
         let px = super::icon_argb(32, false);

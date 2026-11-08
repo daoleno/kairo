@@ -6,7 +6,7 @@ use std::time::Duration;
 use kairo_core::{Mode, Service};
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSStatusBar,
     NSStatusItem, NSVariableStatusItemLength,
@@ -129,9 +129,12 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
 
 fn glyph(mtm: MainThreadMarker, dim: bool) -> Option<Retained<NSImage>> {
     let _ = mtm;
+    // A PNG at 2x (every macOS reads it; SVG data needs a recent one), used as
+    // a template image so the menu bar tints it for light, dark and highlight.
     let svg = include_str!("../../../assets/glyph.svg");
-    let svg = if dim { svg.replace("fill=\"#000\"", "fill=\"#000\" fill-opacity=\"0.45\"").replace("stroke=\"#000\"", "stroke=\"#000\" stroke-opacity=\"0.45\"") } else { svg.to_owned() };
-    let data = NSData::with_bytes(svg.as_bytes());
+    let svg = if dim { svg.replacen("<svg ", "<svg opacity=\"0.45\" ", 1) } else { svg.to_owned() };
+    let png = crate::render_png(&svg, 36);
+    let data = NSData::with_bytes(&png);
     let image = NSImage::initWithData(NSImage::alloc(), &data)?;
     image.setSize(NSSize::new(18.0, 18.0));
     image.setTemplate(true);
