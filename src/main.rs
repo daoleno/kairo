@@ -60,12 +60,75 @@ fn emergency_handlers(svc: &Service) {
     }
 }
 
+/// The guardian: a small process of Kairo's own that outlives it. It holds
+/// the read end of a pipe whose write end only Kairo has; when Kairo is gone
+/// however it went (a crash, SIGKILL, a segfault in a toolkit), the pipe
+/// closes, and the guardian puts the system proxy back and stops the core.
+/// After a clean quit there is nothing left to do and it just exits.
+#[cfg(unix)]
+mod guardian {
+    use super::*;
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    const FLAG: &str = "--guard";
+
+    pub fn is_guardian() -> bool {
+        std::env::args().nth(1).as_deref() == Some(FLAG)
+    }
+
+    /// Starts the guardian for this process.
+    pub fn spawn() {
+        let Ok(exe) = std::env::current_exe() else { return };
+        match Command::new(exe).arg(FLAG).stdin(Stdio::piped()).stdout(Stdio::null()).spawn() {
+            Ok(mut child) => {
+                // The write end stays open for as long as this process lives
+                // (and, close-on-exec, is not inherited by the core).
+                std::mem::forget(child.stdin.take());
+                std::mem::forget(child);
+            }
+            Err(e) => log::warn!("no guardian: {e}"),
+        }
+    }
+
+    pub fn run() -> ! {
+        // Its own session: Ctrl+C in a terminal stops Kairo, not the guardian.
+        unsafe {
+            libc::setsid();
+        }
+        let mut buf = [0u8; 64];
+        let mut stdin = std::io::stdin();
+        while matches!(stdin.read(&mut buf), Ok(n) if n > 0) {}
+        let paths = Paths::new(Paths::default_home());
+        if paths.sysproxy_state().exists() || paths.core_pid().exists() {
+            log::warn!("Kairo ended without cleaning up: restoring the system proxy and stopping the core");
+            Service::restore_system_proxy_now(&paths);
+            if let Ok(rt) = kairo_core::tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                rt.block_on(kairo_core::supervisor::stop_stale(&paths));
+            }
+        }
+        std::process::exit(0);
+    }
+}
+
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    #[cfg(unix)]
+    if guardian::is_guardian() {
+        guardian::run();
+    }
     let minimized = std::env::args().any(|a| a == "--minimized");
+    platform::run(minimized);
+}
+
+/// Starts the engine of the one running Kairo: the guardian, the service
+/// (which recovers from a crash and starts the core) and the handlers.
+fn start_primary() -> Service {
+    #[cfg(unix)]
+    guardian::spawn();
     let svc = Service::global();
     emergency_handlers(&svc);
-    platform::run(svc, minimized);
+    svc
 }
 
 #[cfg(target_os = "linux")]
@@ -90,11 +153,21 @@ mod platform {
         }
     }
 
-    pub fn run(svc: Service, minimized: bool) {
+    pub fn run(minimized: bool) {
         glib::set_prgname(Some(APP_ID));
         glib::set_application_name("Kairo");
-        // One Kairo per user: a second launch shows the first one's window.
+        // One Kairo per user: a second launch shows the first one's window and
+        // leaves (before it touches the core or the system proxy).
         let app = gtk::Application::builder().application_id(APP_ID).build();
+        if let Err(e) = app.register(None::<&gio::Cancellable>) {
+            log::warn!("no session bus registration ({e}); running on our own");
+        }
+        if app.is_remote() {
+            // Forwards the activation to the first Kairo and returns.
+            app.run_with_args::<&str>(&[]);
+            return;
+        }
+        let svc = super::start_primary();
         let tray_ok = Rc::new(Cell::new(false));
         let view_slot: Rc<RefCell<Option<Rc<AppView>>>> = Rc::default();
         let first = Rc::new(Cell::new(true));
@@ -211,7 +284,8 @@ mod platform {
         });
     }
 
-    pub fn run(svc: Service, minimized: bool) {
+    pub fn run(minimized: bool) {
+        let svc = super::start_primary();
         let quit_svc = svc.clone();
         let quit = Arc::new(move || {
             quit_svc.shutdown();
@@ -247,7 +321,8 @@ mod platform {
     use super::*;
     use nsh_platform_windows::{AppOptions, AppSource};
 
-    pub fn run(svc: Service, _minimized: bool) {
+    pub fn run(_minimized: bool) {
+        let svc = super::start_primary();
         nsh_platform_windows::run_app(
             AppSource::Rust(super::root()),
             AppOptions { title: "Kairo".to_owned(), size: (1180, 760), ..Default::default() },

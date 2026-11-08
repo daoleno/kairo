@@ -2723,6 +2723,7 @@ dependencies = [
  "env_logger",
  "kairo-core",
  "kairo-tray",
+ "libc",
  "log",
  "nsh-base",
  "nsh-core",
