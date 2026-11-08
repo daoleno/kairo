@@ -260,7 +260,6 @@ fn node_list(group_name: String, group: Memo<Option<Group>>, nodes: Memo<Vec<Nod
             .px_5()
             .cursor_pointer()
             .hover(|s| s.bg(move || theme().accent))
-            .style_when(is_now, |s| s.bg(move || ui::selection()))
             .child(
                 view()
                     .w(px(16.0))
@@ -274,7 +273,7 @@ fn node_list(group_name: String, group: Memo<Option<Group>>, nodes: Memo<Vec<Nod
                     .min_w(px(0.0))
                     .number_of_lines(1)
                     .font_weight(FontWeight::NORMAL)
-                    .style_when(is_now, |s| s.font_weight(FontWeight::MEDIUM)),
+                    .style_when(is_now, |s| s.font_weight(FontWeight::MEDIUM).text_color(move || theme().primary)),
             )
             .child(
                 text(move || -> SharedString { node.with(|n| n.as_ref().map(|n| type_label(n)).unwrap_or_default()).into() })
@@ -305,8 +304,25 @@ fn node_list(group_name: String, group: Memo<Option<Group>>, nodes: Memo<Vec<Nod
     .flex_1()
 }
 
+/// mihomo's adapter type, spelled the way the protocols spell themselves.
+fn kind_name(kind: &str) -> &str {
+    match kind {
+        "Http" => "HTTP",
+        "Socks5" => "SOCKS5",
+        "Ss" | "Shadowsocks" => "Shadowsocks",
+        "ShadowsocksR" | "Ssr" => "ShadowsocksR",
+        "Vmess" => "VMess",
+        "Vless" => "VLESS",
+        "Tuic" => "TUIC",
+        "Ssh" => "SSH",
+        "AnyTLS" | "Anytls" => "AnyTLS",
+        "WireGuard" | "Wireguard" => "WireGuard",
+        other => other,
+    }
+}
+
 fn type_label(n: &Node) -> String {
-    let mut s = if n.is_group { "Group".to_owned() } else { n.kind.clone() };
+    let mut s = if n.is_group { "Group".to_owned() } else { kind_name(&n.kind).to_owned() };
     if n.udp {
         s.push_str(" · UDP");
     }

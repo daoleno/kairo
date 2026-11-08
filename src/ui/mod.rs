@@ -208,6 +208,7 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
 ) -> View {
     view()
         .flex_row()
+        .flex_shrink_0()
         .p(px(2.0))
         .gap(px(2.0))
         .rounded(radius_control())
@@ -220,7 +221,9 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .selected(is)
                 .role(AccessibilityRole::Tab)
                 .on_press(move || on_select(value))
-                .flex_1()
+                .flex_grow(1.0)
+                .flex_shrink_0()
+                .min_w(px(56.0))
                 .items_center()
                 .justify_center()
                 .h(px(24.0))
@@ -230,7 +233,7 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .text_color(move || theme().muted_foreground)
                 .hover(|s| s.text_color(move || theme().foreground))
                 .style_when(is, |s| s.bg(move || theme().background).shadow_sm().text_color(move || theme().foreground))
-                .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+                .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM).number_of_lines(1))
         }))
 }
 

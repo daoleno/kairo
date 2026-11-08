@@ -138,16 +138,16 @@ async def origin_handler(reader, writer, sub):
             + body
         )
     elif path.startswith("/stream"):
-        size = 2_000_000
+        size = random.randint(1_000_000, 6_000_000)
         writer.write(f"HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n".encode())
         sent = 0
         try:
             while sent < size:
-                chunk = min(40_000, size - sent)
+                chunk = min(random.randint(8_000, 40_000), size - sent)
                 writer.write(b"k" * chunk)
                 await writer.drain()
                 sent += chunk
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.1)
         except Exception:
             pass
     else:
@@ -168,7 +168,7 @@ async def traffic(mixed_port, origin):
     oh, op = origin.split(":")
     async def one():
         host = random.choice(HOSTS)
-        path = "/stream" if random.random() < 0.35 else "/hello"
+        path = "/stream" if random.random() < 0.5 else "/hello"
         try:
             r, w = await asyncio.open_connection("127.0.0.1", mixed_port)
             # Absolute-form request: the proxy resolves the host by the rules; the
@@ -196,12 +196,11 @@ async def main():
     args = ap.parse_args()
     delays = [20, 45, 80, 140, 260, 520]
     ports = []
-    for d in delays:
-        srv = await asyncio.start_server(connect_proxy(d), "127.0.0.1", 0)
-        ports.append(srv.sockets[0].getsockname()[1])
-    dead = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0)
-    dead_port = dead.sockets[0].getsockname()[1]
-    dead.close()
+    # Fixed ports (after the origin's) keep a downloaded profile valid across restarts.
+    for i, d in enumerate(delays):
+        await asyncio.start_server(connect_proxy(d), "127.0.0.1", args.port + 1 + i)
+        ports.append(args.port + 1 + i)
+    dead_port = args.port + 1 + len(delays)  # nothing listens here
     origin = f"127.0.0.1:{args.port}"
     await asyncio.start_server(lambda r, w: origin_handler(r, w, lambda: subscription(ports, dead_port, origin) + hosts_block(args.port)), "127.0.0.1", args.port)
     print(f"subscription: http://{origin}/sub  proxies: {ports}", flush=True)

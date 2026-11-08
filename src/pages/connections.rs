@@ -47,6 +47,8 @@ pub fn page() -> impl IntoElement {
         Arc::new(list)
     });
     let count = move || rows.with(|r| r.len());
+    // With the inspector open the table keeps the columns the inspector doesn't show.
+    let compact = computed(move || selected.with(Option::is_some));
     let total = move || store.connections.with(|c| c.0.list.len());
 
     view()
@@ -89,8 +91,8 @@ pub fn page() -> impl IntoElement {
                     view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .child(header_row(order))
-                        .child(when(move || count() > 0, move || table(rows, selected)).otherwise(move || {
+                        .child(header_row(order, compact))
+                        .child(when(move || count() > 0, move || table(rows, selected, compact)).otherwise(move || {
                             ui::empty_state(
                                 Icon::Connections,
                                 "No connections",
@@ -127,14 +129,15 @@ fn head(label: &'static str, w: Option<f32>, right: bool, sort: Option<(Signal<O
         .when_some(w, |b, w| b.w(px(w)))
         .when(w.is_none(), |b| b.flex_1().min_w(px(0.0)))
         .child(t)
-        .child(icon(Icon::ArrowDown, 10.0).text_color(move || theme().foreground).style_when(move || !active(), |s| s.hidden()));
+        .child(icon(Icon::ArrowDown, 10.0).text_color(move || theme().foreground).style_when(move || !active(), |s| s.invisible()));
     match sort {
         Some((s, o)) => cell.cursor_pointer().on_press(move || s.set(if s.get_untracked() == o { Order::Newest } else { o })).into_element(),
         None => cell.disabled(true).into_element(),
     }
 }
 
-fn header_row(order: Signal<Order>) -> impl IntoElement {
+fn header_row(order: Signal<Order>, compact: Memo<bool>) -> impl IntoElement {
+    let wide = move || !compact.get();
     view()
         .flex_row()
         .items_center()
@@ -145,11 +148,11 @@ fn header_row(order: Signal<Order>) -> impl IntoElement {
         .border_color(move || theme().border)
         .bg(move || ui::subtle())
         .child(head("Host", None, false, None))
-        .child(head("Process", Some(W_PROCESS), false, None))
-        .child(head("Rule", Some(W_RULE), false, None))
+        .child(when(wide, move || head("Process", Some(W_PROCESS), false, None)))
+        .child(when(wide, move || head("Rule", Some(W_RULE), false, None)))
         .child(head("Node", Some(W_CHAIN), false, None))
         .child(head("Down", Some(W_SPEED), true, Some((order, Order::Download))))
-        .child(head("Up", Some(W_SPEED), true, Some((order, Order::Upload))))
+        .child(when(wide, move || head("Up", Some(W_SPEED), true, Some((order, Order::Upload)))))
         .child(head("Total", Some(W_TOTAL), true, Some((order, Order::Total))))
         .child(view().w(px(W_CLOSE)))
 }
@@ -166,8 +169,9 @@ fn cell(content: impl IntoReactive<SharedString>, w: Option<f32>, right: bool, m
     }
 }
 
-fn table(rows: Memo<Arc<Vec<Connection>>>, selected: Signal<Option<String>>) -> impl IntoElement {
+fn table(rows: Memo<Arc<Vec<Connection>>>, selected: Signal<Option<String>>, compact: Memo<bool>) -> impl IntoElement {
     let store = store();
+    let narrow = move || compact.get();
     virtual_list(move || rows.with(|r| r.len()), move |at| {
         let conn = computed(move || rows.with(|r| r.get(at.index()).cloned()));
         let f = move |g: fn(&Connection) -> String| move || -> SharedString { conn.with(|c| c.as_ref().map(g).unwrap_or_default()).into() };
@@ -188,16 +192,25 @@ fn table(rows: Memo<Arc<Vec<Connection>>>, selected: Signal<Option<String>>) -> 
             .hover(|s| s.bg(move || theme().accent))
             .style_when(is, |s| s.bg(move || ui::selection()))
             .child(cell(f(|c| format!("{}:{}", c.host, c.port)), None, false, false))
-            .child(cell(f(|c| if c.process.is_empty() { "—".into() } else { c.process.clone() }), Some(W_PROCESS), false, true))
-            .child(cell(
-                f(|c| if c.rule_payload.is_empty() { c.rule.clone() } else { format!("{} {}", c.rule, c.rule_payload) }),
-                Some(W_RULE),
-                false,
-                true,
-            ))
+            .child(
+                cell(f(|c| if c.process.is_empty() { "—".into() } else { c.process.clone() }), Some(W_PROCESS), false, true)
+                    .style_when(narrow, |s| s.hidden()),
+            )
+            .child(
+                cell(
+                    f(|c| if c.rule_payload.is_empty() { c.rule.clone() } else { format!("{} {}", c.rule, c.rule_payload) }),
+                    Some(W_RULE),
+                    false,
+                    true,
+                )
+                .style_when(narrow, |s| s.hidden()),
+            )
             .child(cell(f(|c| c.outbound().to_owned()), Some(W_CHAIN), false, false))
             .child(cell(f(|c| if c.down_speed == 0 { "—".into() } else { kairo_core::speed(c.down_speed) }), Some(W_SPEED), true, false))
-            .child(cell(f(|c| if c.up_speed == 0 { "—".into() } else { kairo_core::speed(c.up_speed) }), Some(W_SPEED), true, false))
+            .child(
+                cell(f(|c| if c.up_speed == 0 { "—".into() } else { kairo_core::speed(c.up_speed) }), Some(W_SPEED), true, false)
+                    .style_when(narrow, |s| s.hidden()),
+            )
             .child(cell(f(|c| kairo_core::bytes(c.download + c.upload)), Some(W_TOTAL), true, true))
             .child(
                 view().w(px(W_CLOSE)).items_end().child(
