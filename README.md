@@ -7,7 +7,9 @@ Kairo sets up the core and keeps it running. It manages your subscriptions, lets
 traffic, connections, rules and logs. It can also set the system proxy or turn on TUN. The layout is dense and
 calm, with one accent colour, and it follows the system's light or dark appearance.
 
-![Overview](docs/screenshots/overview-light.png)
+![Overview on Linux](docs/screenshots/overview-light.png)
+
+<p align="center"><img src="docs/screenshots/macos-overview-light.png" width="720" alt="Overview on macOS"></p>
 
 ## What it does
 
