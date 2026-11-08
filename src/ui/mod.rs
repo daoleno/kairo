@@ -422,3 +422,38 @@ pub fn page_header(heading: impl IntoReactive<SharedString>, actions: Vec<AnyEle
         .child(title(heading).text_size(px(size::LARGE + 2.0)).flex_1().number_of_lines(1))
         .children(actions)
 }
+
+/// A pop-up button: the current choice and a chevron; a press opens the
+/// platform's menu of `options` (`(value, title)`), the current one checked.
+pub fn popup_button<T: Clone + PartialEq + 'static>(
+    options: impl Fn() -> Vec<(T, String)> + 'static,
+    selected: impl Fn() -> T + Copy + 'static,
+    on_select: impl Fn(T) + Copy + 'static,
+) -> Button {
+    let options = std::rc::Rc::new(options);
+    let title = {
+        let options = options.clone();
+        move || -> SharedString {
+            let current = selected();
+            options().into_iter().find(|(v, _)| *v == current).map(|(_, t)| t).unwrap_or_default().into()
+        }
+    };
+    base_button(Variant::Secondary)
+        .min_w(px(120.0))
+        .justify_between()
+        .on_press(move || {
+            let current = selected();
+            let items = options()
+                .into_iter()
+                .map(|(value, title)| {
+                    let checked = value == current;
+                    nsh_core::element::desktop::MenuItem::new(title).checked(checked).on_select(move || on_select(value.clone()))
+                })
+                .collect();
+            spawn(async move {
+                nsh_core::element::desktop::popup_menu(items).await;
+            });
+        })
+        .child(text(title).text_size(px(size::BODY)).number_of_lines(1))
+        .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground))
+}

@@ -68,7 +68,7 @@ impl Model {
                 )
             });
         let status = match &state.core {
-            CoreStatus::Running { .. } => format!("Running · {} ↑  {} ↓", kairo_core::speed(live.up), kairo_core::speed(live.down)),
+            CoreStatus::Running { .. } => format!("Running · ↑ {}  ↓ {}", kairo_core::speed(live.up), kairo_core::speed(live.down)),
             other => other.title().to_owned(),
         };
         Model {

@@ -26,6 +26,7 @@ env_logger = "0.11"
 log = "0.4"
 kairo-core = { path = "crates/kairo-core" }
 kairo-tray = { path = "crates/kairo-tray" }
+url = "2"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"

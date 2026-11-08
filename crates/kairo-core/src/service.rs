@@ -609,17 +609,22 @@ impl Service {
             }
         }));
         // Logs.
+        // mihomo hands every event to `/logs` subscribers, filtered by the
+        // query's level alone, so the stream follows the setting live.
         let (svc, c) = (self.clone(), ctl);
-        let level = self.settings().log_level.as_str();
         out.push(tokio::spawn(async move {
             loop {
-                let _ = c
-                    .stream::<LogLine>(&format!("/logs?level={level}"), |line| {
-                        svc.push_log(line);
-                        true
-                    })
-                    .await;
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                let level = svc.settings().log_level;
+                let mut state = svc.0.state.subscribe();
+                let path = format!("/logs?level={}", level.as_str());
+                let stream = c.stream::<LogLine>(&path, |line| {
+                    svc.push_log(line);
+                    true
+                });
+                tokio::select! {
+                    _ = stream => tokio::time::sleep(Duration::from_secs(1)).await,
+                    _ = async move { state.wait_for(|s| s.settings.log_level != level).await.is_ok() } => {}
+                }
             }
         }));
         out

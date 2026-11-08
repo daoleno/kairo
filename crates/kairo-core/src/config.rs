@@ -153,6 +153,15 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
                 );
             }
         }
+    } else if !config.contains_key("dns") {
+        // Without a `dns` section the core resolves with the system's resolver
+        // but its DNS API is off. The same resolver, as the core's DNS, keeps
+        // lookups as they were and lets the DNS tool ask it.
+        let dns = sub(config, "dns");
+        set(dns, "enable", true);
+        set(dns, "ipv6", s.ipv6);
+        set(dns, "enhanced-mode", "redir-host");
+        set(dns, "nameserver", Value::Sequence(vec!["system".into()]));
     }
 }
 
@@ -277,6 +286,17 @@ append-proxies:
         assert_eq!(rules.len(), 3);
         assert_eq!(get(&m, "proxies").as_sequence().unwrap().len(), 2);
         assert!(m.get("prepend-rules").is_none());
+    }
+
+    #[test]
+    fn missing_dns_uses_the_system_resolver() {
+        let m = parse_mapping(&build("proxies: []\n", "", &Settings::default()).unwrap()).unwrap();
+        let dns = get(&m, "dns").as_mapping().unwrap();
+        assert_eq!(get(dns, "enable").as_bool(), Some(true));
+        assert_eq!(get(dns, "nameserver").as_sequence().unwrap()[0].as_str(), Some("system"));
+        // A profile's own DNS, even off, is left alone.
+        let m = parse_mapping(&build("dns: {enable: false}\n", "", &Settings::default()).unwrap()).unwrap();
+        assert_eq!(get(get(&m, "dns").as_mapping().unwrap(), "enable").as_bool(), Some(false));
     }
 
     #[test]
