@@ -16,7 +16,7 @@ jobs:
     name: Linux · check, unit, e2e, TUN e2e
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: System libraries
         run: |
           sudo apt-get update
@@ -43,9 +43,9 @@ jobs:
 
   macos:
     name: macOS · check and unit tests
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets

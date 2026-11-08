@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kairo — a native client for mihomo</title>
+<meta name="description" content="Kairo runs the mihomo proxy core for you on macOS and Linux: subscriptions, nodes, system proxy and TUN, in a small native app.">
+<meta property="og:title" content="Kairo — a native client for mihomo">
+<meta property="og:description" content="Subscriptions, nodes, system proxy and TUN, in a small native app for macOS and Linux.">
+<meta property="og:image" content="https://daoleno.github.io/kairo/shots/overview-light.webp">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-512.png">
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-soft: #f5f5f7;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e3e3e8;
+  --accent: #007aff;
+  --accent-fg: #ffffff;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 40px rgba(0,0,0,.12);
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111113;
+    --bg-soft: #1a1a1d;
+    --fg: #f5f5f7;
+    --muted: #98989f;
+    --line: #2a2a2e;
+    --accent: #0a84ff;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111113;
+  --bg-soft: #1a1a1d;
+  --fg: #f5f5f7;
+  --muted: #98989f;
+  --line: #2a2a2e;
+  --accent: #0a84ff;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.55);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+img { display: block; max-width: 100%; height: auto; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+header.top { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; text-decoration: none; }
+.brand img { width: 28px; height: 28px; }
+.top nav { display: flex; gap: 22px; font-size: 14px; }
+.top nav a { text-decoration: none; color: var(--muted); }
+.top nav a:hover { color: var(--fg); }
+
+.hero { text-align: center; padding: 56px 0 28px; }
+h1 {
+  margin: 0 auto;
+  max-width: 14ch;
+  font-size: clamp(44px, 8vw, 88px);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+}
+.lede { margin: 22px auto 0; max-width: 34em; font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); }
+.actions { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 44px; padding: 0 20px; border-radius: 22px;
+  font-size: 15px; font-weight: 600; text-decoration: none;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+}
+.btn svg { width: 16px; height: 16px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn:hover { filter: brightness(1.06); }
+.meta { margin-top: 14px; font-size: 13px; color: var(--muted); }
+
+.switch { display: flex; justify-content: center; margin: 44px 0 18px; }
+.seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--bg-soft); border: 1px solid var(--line); }
+.seg button {
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--muted);
+  border: 0; background: none; padding: 5px 16px; border-radius: 7px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+
+.window { border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--line); background: var(--bg-soft); }
+.window img { width: 100%; }
+.shot-dark { display: none; }
+[data-shots="dark"] .shot-light { display: none; }
+[data-shots="dark"] .shot-dark { display: block; }
+
+section.wrap { margin-top: 112px; }
+h2 { margin: 0; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.025em; line-height: 1.1; }
+.sub { margin: 10px 0 0; color: var(--muted); max-width: 38em; }
+
+.gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 40px 32px; margin-top: 36px; }
+.gallery figure { margin: 0; }
+.gallery figcaption { margin-top: 14px; font-size: 15px; }
+.gallery figcaption b { font-weight: 600; }
+.gallery figcaption span { color: var(--muted); }
+
+.facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 36px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.facts div { background: var(--bg); padding: 20px 22px; }
+.facts b { display: block; font-size: 15px; font-weight: 600; }
+.facts span { display: block; margin-top: 4px; font-size: 14px; color: var(--muted); }
+
+.downloads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 36px; }
+.dl { border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; background: var(--bg); }
+.dl h3 { margin: 0; font-size: 17px; }
+.dl p { margin: 4px 0 16px; font-size: 13px; color: var(--muted); }
+.dl .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.dl .btn { height: 36px; padding: 0 14px; font-size: 14px; }
+.note { margin-top: 18px; font-size: 13px; color: var(--muted); max-width: 52em; }
+.note code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-soft); border: 1px solid var(--line); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+
+footer { margin-top: 96px; padding: 28px 0 40px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+
+@media (max-width: 820px) {
+  .gallery { grid-template-columns: 1fr; }
+  .facts { grid-template-columns: 1fr 1fr; }
+  .downloads { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .wrap { padding: 0 16px; }
+  .top nav a.hide-sm { display: none; }
+  .hero { padding-top: 32px; }
+  .facts { grid-template-columns: 1fr; }
+  section.wrap { margin-top: 72px; }
+  .window { border-radius: 8px; }
+}
+</style>
+</head>
+<body>
+<header class="wrap top">
+  <a class="brand" href="./"><img src="icon.svg" alt="">Kairo</a>
+  <nav>
+    <a class="hide-sm" href="#screens">Screens</a>
+    <a href="#download">Download</a>
+    <a href="https://github.com/daoleno/kairo">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <h1>mihomo, made native.</h1>
+    <p class="lede">Kairo runs the mihomo core for you. Subscriptions, nodes, system proxy and TUN, in a small app that looks at home on macOS and Linux.</p>
+    <div class="actions">
+      <a class="btn primary" id="primary" href="https://github.com/daoleno/kairo/releases/latest">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7.5 8 11.5l4-4M3 14h10"/></svg>
+        <span id="primary-label">Download</span>
+      </a>
+      <a class="btn" href="#download" id="others">Other platforms</a>
+    </div>
+    <p class="meta"><span id="version">Free and open source</span> · macOS 11+ · Linux (GTK 4) · GPL-3.0</p>
+
+    <div class="switch">
+      <div class="seg" role="group" aria-label="Screenshot appearance">
+        <button type="button" data-set="light" aria-pressed="true">Light</button>
+        <button type="button" data-set="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+    <div class="window">
+      <img class="shot-light" src="shots/overview-light.webp" width="1181" height="789" alt="Kairo's overview: the core running, mode, system proxy and TUN switches, a live traffic graph, the active profile's usage and the main proxy group.">
+      <img class="shot-dark" src="shots/overview-dark.webp" width="1181" height="789" alt="The same overview in dark mode." loading="lazy">
+    </div>
+  </div>
+
+  <section class="wrap" id="screens">
+    <h2>Everything the core can do, one click away.</h2>
+    <div class="gallery">
+      <figure>
+        <div class="window">
+          <img class="shot-light" src="shots/proxies-light.webp" width="1181" height="789" alt="Proxies: groups on the left, the selected group's nodes with their delays on the right." loading="lazy">
+          <img class="shot-dark" src="shots/proxies-dark.webp" width="1181" height="789" alt="Proxies in dark mode." loading="lazy">
+        </div>
+        <figcaption><b>Proxies.</b> <span>Pick a node, test a whole group, sort by delay.</span></figcaption>
+      </figure>
+      <figure>
+        <div class="window">
+          <img class="shot-light" src="shots/connections-light.webp" width="1181" height="789" alt="Connections: a live table with one connection's details open beside it." loading="lazy">
+          <img class="shot-dark" src="shots/connections-dark.webp" width="1181" height="789" alt="Connections in dark mode." loading="lazy">
+        </div>
+        <figcaption><b>Connections.</b> <span>Live, searchable, smooth with thousands of rows.</span></figcaption>
+      </figure>
+      <figure>
+        <div class="window">
+          <img class="shot-light" src="shots/profile-edit-light.webp" width="1181" height="789" alt="A profile's details and its YAML overrides editor." loading="lazy">
+          <img class="shot-dark" src="shots/profile-edit-dark.webp" width="1181" height="789" alt="The profile editor in dark mode." loading="lazy">
+        </div>
+        <figcaption><b>Profiles.</b> <span>Subscriptions with usage and expiry, overrides the core checks first.</span></figcaption>
+      </figure>
+      <figure>
+        <div class="window">
+          <img class="shot-light" src="shots/logs-light.webp" width="1181" height="789" alt="Logs: the core's log lines, live, with a level filter and search." loading="lazy">
+          <img class="shot-dark" src="shots/logs-dark.webp" width="1181" height="789" alt="Logs in dark mode." loading="lazy">
+        </div>
+        <figcaption><b>Logs, rules, DNS.</b> <span>See why a request went where it went.</span></figcaption>
+      </figure>
+    </div>
+
+    <div class="facts">
+      <div><b>The core, handled</b><span>Official builds, checked against their SHA-256, restarted if they crash.</span></div>
+      <div><b>System proxy that comes back</b><span>Restored on quit, on a crash, even after a kill.</span></div>
+      <div><b>TUN in one switch</b><span>A one-time grant for the core. Kairo itself never runs as root.</span></div>
+      <div><b>In the menu bar</b><span>Speeds, mode, system proxy and node switching from the tray.</span></div>
+      <div><b>Light and dark</b><span>Follows the system as it changes.</span></div>
+      <div><b>Free software</b><span>GPL-3.0. Built in Rust on NSH, native AppKit and GTK 4.</span></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="download">
+    <h2>Download</h2>
+    <p class="sub" id="dl-sub">The latest release, for Apple silicon and Intel Macs and for Linux.</p>
+    <div class="downloads">
+      <div class="dl">
+        <h3>macOS</h3>
+        <p>macOS 11 or later · Apple silicon and Intel</p>
+        <div class="row">
+          <a class="btn primary" data-asset="macos-universal.dmg" href="https://github.com/daoleno/kairo/releases/latest">.dmg</a>
+          <a class="btn" data-asset="macos-universal.zip" href="https://github.com/daoleno/kairo/releases/latest">.zip</a>
+        </div>
+      </div>
+      <div class="dl">
+        <h3>Linux · x86_64</h3>
+        <p>GTK 4.14+ and WebKitGTK 6.0 (Ubuntu 24.04 and later)</p>
+        <div class="row">
+          <a class="btn primary" data-asset="_amd64.deb" href="https://github.com/daoleno/kairo/releases/latest">.deb</a>
+          <a class="btn" data-asset="linux-x86_64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">.tar.gz</a>
+        </div>
+      </div>
+      <div class="dl">
+        <h3>Linux · arm64</h3>
+        <p>GTK 4.14+ and WebKitGTK 6.0 (Ubuntu 24.04 and later)</p>
+        <div class="row">
+          <a class="btn primary" data-asset="_arm64.deb" href="https://github.com/daoleno/kairo/releases/latest">.deb</a>
+          <a class="btn" data-asset="linux-aarch64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">.tar.gz</a>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      On macOS, Kairo is not notarized yet. The first time, right-click it in Applications and choose <b>Open</b>,
+      or run <code>xattr -dr com.apple.quarantine /Applications/Kairo.app</code>.
+      Kairo downloads the mihomo core on first run. Checksums are in <a data-asset="SHA256SUMS" href="https://github.com/daoleno/kairo/releases/latest">SHA256SUMS</a>.
+    </p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Kairo is free software under the GPL-3.0. mihomo is a separate project by MetaCubeX.</span>
+    <span><a href="https://github.com/daoleno/kairo">Source</a> · <a href="https://github.com/daoleno/kairo/releases">Releases</a> · <a href="https://github.com/daoleno/kairo/issues">Issues</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var buttons = document.querySelectorAll(".seg button");
+  function show(mode) {
+    root.setAttribute("data-shots", mode);
+    buttons.forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.set === mode)); });
+  }
+  var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  show(dark && dark.matches ? "dark" : "light");
+  if (dark && dark.addEventListener) dark.addEventListener("change", function (e) { show(e.matches ? "dark" : "light"); });
+  buttons.forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.set); }); });
+
+  // The visitor's platform picks the main button.
+  var ua = navigator.userAgent;
+  var platform = /Mac/.test(ua) && !/iPhone|iPad/.test(ua) ? "mac" : /Linux/.test(ua) && !/Android/.test(ua) ? (/aarch64|arm64/i.test(ua) ? "linux-arm" : "linux") : "";
+  var pick = { mac: ["macos-universal.dmg", "Download for macOS"], linux: ["_amd64.deb", "Download for Linux"], "linux-arm": ["_arm64.deb", "Download for Linux"] }[platform];
+  var label = document.getElementById("primary-label");
+  var primary = document.getElementById("primary");
+  if (pick) label.textContent = pick[1];
+  else { label.textContent = "Download"; primary.href = "#download"; }
+
+  // Point every button at the latest release's file.
+  fetch("https://api.github.com/repos/daoleno/kairo/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (release) {
+      var assets = release.assets || [];
+      function find(suffix) {
+        for (var i = 0; i < assets.length; i++) if (assets[i].name.slice(-suffix.length) === suffix) return assets[i].browser_download_url;
+        return null;
+      }
+      document.querySelectorAll("[data-asset]").forEach(function (a) {
+        var url = find(a.dataset.asset);
+        if (url) a.href = url;
+      });
+      if (pick) { var url = find(pick[0]); if (url) primary.href = url; }
+      var v = release.tag_name || "";
+      document.getElementById("version").textContent = v + " · free and open source";
+      document.getElementById("dl-sub").textContent = "Kairo " + v.replace(/^v/, "") + ", for Apple silicon and Intel Macs and for Linux.";
+    })
+    .catch(function () { /* the links stay on the releases page */ });
+})();
+</script>
+</body>
+</html>
