@@ -61,7 +61,7 @@ def connect_proxy(delay):
             return
         host, _, port = parts[1].decode().rpartition(":")
         # The demo hosts live on this machine.
-        if host.endswith(".test") or host.endswith(".local"):
+        if host.endswith(".test") or host.endswith(".local") or host.startswith("203.0.113."):
             host = "127.0.0.1"
         await asyncio.sleep(delay / 1000)
         try:
