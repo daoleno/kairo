@@ -1,6 +1,7 @@
-//! Kairo's tray / menu bar item. It shows the core's state and the speeds, and
-//! offers the mode, the system proxy, TUN, quick switching of the main group's
-//! node, the core's start/stop, the window and Quit.
+//! Kairo's tray / menu bar item: whether it is connected and through where,
+//! and the three everyday choices without the window: Connect, the location
+//! (Fastest or a place, quickest first) and the route. Then the window and
+//! Quit. The system proxy and TUN live in Settings (Connect sets the proxy).
 //!
 //! - Linux: a StatusNotifierItem (KDE Plasma, GNOME with the AppIndicator
 //!   extension, most panels) through `ksni`.
@@ -24,12 +25,16 @@ pub struct Hooks {
     pub quit: Arc<dyn Fn() + Send + Sync>,
 }
 
-/// One node of the quick-switch group.
+/// A location in the menu: `name` empty is Fastest (automatic).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
     pub name: String,
+    pub label: String,
     pub delay: Option<u32>,
 }
+
+/// How many places the menu lists (the rest: All Locations… in the window).
+pub const PLACES: usize = 15;
 
 /// What the menu shows.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -43,8 +48,12 @@ pub struct Model {
     pub tun_allowed: bool,
     pub up: u64,
     pub down: u64,
-    /// The quick-switch group: its name, members and current pick.
+    pub has_profile: bool,
+    /// The location: its group, the choices (Fastest first) and the one in use
+    /// (empty: Fastest).
     pub group: Option<(String, Vec<Choice>, Option<String>)>,
+    /// The location's title for the submenu ("Fastest · Tokyo 03").
+    pub place: String,
 }
 
 impl Model {
@@ -53,22 +62,37 @@ impl Model {
         let live = svc.live().borrow().clone();
         let proxies = svc.proxies().borrow().clone();
         let s = &state.settings;
-        let group = proxies
-            .groups
-            .iter()
-            .filter(|g| g.selectable() && g.name != "GLOBAL" && !g.hidden)
-            .find(|g| s.tray_group.is_empty() || g.name == s.tray_group)
-            .or_else(|| proxies.groups.iter().find(|g| g.selectable() && g.name != "GLOBAL" && !g.hidden))
-            .map(|g| {
-                (
-                    g.name.clone(),
-                    g.members.iter().map(|m| Choice { name: m.name.clone(), delay: m.delay }).collect(),
-                    g.now.clone(),
-                )
+        let main = kairo_core::places::main_group(&proxies.groups, &s.tray_group);
+        let now_place = main.and_then(|g| g.now.as_ref().and_then(|n| g.members.iter().find(|m| &m.name == n))).map(kairo_core::places::place);
+        let label_of = |p: &kairo_core::places::Place| format!("{}{}", p.flag.clone().map(|f| f + "  ").unwrap_or_default(), p.title);
+        let group = main.map(|g| {
+            let mut places: Vec<_> = kairo_core::places::places(g).into_iter().filter(|p| !p.is_group).collect();
+            places.sort_by_key(|p| match p.delay {
+                Some(d) if d > 0 => d,
+                _ => u32::MAX,
             });
+            let mut choices = vec![Choice { name: String::new(), label: "Fastest".into(), delay: None }];
+            choices.extend(places.into_iter().take(PLACES).map(|p| Choice { label: label_of(&p), name: p.name, delay: p.delay }));
+            let now = if s.auto_location { Some(String::new()) } else { g.now.clone() };
+            (g.name.clone(), choices, now)
+        });
+        let place = match (&now_place, s.auto_location) {
+            (Some(p), true) => format!("Fastest · {}", label_of(p)),
+            (Some(p), false) => label_of(p),
+            (None, _) => "—".into(),
+        };
         let status = match &state.core {
-            CoreStatus::Running { .. } => format!("Running · ↑ {}  ↓ {}", kairo_core::speed(live.up), kairo_core::speed(live.down)),
-            other => other.title().to_owned(),
+            CoreStatus::Running { .. } => match &now_place {
+                Some(p) => format!(
+                    "Connected · {}{}",
+                    label_of(p),
+                    p.delay.filter(|d| *d > 0).map(|d| format!(" · {d} ms")).unwrap_or_default()
+                ),
+                None => "Connected".into(),
+            },
+            CoreStatus::Starting => "Connecting…".into(),
+            CoreStatus::Failed { .. } => "Couldn't connect".into(),
+            _ => "Not Connected".into(),
         };
         Model {
             status,
@@ -80,16 +104,27 @@ impl Model {
             tun_allowed: state.tun_privilege == Some(kairo_core::tun::Privilege::Granted),
             up: live.up,
             down: live.down,
+            has_profile: state.profiles.active.is_some(),
             group,
+            place,
         }
     }
 
-    /// The menu label of a node: its name and last delay.
+    /// The menu label of a location: its name and last delay.
     pub fn choice_label(c: &Choice) -> String {
         match c.delay {
-            Some(0) => format!("{}    timeout", c.name),
-            Some(d) => format!("{}    {d} ms", c.name),
-            None => c.name.clone(),
+            Some(0) => format!("{}    no answer", c.label),
+            Some(d) => format!("{}    {d} ms", c.label),
+            None => c.label.clone(),
+        }
+    }
+
+    /// The route's title (the mode in plain words).
+    pub fn route_title(m: Mode) -> &'static str {
+        match m {
+            Mode::Rule => "Smart Route",
+            Mode::Global => "All Traffic",
+            Mode::Direct => "Direct",
         }
     }
 }
@@ -101,25 +136,12 @@ pub(crate) mod act {
     pub fn mode(svc: &Service, m: Mode) {
         svc.fire(svc.set_mode(m));
     }
-    pub fn sysproxy(svc: &Service, on: bool) {
-        svc.fire(svc.set_system_proxy(on));
+    /// A location (empty: Fastest).
+    pub fn locate(svc: &Service, name: String) {
+        svc.fire(svc.set_location((!name.is_empty()).then_some(name)));
     }
-    pub fn tun(svc: &Service, on: bool) {
-        svc.fire(svc.set_tun(on));
-    }
-    pub fn select(svc: &Service, group: String, name: String) {
-        svc.fire(svc.select(group, name));
-    }
-    pub fn toggle_core(svc: &Service, running: bool) {
-        if running {
-            let f = svc.stop_core();
-            svc.fire(async move {
-                f.await;
-                Ok::<(), String>(())
-            });
-        } else {
-            svc.fire(svc.start_core());
-        }
+    pub fn connect(svc: &Service, on: bool) {
+        svc.fire(svc.connect(on));
     }
 }
 
@@ -217,7 +239,7 @@ mod tests {
     #[test]
     fn labels() {
         use super::{Choice, Model};
-        assert_eq!(Model::choice_label(&Choice { name: "a".into(), delay: Some(120) }), "a    120 ms");
-        assert_eq!(Model::choice_label(&Choice { name: "a".into(), delay: Some(0) }), "a    timeout");
+        assert_eq!(Model::choice_label(&Choice { name: "x".into(), label: "a".into(), delay: Some(120) }), "a    120 ms");
+        assert_eq!(Model::choice_label(&Choice { name: "x".into(), label: "a".into(), delay: Some(0) }), "a    no answer");
     }
 }

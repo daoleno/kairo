@@ -12,6 +12,7 @@ use nsh_core::prelude::*;
 pub enum Page {
     #[default]
     Overview,
+    Apps,
     Proxies,
     Profiles,
     Connections,
@@ -22,19 +23,41 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 8] =
-        [Page::Overview, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns, Page::Settings];
+    pub const ALL: [Page; 9] = [
+        Page::Overview,
+        Page::Apps,
+        Page::Proxies,
+        Page::Profiles,
+        Page::Connections,
+        Page::Rules,
+        Page::Logs,
+        Page::Dns,
+        Page::Settings,
+    ];
 
-    /// The page named `name` (its title, any case).
+    /// The page named `name` (its title or its old one, any case).
     pub fn named(name: &str) -> Option<Page> {
-        Page::ALL.into_iter().find(|p| p.title().eq_ignore_ascii_case(name))
+        let old = match name.to_ascii_lowercase().as_str() {
+            "overview" => Some(Page::Overview),
+            "proxies" => Some(Page::Proxies),
+            "profiles" => Some(Page::Profiles),
+            "apps" => Some(Page::Apps),
+            _ => None,
+        };
+        old.or_else(|| Page::ALL.into_iter().find(|p| p.title().eq_ignore_ascii_case(name)))
+    }
+
+    /// Pages under Advanced (the sidebar folds them away).
+    pub fn advanced(self) -> bool {
+        !matches!(self, Page::Overview | Page::Apps)
     }
 
     pub fn title(self) -> &'static str {
         match self {
-            Page::Overview => "Overview",
-            Page::Proxies => "Proxies",
-            Page::Profiles => "Profiles",
+            Page::Overview => "Home",
+            Page::Apps => "Apps & Sites",
+            Page::Proxies => "Groups",
+            Page::Profiles => "Subscriptions",
             Page::Connections => "Connections",
             Page::Rules => "Rules",
             Page::Logs => "Logs",

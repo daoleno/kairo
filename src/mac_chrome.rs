@@ -40,9 +40,10 @@ enum Row {
 
 const ROWS: &[Row] = &[
     Row::Item(Page::Overview),
+    Row::Item(Page::Apps),
+    Row::Heading("Advanced"),
     Row::Item(Page::Proxies),
     Row::Item(Page::Profiles),
-    Row::Heading("Activity"),
     Row::Item(Page::Connections),
     Row::Item(Page::Rules),
     Row::Item(Page::Logs),
@@ -53,7 +54,8 @@ const ROWS: &[Row] = &[
 
 fn symbol(page: Page) -> &'static str {
     match page {
-        Page::Overview => "gauge.with.dots.needle.33percent",
+        Page::Overview => "house",
+        Page::Apps => "square.grid.2x2",
         Page::Proxies => "globe",
         Page::Profiles => "doc.text",
         Page::Connections => "arrow.up.arrow.down",
@@ -416,6 +418,7 @@ struct Installed {
     sidebar: Retained<Sidebar>,
     toolbar: Retained<Toolbar>,
     footer: Footer,
+    side_item: Retained<NSSplitViewItem>,
     _split: Retained<NSSplitViewController>,
 }
 
@@ -519,6 +522,8 @@ pub fn install(svc: Service) {
         content_item.setAutomaticallyAdjustsSafeAreaInsets(!flush);
         split.addSplitViewItem(&side_item);
         split.addSplitViewItem(&content_item);
+        // Home needs no sidebar: it folds away, holding Advanced, until asked for.
+        side_item.setCollapsed(!chrome::bridge().page.borrow().advanced());
 
         window.setStyleMask(window.styleMask() | NSWindowStyleMask::FullSizeContentView);
         window.setTitlebarAppearsTransparent(false);
@@ -540,7 +545,7 @@ pub fn install(svc: Service) {
         table.sizeLastColumnToFit();
 
         INSTALLED.with(|i| {
-            *i.borrow_mut() = Some(Installed { window: window.clone(), sidebar, toolbar: toolbar_delegate, footer, _split: split })
+            *i.borrow_mut() = Some(Installed { window: window.clone(), sidebar, toolbar: toolbar_delegate, footer, side_item: side_item.clone(), _split: split })
         });
         log::warn!("spike: chrome installed (under_toolbar={under_toolbar})");
         follow(svc);
@@ -572,6 +577,10 @@ fn follow(svc: Service) {
                                 i.window.setTitle(&NSString::from_str(page.title()));
                                 i.window.setSubtitle(&NSString::from_str(&bar.subtitle));
                                 i.sidebar.select(page);
+                                // An Advanced page from a menu, a key or the palette: show where it is.
+                                if page.advanced() && i.side_item.isCollapsed() {
+                                    i.side_item.setCollapsed(false);
+                                }
                                 i.footer.update(&s, &l);
                                 if let Some(toolbar) = i.window.toolbar() {
                                     show_tools(&toolbar, &i.toolbar, bar.tools);

@@ -16,8 +16,6 @@ use objc2_foundation::{NSData, NSSize, NSString};
 use crate::{Hooks, Model, act};
 
 const TAG_MODE: isize = 1; // + index
-const TAG_SYSPROXY: isize = 10;
-const TAG_TUN: isize = 11;
 const TAG_CORE: isize = 20;
 const TAG_SHOW: isize = 21;
 const TAG_QUIT: isize = 22;
@@ -44,16 +42,14 @@ define_class!(
             let model = iv.model.borrow().clone();
             match tag {
                 t if (TAG_MODE..TAG_MODE + 3).contains(&t) => act::mode(&iv.svc, Mode::ALL[(t - TAG_MODE) as usize]),
-                TAG_SYSPROXY => act::sysproxy(&iv.svc, !model.sysproxy),
-                TAG_TUN => act::tun(&iv.svc, !model.tun),
-                TAG_CORE => act::toggle_core(&iv.svc, model.running),
+                TAG_CORE => act::connect(&iv.svc, !model.running),
                 TAG_SHOW => (iv.hooks.show)(),
                 TAG_QUIT => (iv.hooks.quit)(),
                 t if t >= TAG_NODE => {
-                    if let Some((group, choices, _)) = &model.group
+                    if let Some((_, choices, _)) = &model.group
                         && let Some(c) = choices.get((t - TAG_NODE) as usize)
                     {
-                        act::select(&iv.svc, group.clone(), c.name.clone());
+                        act::locate(&iv.svc, c.name.clone());
                     }
                 }
                 _ => {}
@@ -108,33 +104,29 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
     let status = item(target, mtm, &m.status, 0, false, None);
     menu.addItem(&status);
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    for (i, mode) in Mode::ALL.iter().enumerate() {
-        menu.addItem(&item(target, mtm, &format!("{} Mode", mode.title()), TAG_MODE + i as isize, true, Some(*mode == m.mode)));
-    }
-    menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&symbol(item(target, mtm, "System Proxy", TAG_SYSPROXY, m.sysproxy_supported, Some(m.sysproxy)), "network"));
-    menu.addItem(&symbol(item(target, mtm, "TUN Mode", TAG_TUN, m.tun_allowed || m.tun, Some(m.tun)), "point.3.connected.trianglepath.dotted"));
+    menu.addItem(&symbol(item(target, mtm, "Connected", TAG_CORE, m.has_profile, Some(m.running)), "power"));
     if let Some((group, choices, now)) = &m.group {
-        menu.addItem(&NSMenuItem::separatorItem(mtm));
-        let holder = symbol(item(target, mtm, &format!("{group}: {}", now.clone().unwrap_or_default()), 0, m.running, None), "globe");
+        let holder = symbol(item(target, mtm, &format!("Location: {}", m.place), 0, true, None), "location");
         unsafe { holder.setAction(None) };
         let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(group));
         sub.setAutoenablesItems(false);
         for (i, c) in choices.iter().enumerate() {
             let checked = now.as_deref() == Some(c.name.as_str());
-            sub.addItem(&item(target, mtm, &Model::choice_label(c), TAG_NODE + i as isize, m.running, Some(checked)));
+            sub.addItem(&item(target, mtm, &Model::choice_label(c), TAG_NODE + i as isize, true, Some(checked)));
+            if i == 0 {
+                sub.addItem(&NSMenuItem::separatorItem(mtm));
+            }
         }
         holder.setSubmenu(Some(&sub));
         menu.addItem(&holder);
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&symbol(
-        item(target, mtm, if m.running { "Stop Core" } else { "Start Core" }, TAG_CORE, true, None),
-        if m.running { "stop.circle" } else { "play.circle" },
-    ));
-    menu.addItem(&symbol(item(target, mtm, "Show Kairo", TAG_SHOW, true, None), "macwindow"));
+    for (i, mode) in Mode::ALL.iter().enumerate() {
+        menu.addItem(&item(target, mtm, Model::route_title(*mode), TAG_MODE + i as isize, true, Some(*mode == m.mode)));
+    }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&symbol(item(target, mtm, "Quit Kairo", TAG_QUIT, true, None), "power"));
+    menu.addItem(&symbol(item(target, mtm, "Open Kairo", TAG_SHOW, true, None), "macwindow"));
+    menu.addItem(&symbol(item(target, mtm, "Quit Kairo", TAG_QUIT, true, None), "xmark.circle"));
 }
 
 fn glyph(mtm: MainThreadMarker, dim: bool) -> Option<Retained<NSImage>> {

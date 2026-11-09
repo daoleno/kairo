@@ -113,6 +113,11 @@ pub struct Settings {
     pub close_to_tray: bool,
     /// A core binary of the user's own; otherwise Kairo's downloaded one.
     pub core_path: Option<String>,
+    /// Kairo keeps the location on the fastest place (tests on connect and
+    /// every few minutes); picking a place by hand turns it off.
+    pub auto_location: bool,
+    /// The accent (`graphite`, `ember`, `iris`, `sage`...; empty: Kairo's).
+    pub accent: String,
 }
 
 impl Default for Settings {
@@ -125,7 +130,8 @@ impl Default for Settings {
             ipv6: false,
             mode: Mode::Rule,
             log_level: LogLevel::Info,
-            system_proxy: false,
+            // Connecting sets it: what a person means by "connected".
+            system_proxy: true,
             bypass: default_bypass(),
             tun: false,
             tun_stack: "mixed".into(),
@@ -138,6 +144,8 @@ impl Default for Settings {
             tray_group: String::new(),
             close_to_tray: true,
             core_path: None,
+            auto_location: true,
+            accent: String::new(),
         }
     }
 }

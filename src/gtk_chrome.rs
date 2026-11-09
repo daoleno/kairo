@@ -19,14 +19,17 @@ use nsh_platform_linux::gtk4 as gtk;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-const PAGES: [Page; 8] =
-    [Page::Overview, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns, Page::Settings];
+const PAGES: [Page; 9] = Page::ALL;
+/// Where the sidebar's Advanced section starts, and where Settings sits apart.
+const ADVANCED_AT: i32 = 2;
+const SETTINGS_AT: i32 = 8;
 
 /// The icon theme's names for a page's glyph, best first (Adwaita and Breeze
 /// name some differently).
 fn icons(page: Page) -> &'static [&'static str] {
     match page {
-        Page::Overview => &["power-profile-performance-symbolic", "speedometer-symbolic", "utilities-system-monitor-symbolic"],
+        Page::Overview => &["go-home-symbolic", "user-home-symbolic"],
+        Page::Apps => &["view-app-grid-symbolic", "view-grid-symbolic", "applications-other-symbolic"],
         Page::Proxies => &["globe-symbolic", "web-browser-symbolic", "network-workgroup-symbolic"],
         Page::Profiles => &["text-x-generic-symbolic", "emblem-documents-symbolic", "document-properties-symbolic"],
         Page::Connections => &["network-transmit-receive-symbolic", "network-connect-symbolic", "network-wired-symbolic"],
@@ -59,11 +62,16 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         list.append(&row);
         counts.push(count);
     }
-    // The everyday pages, what is flowing, and Settings, apart.
+    // The everyday pages; Advanced below them; Settings apart.
     list.set_header_func(|row, _| {
-        let i = row.index();
-        let separator = (i == 3 || i == 7).then(|| gtk::Separator::new(gtk::Orientation::Horizontal));
-        row.set_header(separator.as_ref());
+        let header: Option<gtk::Widget> = match row.index() {
+            ADVANCED_AT => Some(
+                gtk::Label::builder().label("Advanced").xalign(0.0).css_classes(["heading", "dim-label"]).margin_start(12).margin_top(14).margin_bottom(4).build().upcast(),
+            ),
+            SETTINGS_AT => Some(gtk::Separator::new(gtk::Orientation::Horizontal).upcast()),
+            _ => None,
+        };
+        row.set_header(header.as_ref());
     });
     // The page the app opens on, before the list reports selections.
     let first = *chrome::bridge().page.borrow();
@@ -81,21 +89,24 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     side_view.set_content(Some(&side_scroll));
     let footer = Footer::new();
     side_view.add_bottom_bar(&footer.root);
-    let sidebar = adw::NavigationPage::builder().title("Kairo").tag("sidebar").child(&side_view).build();
 
-    let title = adw::WindowTitle::new("Overview", "");
+    let title = adw::WindowTitle::new(first.title(), "");
     let content_bar = adw::HeaderBar::builder().title_widget(&title).build();
     let content_view = adw::ToolbarView::new();
     content_view.add_top_bar(&content_bar);
     content_view.set_content(Some(&view.widget()));
-    let content = adw::NavigationPage::builder().title("Overview").tag("content").child(&content_view).build();
 
-    let split = adw::NavigationSplitView::builder()
-        .sidebar(&sidebar)
-        .content(&content)
+    // Home needs no sidebar: it folds away, holding Advanced, until asked for.
+    let split = adw::OverlaySplitView::builder()
+        .sidebar(&side_view)
+        .content(&content_view)
         .min_sidebar_width(200.0)
         .max_sidebar_width(260.0)
+        .show_sidebar(first.advanced())
         .build();
+    let toggle = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Show Sidebar (Advanced)").build();
+    split.bind_property("show-sidebar", &toggle, "active").bidirectional().sync_create().build();
+    content_bar.pack_start(&toggle);
     window.set_content(Some(&split));
 
     // The NSH content in the GTK theme's colors, again when they change.
@@ -135,7 +146,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let mut pages = chrome::bridge().page.subscribe();
     let list_page = list.clone();
     let title_page = title.clone();
-    let content_page = content.clone();
+    let split_page = split.clone();
     glib::spawn_future_local(async move {
         loop {
             let page = *pages.borrow_and_update();
@@ -144,7 +155,10 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
                 list_page.select_row(list_page.row_at_index(i as i32).as_ref());
             }
             title_page.set_title(page.title());
-            content_page.set_title(page.title());
+            // An Advanced page from a menu, a key or the palette: show where it is.
+            if page.advanced() && !split_page.shows_sidebar() {
+                split_page.set_show_sidebar(true);
+            }
             if pages.changed().await.is_err() {
                 break;
             }

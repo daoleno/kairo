@@ -281,12 +281,10 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
     view()
         .flex_row()
         .flex_shrink_0()
-        .p(px(2.0))
+        .p(px(3.0))
         .gap(px(2.0))
-        .rounded(radius_control())
-        .bg(move || theme().muted)
-        .border_1()
-        .border_color(move || theme().border)
+        .rounded_full()
+        .bg(move || track())
         .children(options.into_iter().map(move |(value, label)| {
             let is = move || selected() == value;
             button()
@@ -298,9 +296,9 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .min_w(px(56.0))
                 .items_center()
                 .justify_center()
-                .h(px(24.0))
-                .px_3()
-                .rounded(radius_small())
+                .h(px(26.0))
+                .px_3p5()
+                .rounded_full()
                 .cursor_pointer()
                 .text_color(move || theme().muted_foreground)
                 .hover(|s| s.text_color(move || theme().foreground))
@@ -430,6 +428,57 @@ pub fn group(label: Option<&'static str>, rows: Vec<AnyElement>) -> View {
         }
     }
     view().gap_2().child(label.map(|l| section_label(l).px_1())).child(inner)
+}
+
+/// Rows in one rounded group: no outline, a soft fill, hairlines inset
+/// between rows (the grouped lists of the platforms' settings).
+pub fn rows(rows: Vec<AnyElement>) -> View {
+    let count = rows.len();
+    let mut inner = view().rounded(px(20.0)).bg(move || theme().muted).overflow_hidden();
+    for (i, row) in rows.into_iter().enumerate() {
+        inner = inner.child(row);
+        if i + 1 < count {
+            inner = inner.child(view().h(px(1.0)).ml_5().bg(move || theme().border.opacity(0.7)));
+        }
+    }
+    inner
+}
+
+/// A row of [`rows`].
+pub fn row_view() -> View {
+    view().flex_row().items_center().gap_3().px_5().py_3().min_h(px(58.0))
+}
+
+/// A capsule button: the prominent one filled with the accent, the others
+/// a soft fill.
+pub fn capsule(label: impl IntoReactive<SharedString>, prominent: bool) -> Button {
+    button()
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .h(px(38.0))
+        .px_5()
+        .rounded_full()
+        .cursor_pointer()
+        .bg(move || if prominent { theme().primary } else { theme().secondary })
+        .text_color(move || if prominent { theme().primary_foreground } else { theme().foreground })
+        .hover(|s| s.opacity(0.9))
+        .focus(|s| s.outline(px(3.0)).outline_color(move || theme().ring))
+        .disabled_style(|s| s.opacity(0.5))
+        .child(text(label).text_size(px(size::body() + 1.0)).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
+}
+
+/// A quiet text button (a link's look).
+pub fn link_btn(label: impl IntoReactive<SharedString>) -> Button {
+    button()
+        .cursor_pointer()
+        .px_1()
+        .rounded(radius_small())
+        .text_color(move || theme().foreground)
+        .hover(|s| s.opacity(0.7))
+        .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .disabled_style(|s| s.opacity(0.4))
+        .child(text(label).text_size(px(size::small())).font_weight(FontWeight::MEDIUM))
 }
 
 /// A short, neutral state or count.

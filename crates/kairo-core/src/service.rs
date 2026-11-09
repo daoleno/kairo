@@ -221,6 +221,8 @@ impl Service {
         rt.spawn(async move { boot.boot().await });
         let sched = svc.clone();
         rt.spawn(async move { sched.scheduler().await });
+        let places = svc.clone();
+        rt.spawn(async move { places.location_loop().await });
         svc
     }
 
@@ -562,8 +564,9 @@ impl Service {
         let svc = self.clone();
         tokio::spawn(async move {
             svc.refresh_proxies_now().await;
+            svc.keep_fastest().await;
         });
-        if self.settings().system_proxy {
+        if self.settings().system_proxy && self.0.state.borrow().sysproxy_supported {
             self.apply_sysproxy(true);
         }
         Ok(())
@@ -757,6 +760,8 @@ impl Service {
                 .await
                 .map_err(|e| format!("The core rejected the config: {e}"))?;
             self.refresh_proxies_now().await;
+            let svc = self.clone();
+            tokio::spawn(async move { svc.keep_fastest().await });
         }
         Ok(())
     }
@@ -924,6 +929,100 @@ impl Service {
     fn sysproxy_off_temporarily(&self) {
         if self.0.state.borrow().sysproxy_active || self.0.paths.sysproxy_state().exists() {
             self.apply_sysproxy(false);
+        }
+    }
+
+    // --- Connect and location -----------------------------------------------------
+
+    /// Connected: the core runs (and the system proxy points at it, when that
+    /// is on); it stays so across launches. Off: the core stops.
+    pub fn connect(&self, on: bool) -> impl Future<Output = Result<(), String>> + 'static {
+        let svc = self.clone();
+        self.run(async move {
+            let mut next = svc.settings();
+            if next.auto_start_core != on {
+                next.auto_start_core = on;
+                svc.update_settings(next).await?;
+            }
+            if on {
+                if !svc.running() {
+                    svc.start_core().await?;
+                }
+            } else {
+                svc.stop_core().await;
+            }
+            Ok(())
+        })
+    }
+
+    /// The group whose members are the locations.
+    pub fn main_group(&self) -> Option<crate::model::Group> {
+        let preferred = self.settings().tray_group;
+        crate::places::main_group(&self.0.proxies.borrow().groups, &preferred).cloned()
+    }
+
+    /// Goes through `name` (a place of the main group); `None`: the fastest,
+    /// kept so (automatic).
+    pub fn set_location(&self, name: Option<String>) -> impl Future<Output = Result<(), String>> + 'static {
+        let svc = self.clone();
+        self.run(async move {
+            let mut next = svc.settings();
+            if next.auto_location != name.is_none() {
+                next.auto_location = name.is_none();
+                svc.update_settings(next).await?;
+            }
+            let group = svc.main_group().ok_or("This subscription has no locations to choose from")?;
+            match name {
+                Some(n) => svc.select(group.name, n).await,
+                None => svc.pick_fastest(true).await.map(|_| ()),
+            }
+        })
+    }
+
+    /// Tests the locations and goes through the fastest (when `force`, or when
+    /// the current one is a note, failed, or much slower). The place it chose.
+    async fn pick_fastest(&self, force: bool) -> Result<Option<String>, String> {
+        let Some(group) = self.main_group() else { return Ok(None) };
+        self.test_group(group.name.clone()).await?;
+        let Some(group) = self.main_group() else { return Ok(None) };
+        let Some(best) = crate::places::fastest(&group) else {
+            return Err("No location answered. Check the network, or update the subscription".into());
+        };
+        let now = group.now.clone().unwrap_or_default();
+        let current = group.members.iter().find(|m| m.name == now);
+        let keep = !force
+            && current.is_some_and(|c| {
+                !crate::places::is_note(&c.name) && c.delay.is_some_and(|d| d > 0 && d <= best.delay.unwrap_or(0).saturating_mul(3) / 2 + 40)
+            });
+        if keep || now == best.name {
+            return Ok(Some(now));
+        }
+        self.select(group.name, best.name.clone()).await?;
+        Ok(Some(best.name))
+    }
+
+    /// Automatic location: on connect and on a new config, then every ten
+    /// minutes while it stays automatic.
+    async fn keep_fastest(&self) {
+        static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !self.settings().auto_location || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        if let Err(e) = self.pick_fastest(false).await {
+            log::warn!("automatic location: {e}");
+        }
+        RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The periodic part of [`Service::keep_fastest`].
+    async fn location_loop(&self) {
+        let mut tick = tokio::time::interval(Duration::from_secs(600));
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            if self.running() {
+                self.keep_fastest().await;
+            }
         }
     }
 

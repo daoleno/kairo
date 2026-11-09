@@ -48,38 +48,21 @@ impl ksni::Tray for KairoTray {
         let mut items: Vec<MenuItem<Self>> = vec![
             StandardItem { label: m.status.clone(), enabled: false, ..Default::default() }.into(),
             MenuItem::Separator,
-            RadioGroup {
-                selected: Mode::ALL.iter().position(|x| *x == m.mode).unwrap_or(0),
-                select: Box::new(|t: &mut Self, i| act::mode(&t.svc, Mode::ALL[i])),
-                options: Mode::ALL.iter().map(|x| RadioItem { label: format!("{} Mode", x.title()), ..Default::default() }).collect(),
-            }
-            .into(),
-            MenuItem::Separator,
             CheckmarkItem {
-                label: "System Proxy".into(),
-                checked: m.sysproxy,
-                enabled: m.sysproxy_supported,
-                activate: Box::new(|t: &mut Self| act::sysproxy(&t.svc, !t.model.sysproxy)),
-                ..Default::default()
-            }
-            .into(),
-            CheckmarkItem {
-                label: "TUN Mode".into(),
-                checked: m.tun,
-                enabled: m.tun_allowed || m.tun,
-                activate: Box::new(|t: &mut Self| act::tun(&t.svc, !t.model.tun)),
+                label: "Connected".into(),
+                checked: m.running,
+                enabled: m.has_profile,
+                activate: Box::new(|t: &mut Self| act::connect(&t.svc, !t.model.running)),
                 ..Default::default()
             }
             .into(),
         ];
-        if let Some((group, choices, now)) = &m.group {
-            items.push(MenuItem::Separator);
+        if let Some((_, choices, now)) = &m.group {
             let selected = now.as_ref().and_then(|n| choices.iter().position(|c| &c.name == n)).unwrap_or(usize::MAX);
-            let g = group.clone();
             items.push(
                 SubMenu {
-                    label: format!("{group}: {}", now.clone().unwrap_or_default()),
-                    enabled: m.running,
+                    label: format!("Location: {}", m.place).replace('_', "__"),
+                    icon_name: "find-location-symbolic".into(),
                     submenu: vec![
                         RadioGroup {
                             selected,
@@ -87,7 +70,7 @@ impl ksni::Tray for KairoTray {
                                 if let Some((_, choices, _)) = &t.model.group
                                     && let Some(c) = choices.get(i)
                                 {
-                                    act::select(&t.svc, g.clone(), c.name.clone());
+                                    act::locate(&t.svc, c.name.clone());
                                 }
                             }),
                             options: choices.iter().map(|c| RadioItem { label: Model::choice_label(c).replace('_', "__"), ..Default::default() }).collect(),
@@ -101,25 +84,23 @@ impl ksni::Tray for KairoTray {
         }
         items.push(MenuItem::Separator);
         items.push(
-            StandardItem {
-                label: if m.running { "Stop Core".into() } else { "Start Core".into() },
-                enabled: true,
-                icon_name: if m.running { "media-playback-stop-symbolic".into() } else { "media-playback-start-symbolic".into() },
-                activate: Box::new(|t: &mut Self| act::toggle_core(&t.svc, t.model.running)),
-                ..Default::default()
+            RadioGroup {
+                selected: Mode::ALL.iter().position(|x| *x == m.mode).unwrap_or(0),
+                select: Box::new(|t: &mut Self, i| act::mode(&t.svc, Mode::ALL[i])),
+                options: Mode::ALL.iter().map(|x| RadioItem { label: Model::route_title(*x).into(), ..Default::default() }).collect(),
             }
             .into(),
         );
+        items.push(MenuItem::Separator);
         items.push(
             StandardItem {
-                label: "Show Kairo".into(),
+                label: "Open Kairo".into(),
                 icon_name: "window-new-symbolic".into(),
                 activate: Box::new(|t: &mut Self| (t.hooks.show)()),
                 ..Default::default()
             }
             .into(),
         );
-        items.push(MenuItem::Separator);
         items.push(
             StandardItem {
                 label: "Quit Kairo".into(),

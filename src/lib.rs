@@ -52,10 +52,7 @@ pub fn App() -> impl IntoElement {
     if os() == Os::MacOs {
         menus(store);
     }
-    for (i, page) in [Page::Overview, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, page) in GO.into_iter().enumerate() {
         on_key(&format!("mod+{}", i + 1), move |_| store.page.set(page));
     }
 
@@ -66,12 +63,41 @@ pub fn App() -> impl IntoElement {
         .child(shell::shell())
 }
 
+/// The pages ⌘1… open, in the sidebar's order.
+const GO: [Page; 8] = [Page::Overview, Page::Apps, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns];
+
+/// Fastest, then the quickest places (the rest are a search away on Home).
+fn location_items(store: Store) -> Vec<MenuItem> {
+    use kairo_core::places;
+    let auto = store.state.with(|s| s.settings.auto_location);
+    let preferred = store.state.with(|s| s.settings.tray_group.clone());
+    let (now, mut list) = store.proxies.with(|p| match places::main_group(&p.0.groups, &preferred) {
+        Some(g) => (g.now.clone(), places::places(g)),
+        None => (None, vec![]),
+    });
+    list.retain(|p| !p.is_group);
+    list.sort_by_key(|p| match p.delay {
+        Some(d) if d > 0 => d,
+        _ => u32::MAX,
+    });
+    let mut items = vec![MenuItem::new("Fastest").checked(auto).on_select(move || store.run(store.svc().set_location(None))), MenuItem::separator()];
+    for p in list.into_iter().take(12) {
+        let name = p.name.clone();
+        let title = format!("{}{}{}", p.flag.map(|f| f + "  ").unwrap_or_default(), p.title, p.delay.filter(|d| *d > 0).map(|d| format!("   {d} ms")).unwrap_or_default());
+        items.push(MenuItem::new(title).checked(!auto && now.as_deref() == Some(name.as_str())).on_select(move || store.run(store.svc().set_location(Some(name.clone())))));
+    }
+    items.push(MenuItem::separator());
+    items.push(MenuItem::new("All Locations…").on_select(move || store.page.set(Page::Overview)));
+    items
+}
+
 fn menus(store: Store) {
     use nsh_core::desktop::MenuRole;
     let mac = os() == Os::MacOs;
     effect(move || {
         let mode = store.state.with(|s| s.settings.mode);
         let running = store.state.with(|s| s.core.is_running());
+        let has_profile = store.state.with(|s| s.profiles.active.is_some());
         let svc = store.svc();
         let mut menus = Vec::new();
         if mac {
@@ -103,34 +129,51 @@ fn menus(store: Store) {
                 ],
             ));
         }
-        let mut core = vec![
-            MenuItem::new(if running { "Stop Core" } else { "Start Core" }).on_select({
+        let mut conn = vec![
+            MenuItem::new(if running { "Disconnect" } else { "Connect" }).disabled(!has_profile).on_select({
                 let svc = svc.clone();
-                move || {
-                    if running {
-                        let f = svc.stop_core();
-                        spawn(f);
-                    } else {
-                        store.run(svc.start_core());
-                    }
-                }
-            }),
-            MenuItem::new("Restart Core").disabled(!running).on_select({
-                let svc = svc.clone();
-                move || store.run(svc.restart_core())
+                move || store.run(svc.connect(!running))
             }),
             MenuItem::separator(),
+            MenuItem::submenu("Location", location_items(store)),
         ];
-        for m in kairo_core::Mode::ALL {
+        for (m, title) in [(kairo_core::Mode::Rule, "Smart Route"), (kairo_core::Mode::Global, "All Traffic"), (kairo_core::Mode::Direct, "Direct")] {
             let svc = svc.clone();
-            core.push(MenuItem::new(format!("{} Mode", m.title())).checked(mode == m).on_select(move || store.run(svc.set_mode(m))));
+            conn.push(MenuItem::new(title).checked(mode == m).on_select(move || store.run(svc.set_mode(m))));
         }
+        conn.push(MenuItem::separator());
+        conn.push(MenuItem::submenu(
+            "Core",
+            [
+                MenuItem::new(if running { "Stop Core" } else { "Start Core" }).on_select({
+                    let svc = svc.clone();
+                    move || {
+                        if running {
+                            spawn(svc.stop_core());
+                        } else {
+                            store.run(svc.start_core());
+                        }
+                    }
+                }),
+                MenuItem::new("Restart Core").disabled(!running).on_select({
+                    let svc = svc.clone();
+                    move || store.run(svc.restart_core())
+                }),
+            ],
+        ));
         if !mac {
-            core.push(MenuItem::separator());
-            core.push(MenuItem::new("Settings…").shortcut("mod+,").on_select(move || store.page.set(Page::Settings)));
-            core.push(MenuItem::role(MenuRole::Quit));
+            conn.push(MenuItem::separator());
+            conn.push(MenuItem::new("Settings…").shortcut("mod+,").on_select(move || store.page.set(Page::Settings)));
+            conn.push(MenuItem::role(MenuRole::Quit));
         }
-        menus.push(MenuItem::submenu("Core", core));
+        menus.push(MenuItem::submenu("Connection", conn));
+        menus.push(MenuItem::submenu(
+            "Go",
+            GO.into_iter()
+                .enumerate()
+                .map(|(i, page)| MenuItem::new(page.title()).shortcut(["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8"][i]).on_select(move || store.page.set(page)))
+                .collect::<Vec<_>>(),
+        ));
         menus.push(MenuItem::submenu(
             "Edit",
             [
