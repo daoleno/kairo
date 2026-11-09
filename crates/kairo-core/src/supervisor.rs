@@ -187,6 +187,21 @@ pub async fn stop_pid(pid: i32) {
     }
 }
 
+/// Whether this Kairo's core is running (starting, or left by a Kairo that is gone).
+pub fn core_alive(paths: &Paths) -> bool {
+    let Some(pid) = std::fs::read_to_string(paths.core_pid())
+        .ok()
+        .and_then(|t| t.trim().parse::<i32>().ok())
+    else {
+        return false;
+    };
+    #[cfg(unix)]
+    let alive = pid > 1 && unsafe { libc::kill(pid, 0) } == 0;
+    #[cfg(not(unix))]
+    let alive = pid > 1;
+    alive && is_our_core(pid, paths)
+}
+
 fn is_our_core(pid: i32, paths: &Paths) -> bool {
     let runtime = paths.runtime_dir().to_string_lossy().into_owned();
     #[cfg(target_os = "linux")]

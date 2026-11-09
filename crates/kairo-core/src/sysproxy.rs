@@ -517,6 +517,7 @@ fn load_saved(paths: &Paths) -> Option<Saved> {
 /// Points the system proxy at `spec`. The settings it replaces are saved first
 /// (once: enabling again keeps the original ones).
 pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
+    let _lock = lock(paths);
     let b = backends();
     if !(b.gnome || b.kde.is_some() || b.mac) {
         return Err("This desktop has no system proxy Kairo can set".into());
@@ -567,6 +568,11 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
 /// [`enable`] saves before it changes anything, so Kairo has nothing of its own to
 /// undo, and the proxy as it is (perhaps another app's) is the user's.
 pub fn disable(paths: &Paths) -> Result<(), String> {
+    let _lock = lock(paths);
+    disable_locked(paths)
+}
+
+fn disable_locked(paths: &Paths) -> Result<(), String> {
     let Some(saved) = load_saved(paths) else {
         // An unreadable state file would otherwise stick around forever.
         let _ = std::fs::remove_file(paths.sysproxy_state());
@@ -610,21 +616,73 @@ pub fn recover(paths: &Paths) -> bool {
     false
 }
 
-/// For the login check and the guardian: puts the system proxy back when
-/// Kairo left it pointing at a port nothing answers any more (Kairo and its
-/// core gone, the computer restarted). A live core is left alone.
+/// One change of the system proxy at a time, across processes: Kairo setting
+/// it and the login check putting it back must not interleave (the check
+/// deciding on the old state, then undoing what Kairo just set). Held for the
+/// length of one `enable`, `disable` or decision of the check. Waits for it
+/// 15 s at most; `None` then, or when there is no lock file to be had, and the
+/// change goes ahead as before (never stuck, as a panic's restore in the very
+/// thread that holds it would be).
+fn lock(paths: &Paths) -> Option<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let _ = std::fs::create_dir_all(paths.state_dir());
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(paths.state_dir().join("sysproxy.lock"))
+            .ok()?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            // SAFETY: a valid descriptor, kept open for as long as the lock is held.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                return Some(file);
+            }
+            if std::time::Instant::now() >= deadline {
+                log::warn!("the system proxy's lock is held too long: going ahead");
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = paths;
+        None
+    }
+}
+
+/// How long the login check waits for a Kairo core that is starting.
+const LOGIN_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// For the login check: puts the system proxy back when Kairo left it pointing
+/// at a port nothing answers any more (Kairo and its core gone, the computer
+/// restarted). A live core is left alone, and so is one that is starting: a
+/// Kairo opened at the same login sets the proxy once its core answers the
+/// controller, a moment before the proxy port does, so the check waits for it.
 pub fn restore_if_dead(paths: &Paths) -> bool {
-    let Some(saved) = load_saved(paths) else {
-        return false;
-    };
-    if saved.applied.is_some_and(answers) {
-        return false;
+    let deadline = std::time::Instant::now() + LOGIN_WAIT;
+    loop {
+        {
+            let _lock = lock(paths);
+            let Some(saved) = load_saved(paths) else {
+                return false;
+            };
+            if saved.applied.is_some_and(answers) {
+                return false;
+            }
+            if !crate::supervisor::core_alive(paths) || std::time::Instant::now() >= deadline {
+                log::warn!("the system proxy points at a Kairo that is gone: restoring it");
+                if let Err(e) = disable_locked(paths) {
+                    log::error!("could not restore the system proxy: {e}");
+                }
+                return true;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
-    log::warn!("the system proxy points at a Kairo that is gone: restoring it");
-    if let Err(e) = disable(paths) {
-        log::error!("could not restore the system proxy: {e}");
-    }
-    true
 }
 
 /// Whether the system proxy currently points at `spec`.
@@ -644,10 +702,11 @@ mod tests {
     /// any backend is consulted is what keeps this test from touching the machine.
     #[test]
     fn a_dead_local_proxy_is_not_put_back() {
-        let dead = {
-            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
-        };
+        // Bound but not listening: it refuses connections, and no other test
+        // can take the port meanwhile.
+        let dead_socket = tokio::net::TcpSocket::new_v4().unwrap();
+        dead_socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let dead = dead_socket.local_addr().unwrap().port();
         let live = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let live_port = live.local_addr().unwrap().port();
         let saved = Saved {
