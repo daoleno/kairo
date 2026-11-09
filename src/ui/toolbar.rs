@@ -201,8 +201,25 @@ pub fn dispatch(event: ToolEvent) {
     }
 }
 
+/// Above a scrolling page whose content runs under a floating toolbar
+/// (macOS): the space the toolbar takes at the top of that content, plus `gap`.
+pub fn scroll_top(gap: f32) -> impl Fn() -> Points + Copy + 'static {
+    let store = crate::store::store();
+    move || px(store.insets.get().top + gap)
+}
+
+/// The toolbar of a page that scrolls under it: as [`toolbar`], without the
+/// room above the page (its content leaves it, with [`scroll_top`]).
+pub fn floating(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<Spec>) -> View {
+    toolbar_with(page, subtitle, tools, false)
+}
+
 /// The page's toolbar: in the window's chrome, or drawn above the page.
 pub fn toolbar(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<Spec>) -> View {
+    toolbar_with(page, subtitle, tools, true)
+}
+
+fn toolbar_with(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<Spec>, room: bool) -> View {
     if chrome::native() {
         let specs = Rc::new(tools);
         HANDLERS.with(|h| {
@@ -241,7 +258,7 @@ pub fn toolbar(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<S
         });
         // Room for the window's toolbar where it floats over the content.
         let store = crate::store::store();
-        return view().flex_shrink_0().h(move || px(store.insets.get().top));
+        return view().flex_shrink_0().h(move || px(if room { store.insets.get().top } else { 0.0 }));
     }
     view()
         .h(px(HEADER_HEIGHT))

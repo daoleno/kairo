@@ -492,34 +492,6 @@ pub fn empty_state(glyph: Icon, heading: &'static str, detail: impl IntoReactive
         .child(action.map(|a| view().mt_2().child(a)))
 }
 
-/// A page's header: its title on the left, its actions on the right.
-pub fn page_header(heading: impl IntoReactive<SharedString>, actions: Vec<AnyElement>) -> View {
-    if crate::chrome::native() {
-        // The window's toolbar shows the title.
-        let empty = actions.is_empty();
-        return view()
-            .flex_shrink_0()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .px_5()
-            .style_when(move || !empty, |s| s.h(px(44.0)))
-            .children(actions);
-    }
-    view()
-        .h(px(HEADER_HEIGHT))
-        .flex_shrink_0()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .px_5()
-        .border_b_1()
-        .border_color(move || theme().border)
-        .window_drag(true)
-        .child(title(heading).text_size(px(size::large() + 2.0)).flex_1().number_of_lines(1))
-        .children(actions)
-}
-
 /// A pop-up button: the current choice and a chevron; a press opens the
 /// platform's menu of `options` (`(value, title)`), the current one checked.
 pub fn popup_button<T: Clone + PartialEq + 'static>(

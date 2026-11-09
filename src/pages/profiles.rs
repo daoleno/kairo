@@ -31,7 +31,7 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
     let updating_all = move || store.state.with(|s| !s.updating.is_empty());
     view()
         .flex_1()
-        .child(toolbar::toolbar(
+        .child(toolbar::floating(
             Page::Profiles,
             move || {
                 let n = store.state.with(|s| s.profiles.profiles.len());
@@ -55,7 +55,7 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
             scroll().flex_1().child(
                 view()
                     .px_6()
-                    .pt_5()
+                    .pt(toolbar::scroll_top(20.0))
                     .pb_6()
                     .gap_4()
                     .w_full()

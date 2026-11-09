@@ -16,7 +16,7 @@ pub fn page() -> impl IntoElement {
     let startable = move || store.state.with(|s| s.task.is_none() && !matches!(s.core, CoreStatus::Starting | CoreStatus::Stopping));
     view()
         .flex_1()
-        .child(toolbar::toolbar(Page::Overview, String::new, vec![
+        .child(toolbar::floating(Page::Overview, String::new, vec![
             toolbar::button("core.restart", "Restart Core", Glyph::Restart, Icon::Restart, move || store.run(store.svc().restart_core()))
                 .enabled(running),
             toolbar::button_dyn(
@@ -38,7 +38,7 @@ pub fn page() -> impl IntoElement {
             scroll().flex_1().child(
                 view()
                     .px_6()
-                    .pt_5()
+                    .pt(toolbar::scroll_top(20.0))
                     .pb_6()
                     .gap_5()
                     .w_full()

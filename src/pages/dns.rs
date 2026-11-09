@@ -5,7 +5,7 @@ use kairo_core::model::{DnsAnswer, dns_type_name};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use crate::store::store;
+use crate::store::{Page, store};
 use crate::ui::{self, Icon, Variant, size};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,12 +70,12 @@ pub fn page() -> impl IntoElement {
 
     view()
         .flex_1()
-        .child(ui::page_header("DNS", vec![]))
+        .child(ui::toolbar::floating(Page::Dns, String::new, vec![]))
         .child(
             scroll().flex_1().child(
                 view()
                     .px_6()
-                    .pt_5()
+                    .pt(ui::toolbar::scroll_top(20.0))
                     .pb_6()
                     .gap_4()
                     .w_full()

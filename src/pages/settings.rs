@@ -7,7 +7,7 @@ use kairo_core::{Settings, Theme, UpdateStatus};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use crate::store::store;
+use crate::store::{Page, store};
 use crate::ui::{self, Icon, Variant, size};
 
 /// The typed settings, as text while they are edited.
@@ -125,12 +125,12 @@ pub fn page() -> impl IntoElement {
 
     view()
         .flex_1()
-        .child(ui::page_header("Settings", vec![]))
+        .child(ui::toolbar::floating(Page::Settings, String::new, vec![]))
         .child(
             scroll().flex_1().child(
                 view()
                     .px_6()
-                    .pt_5()
+                    .pt(ui::toolbar::scroll_top(20.0))
                     .pb_6()
                     .gap_5()
                     .w_full()
