@@ -93,9 +93,20 @@ impl Service {
             return;
         };
         if ai.exit.is_none() && !ai.follow {
-            self.ai_pin_current();
+            if self.0.state.borrow().ai.adopted {
+                // The subscription's own AI group already goes somewhere
+                // (the person may have chosen it): that is the exit.
+                // Never move it for them.
+                self.ai_pin_adopted(&group);
+            } else {
+                self.ai_pin_current();
+            }
         }
         let ai = self.settings().ai;
+        if ai.exit.is_none() && !ai.follow {
+            // Adopted, and it sits on something that is not one node: leave it.
+            return;
+        }
         let want = {
             let p = self.0.proxies.borrow();
             ai::want(
@@ -122,6 +133,44 @@ impl Service {
             }
             self.refresh_proxies_now().await;
         }
+    }
+
+    /// Pins the node the adopted AI group is on now, when that is one of its
+    /// own nodes (not another group, not DIRECT).
+    fn ai_pin_adopted(&self, group: &str) {
+        let name = {
+            let p = self.0.proxies.borrow();
+            p.groups.iter().find(|g| g.name == group).and_then(|g| {
+                let now = g.now.clone()?;
+                g.members
+                    .iter()
+                    .find(|m| m.name == now && !m.is_group)
+                    .map(|m| m.name.clone())
+            })
+        };
+        let Some(name) = name else { return };
+        if places::is_note(&name) || places::is_builtin(&name) {
+            return;
+        }
+        let fingerprint = self
+            .0
+            .ai_cfg
+            .lock()
+            .expect("ai cfg")
+            .as_ref()
+            .and_then(|c| ai::fingerprint(c, &name));
+        let Some(fingerprint) = fingerprint else {
+            return;
+        };
+        self.modify(|s| {
+            s.settings.ai.exit = Some(AiExit {
+                name,
+                fingerprint,
+                since: unix(),
+            });
+            s.settings.ai.follow = false;
+        });
+        self.save_settings();
     }
 
     /// Pins the node the Location is on now, if it is a real place.

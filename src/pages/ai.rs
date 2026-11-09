@@ -170,7 +170,12 @@ pub fn summary(tiles: &[Tile], checking: bool) -> String {
             "Not checked yet".into()
         };
     }
-    format!("{ok} of {} look right", tiles.len())
+    // What was measured, not a verdict: they answered.
+    if ok == tiles.len() {
+        format!("All {ok} reachable")
+    } else {
+        format!("{ok} of {} reachable", tiles.len())
+    }
 }
 
 /// How long ago, for the line under a check.
@@ -478,7 +483,7 @@ pub fn mono(s: &'static str) -> impl IntoElement {
         .rounded_full()
         .items_center()
         .justify_center()
-        .bg(move || ui::subtle())
+        .bg(ui::subtle)
         .child(
             text(s)
                 .text_size(px(size::small()))
@@ -539,7 +544,7 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
         let Some(service) = id.and_then(|id| ai::SERVICES.iter().find(|s| s.id == id)) else {
             return view().into_element();
         };
-        let (check, hold, checking, tile) = store.state.with(|s| {
+        let (check, hold, checking) = store.state.with(|s| {
             (
                 s.ai.checks
                     .iter()
@@ -550,11 +555,6 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
                     .find(|(k, _)| k == service.id)
                     .map(|(_, h)| h.clone()),
                 s.ai.checking,
-                store
-                    .activity
-                    .with(|a| tiles(s, &a.0))
-                    .into_iter()
-                    .find(|t| t.id == service.id),
             )
         });
         untracked(move || {
@@ -578,7 +578,10 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
                 .copied()
                 .collect::<Vec<_>>()
                 .join(" · ");
-            let tile = tile.unwrap();
+            let flag_text = check
+                .as_ref()
+                .and_then(|c| c.country.code().map(flag))
+                .unwrap_or_else(|| "◎".into());
             ui::card()
                 .p_4()
                 .gap_3()
@@ -595,7 +598,7 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
                                 .child(ui::body(service.name).font_weight(FontWeight::SEMIBOLD))
                                 .child(ui::muted(hosts).text_size(px(size::small()))),
                         )
-                        .child(text(tile.flag).text_size(px(26.0)))
+                        .child(text(flag_text).text_size(px(26.0)))
                         .child(ui::icon_btn(Icon::Close, "Close").on_press(move || selected.set(None))),
                 )
                 .children(rows)
@@ -678,14 +681,162 @@ fn check_row(ok: Option<bool>, title: &'static str, value: String) -> AnyElement
         .gap_3()
         .child(match ok {
             Some(true) => icon(Icon::Check, 15.0)
-                .text_color(move || ui::success())
+                .text_color(ui::success)
                 .into_element(),
-            Some(false) => ui::dot(move || ui::warning()).into_element(),
+            Some(false) => ui::dot(ui::warning).into_element(),
             None => ui::dot(move || theme().muted_foreground.opacity(0.5)).into_element(),
         })
         .child(ui::body(title).w(px(170.0)).flex_shrink_0())
         .child(ui::muted(value).flex_1().min_w(px(0.0)))
         .into_element()
+}
+
+// --- The AI exit -------------------------------------------------------------------
+
+/// The row on Home: where AI tools go out, apart from the Location.
+pub fn exit_row() -> impl IntoElement {
+    let store = store();
+    let open = signal(false);
+    let place = computed(exit_place);
+    let pinned = move || store.state.with(|s| s.settings.ai.exit.is_some());
+    let value = move || -> SharedString {
+        match place.get() {
+            Some(p) => format!("{} · {}", p.title, ui::delay_text(p.delay)).into(),
+            None => "—".into(),
+        }
+    };
+    popover()
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &nsh_base::PopoverEvent| {
+            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
+        .placement(Placement::Bottom)
+        .align(Align::End)
+        .offset(px(6.0))
+        .popup_class("transition-opacity duration-150")
+        .popup_starting_class(Some(SharedString::from("opacity-0")))
+        .trigger(
+            ui::row_view()
+                .cursor_pointer()
+                .child(
+                    text(move || {
+                        place
+                            .get()
+                            .and_then(|p| p.flag)
+                            .unwrap_or_else(|| "◎".into())
+                    })
+                    .text_size(px(size::large() + 2.0)),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap_0p5()
+                        .child(ui::body("AI exit"))
+                        .child(ui::muted(move || -> SharedString {
+                            if pinned() {
+                                "Stays here when the Location changes".into()
+                            } else {
+                                "Follows your Location".into()
+                            }
+                        })),
+                )
+                .child(ui::muted(value).tabular_nums().number_of_lines(1))
+                .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground)),
+        )
+        .child(exit_picker(move || open.set(false)))
+}
+
+fn exit_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
+    let store = store();
+    let query = signal(String::new());
+    let preferred = move || store.state.with(|s| s.settings.tray_group.clone());
+    let pinned = move || store.state.with(|s| s.settings.ai.exit.clone());
+    let list = move || {
+        let q = query.get().to_lowercase();
+        store.proxies.with(|p| {
+            let Some(g) = places::main_group(&p.0.groups, &preferred()) else {
+                return vec![];
+            };
+            let all: Vec<places::Place> = places::places(&p.0.groups, g)
+                .into_iter()
+                .filter(|p| {
+                    q.is_empty()
+                        || p.name.to_lowercase().contains(&q)
+                        || p.region.to_lowercase().contains(&q)
+                })
+                .collect();
+            places::by_region(&all)
+        })
+    };
+    view()
+        .w(px(360.0))
+        .max_h(move || px((nsh_core::element::window().height.0 - 340.0).clamp(220.0, 520.0)))
+        .rounded(px(22.0))
+        .bg(move || theme().popover)
+        .shadow_xl()
+        .border_1()
+        .border_color(move || theme().border.opacity(0.6))
+        .overflow_hidden()
+        .child(
+            view()
+                .p_3()
+                .child(ui::search_field(query, "Search locations")),
+        )
+        .child(
+            scroll().flex_shrink(1.0).child(
+                view()
+                    .px_2()
+                    .pb_2()
+                    .child(
+                        nsh_base::button()
+                            .on_press(move || {
+                                close();
+                                store.run(store.svc().ai_follow_location());
+                            })
+                            .flex_row()
+                            .items_center()
+                            .gap_3()
+                            .h(px(40.0))
+                            .px_3()
+                            .rounded(px(12.0))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(move || theme().accent))
+                            .style_when(move || pinned().is_none(), |s| s.bg(ui::selection))
+                            .child(icon(Icon::Globe, 15.0).text_color(move || theme().primary))
+                            .child(
+                                ui::body("Follow my Location")
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .flex_1(),
+                            ),
+                    )
+                    .child(dynamic(move || {
+                        let regions = list();
+                        let pinned = pinned();
+                        untracked(move || {
+                            view().children(regions.into_iter().map(move |(region, places)| {
+                                let pinned = pinned.clone();
+                                view()
+                                    .child(ui::section_label(region).px_3().pt_3().pb_1())
+                                    .children(places.into_iter().map(move |p| {
+                                        let chosen =
+                                            pinned.as_ref().is_some_and(|e| e.name == p.name);
+                                        let name = p.name.clone();
+                                        let delay = ui::delay_text(p.delay).to_string();
+                                        crate::pages::home::place_line(p, chosen, delay).on_press(
+                                            move || {
+                                                close();
+                                                store.run(store.svc().set_ai_exit(name.clone()));
+                                            },
+                                        )
+                                    }))
+                            }))
+                        })
+                    })),
+            ),
+        )
 }
 
 #[cfg(test)]
@@ -730,15 +881,12 @@ mod tests {
     }
 
     #[test]
-    fn all_the_same_country_reads_as_right_and_says_what_it_saw() {
+    fn all_the_same_country_says_what_it_saw_and_no_more() {
         let t = tiles(&state_with(all("JP")), &Tally::default());
         assert!(t.iter().all(|t| t.tone == Tone::Ok));
         assert_eq!(t[0].line1, "Sees Japan");
         assert_eq!(t[0].flag, "🇯🇵");
-        assert_eq!(
-            summary(&t, false),
-            format!("{0} of {0} look right", t.len())
-        );
+        assert_eq!(summary(&t, false), format!("All {} reachable", t.len()));
     }
 
     #[test]
@@ -869,155 +1017,4 @@ mod tests {
         assert_eq!(hold_line(None, true).1, "Testing for 90 s…");
         assert_eq!(hold_line(None, false).1, "Not tested yet");
     }
-}
-
-// --- The AI exit -------------------------------------------------------------------
-
-/// The row on Home: where AI tools go out, apart from the Location.
-pub fn exit_row() -> impl IntoElement {
-    let store = store();
-    let open = signal(false);
-    let place = computed(exit_place);
-    let pinned = move || store.state.with(|s| s.settings.ai.exit.is_some());
-    let value = move || -> SharedString {
-        match place.get() {
-            Some(p) => format!("{} · {}", p.title, ui::delay_text(p.delay)).into(),
-            None => "—".into(),
-        }
-    };
-    popover()
-        .open(move || Some(open.get()))
-        .on_open_change(move |e: &nsh_base::PopoverEvent| {
-            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
-                open.set(*next);
-            }
-        })
-        .placement(Placement::Bottom)
-        .align(Align::End)
-        .offset(px(6.0))
-        .popup_class("transition-opacity duration-150")
-        .popup_starting_class(Some(SharedString::from("opacity-0")))
-        .trigger(
-            ui::row_view()
-                .cursor_pointer()
-                .child(
-                    text(move || {
-                        place
-                            .get()
-                            .and_then(|p| p.flag)
-                            .unwrap_or_else(|| "◎".into())
-                    })
-                    .text_size(px(size::large() + 2.0)),
-                )
-                .child(
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .gap_0p5()
-                        .child(ui::body("AI exit"))
-                        .child(ui::muted(move || -> SharedString {
-                            if pinned() {
-                                "Stays here when the Location changes".into()
-                            } else {
-                                "Follows your Location".into()
-                            }
-                        })),
-                )
-                .child(ui::muted(value).tabular_nums().number_of_lines(1))
-                .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground)),
-        )
-        .child(exit_picker(move || open.set(false)))
-}
-
-fn exit_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
-    let store = store();
-    let query = signal(String::new());
-    let preferred = move || store.state.with(|s| s.settings.tray_group.clone());
-    let pinned = move || store.state.with(|s| s.settings.ai.exit.clone());
-    let list = move || {
-        let q = query.get().to_lowercase();
-        store.proxies.with(|p| {
-            let Some(g) = places::main_group(&p.0.groups, &preferred()) else {
-                return vec![];
-            };
-            let all: Vec<places::Place> = places::places(&p.0.groups, g)
-                .into_iter()
-                .filter(|p| {
-                    q.is_empty()
-                        || p.name.to_lowercase().contains(&q)
-                        || p.region.to_lowercase().contains(&q)
-                })
-                .collect();
-            places::by_region(&all)
-        })
-    };
-    view()
-        .w(px(360.0))
-        .max_h(move || px((nsh_core::element::window().height.0 - 340.0).clamp(220.0, 520.0)))
-        .rounded(px(22.0))
-        .bg(move || theme().popover)
-        .shadow_xl()
-        .border_1()
-        .border_color(move || theme().border.opacity(0.6))
-        .overflow_hidden()
-        .child(
-            view()
-                .p_3()
-                .child(ui::search_field(query, "Search locations")),
-        )
-        .child(
-            scroll().flex_shrink(1.0).child(
-                view()
-                    .px_2()
-                    .pb_2()
-                    .child(
-                        nsh_base::button()
-                            .on_press(move || {
-                                close();
-                                store.run(store.svc().ai_follow_location());
-                            })
-                            .flex_row()
-                            .items_center()
-                            .gap_3()
-                            .h(px(40.0))
-                            .px_3()
-                            .rounded(px(12.0))
-                            .cursor_pointer()
-                            .hover(|s| s.bg(move || theme().accent))
-                            .style_when(
-                                move || pinned().is_none(),
-                                |s| s.bg(move || ui::selection()),
-                            )
-                            .child(icon(Icon::Globe, 15.0).text_color(move || theme().primary))
-                            .child(
-                                ui::body("Follow my Location")
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .flex_1(),
-                            ),
-                    )
-                    .child(dynamic(move || {
-                        let regions = list();
-                        let pinned = pinned();
-                        untracked(move || {
-                            view().children(regions.into_iter().map(move |(region, places)| {
-                                let pinned = pinned.clone();
-                                view()
-                                    .child(ui::section_label(region).px_3().pt_3().pb_1())
-                                    .children(places.into_iter().map(move |p| {
-                                        let chosen =
-                                            pinned.as_ref().is_some_and(|e| e.name == p.name);
-                                        let name = p.name.clone();
-                                        let delay = ui::delay_text(p.delay).to_string();
-                                        crate::pages::home::place_line(p, chosen, delay).on_press(
-                                            move || {
-                                                close();
-                                                store.run(store.svc().set_ai_exit(name.clone()));
-                                            },
-                                        )
-                                    }))
-                            }))
-                        })
-                    })),
-            ),
-        )
 }

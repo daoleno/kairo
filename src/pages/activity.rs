@@ -197,6 +197,7 @@ fn weight(bytes: u64, max: u64) -> f32 {
 pub fn page() -> impl IntoElement {
     let store = store();
     let graph = computed(move || store.activity.with(|a| graph(&a.0)));
+    let empty = computed(move || graph.with(|g| g.edges.is_empty()));
     view()
         .flex_1()
         .child(toolbar::floating(
@@ -205,8 +206,9 @@ pub fn page() -> impl IntoElement {
             vec![],
         ))
         .child(dynamic(move || {
-            let empty = graph.with(|g| g.edges.is_empty());
-            if empty {
+            // Only a change between "nothing" and "something" remounts the
+            // page; the numbers moving do not (the scroll position stays).
+            if empty.get() {
                 untracked(nothing).into_element()
             } else {
                 untracked(move || flow(graph)).into_element()
@@ -251,7 +253,10 @@ fn flow(graph: Memo<Graph>) -> impl IntoElement {
                     )
                     .child(ui::link_btn("Clear").on_press(move || store.svc().clear_activity())),
             )
-            .child(figure(graph, width))
+            .child(dynamic(move || {
+                let g = graph.get();
+                untracked(move || figure(g, width).into_element())
+            }))
             .child(
                 view()
                     .flex_row()
@@ -314,8 +319,7 @@ enum Align {
     End,
 }
 
-fn figure(graph: Memo<Graph>, width: Signal<f32>) -> impl IntoElement {
-    let g = graph.get();
+fn figure(g: Graph, width: Signal<f32>) -> impl IntoElement {
     let rows = g.rows().max(1);
     let height = rows as f32 * ROW;
     let (via, direct) = g.hubs();

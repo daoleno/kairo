@@ -729,6 +729,94 @@ async fn tun_in_a_network_namespace() {
     svc.stop_core().await;
 }
 
+/// Upgrading from a Kairo without the AI layer: a subscription with its own
+/// AI group, set by the person to another node than the Location, keeps going
+/// where it was. The layer takes it over as the pinned exit; it never moves it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_upgrade_keeps_the_subscriptions_own_ai_group_where_it_was() {
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe {
+        std::env::set_var("KAIRO_NO_SYSPROXY", "1");
+        std::env::set_var("KAIRO_NO_UPDATE", "1");
+    }
+    let home = tempfile::tempdir().unwrap();
+    let target = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target");
+    let core = core_binary(&target);
+    let origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_addr: SocketAddr = origin_listener.local_addr().unwrap();
+    let (pa, pb) = (
+        TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        TcpListener::bind("127.0.0.1:0").await.unwrap(),
+    );
+    let (pa_port, pb_port) = (
+        pa.local_addr().unwrap().port(),
+        pb.local_addr().unwrap().port(),
+    );
+    tokio::spawn(connect_proxy(pa, Arc::new(AtomicUsize::new(0))));
+    tokio::spawn(connect_proxy(pb, Arc::new(AtomicUsize::new(0))));
+    // The Location (Proxy) starts on node-a; the AI group, listing node-b
+    // first, starts on node-b: the person's own choice.
+    let subscription = format!(
+        r#"
+proxies:
+  - {{name: node-a, type: http, server: 127.0.0.1, port: {pa_port}}}
+  - {{name: node-b, type: http, server: 127.0.0.1, port: {pb_port}}}
+proxy-groups:
+  - {{name: Proxy, type: select, proxies: [node-a, node-b, DIRECT]}}
+  - {{name: AI, type: select, proxies: [node-b, node-a, Proxy]}}
+rules:
+  - DOMAIN-SUFFIX,openai.com,AI
+  - MATCH,Proxy
+"#
+    );
+    tokio::spawn(origin(origin_listener, Arc::new(subscription)));
+    let mut paths = Paths::new(home.path());
+    paths.bundled_core = Some(core);
+    paths.ensure().unwrap();
+    let _core = CoreGuard(paths.core_pid());
+    // The settings file of a Kairo that knew nothing of AI: no `ai` key.
+    let mut settings = Settings::default();
+    settings.mixed_port = free_port();
+    settings.controller_port = free_port();
+    settings.secret = "e2e-secret".into();
+    settings.test_url = format!("http://{origin_addr}/generate_204");
+    settings.auto_location = false;
+    settings.test_timeout_ms = 3000;
+    settings.save(&paths).unwrap();
+    let text = std::fs::read_to_string(paths.settings()).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    json.as_object_mut().unwrap().remove("ai");
+    std::fs::write(paths.settings(), serde_json::to_string(&json).unwrap()).unwrap();
+
+    let svc = Service::start(paths.clone());
+    let state = svc.state();
+    wait_for("the core", Duration::from_secs(20), || {
+        state.borrow().core.is_running().then_some(())
+    })
+    .await;
+    assert!(
+        state.borrow().settings.ai.enabled,
+        "the layer is on by default"
+    );
+    svc.add_remote(format!("http://{origin_addr}/sub"), None)
+        .await
+        .expect("add the subscription");
+    let pinned = wait_for("an exit pinned", Duration::from_secs(30), || {
+        state.borrow().settings.ai.exit.clone()
+    })
+    .await;
+    assert_eq!(
+        pinned.name, "node-b",
+        "the AI group's own choice is the exit"
+    );
+    assert_eq!(state.borrow().ai.group, "AI");
+    assert!(state.borrow().ai.adopted);
+    // Let the sync and the location checks settle; AI must still be on node-b.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert_eq!(svc.ai_node().as_deref(), Some("node-b"));
+    svc.stop_core().await;
+}
+
 /// The AI layer against a real core: AI hosts go to their own group on one
 /// pinned exit, a change of location or of exit never cuts an open stream,
 /// loopback stays direct, and "All Traffic" keeps AI where it is.

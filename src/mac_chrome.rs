@@ -168,7 +168,7 @@ impl Sidebar {
             Some(row) => table
                 .selectRowIndexes_byExtendingSelection(&NSIndexSet::indexSetWithIndex(row), false),
             // A page the sidebar does not list (DNS, from the palette).
-            None => table.deselectAll(None),
+            None => unsafe { table.deselectAll(None) },
         }
         self.ivars().quiet.set(false);
     }
