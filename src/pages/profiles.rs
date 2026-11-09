@@ -8,7 +8,9 @@ use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
 
 use crate::pages::overview::expiry_text;
-use crate::store::store;
+use crate::chrome::Glyph;
+use crate::store::{Page, store};
+use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, icon, size};
 
 pub fn page() -> impl IntoElement {
@@ -29,17 +31,24 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
     let updating_all = move || store.state.with(|s| !s.updating.is_empty());
     view()
         .flex_1()
-        .child(ui::page_header(
-            "Profiles",
+        .child(toolbar::toolbar(
+            Page::Profiles,
+            move || {
+                let n = store.state.with(|s| s.profiles.profiles.len());
+                match n {
+                    0 => String::new(),
+                    1 => "1 profile".to_owned(),
+                    n => format!("{n} profiles"),
+                }
+            },
             vec![
-                ui::btn_icon(Icon::Refresh, "Update All", Variant::Secondary)
-                    .disabled(move || !any_remote() || updating_all())
-                    .on_press(move || store.run(store.svc().update_all_profiles()))
-                    .into_element(),
-                ui::btn_icon(Icon::Plus, "Add Profile", Variant::Primary)
-                    .disabled(move || adding.get())
-                    .on_press(move || adding.set(true))
-                    .into_element(),
+                toolbar::button("profiles.update-all", "Update All", Glyph::Refresh, Icon::Refresh, move || {
+                    store.run(store.svc().update_all_profiles())
+                })
+                .enabled(move || any_remote() && !updating_all()),
+                toolbar::button("profiles.add", "Add Profile", Glyph::Add, Icon::Plus, move || adding.set(true))
+                    .enabled(move || !adding.get())
+                    .prominent(),
             ],
         ))
         .child(

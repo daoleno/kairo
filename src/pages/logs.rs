@@ -7,8 +7,10 @@ use kairo_core::model::LogEntry;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use crate::store::store;
-use crate::ui::{self, Icon, Variant, size};
+use crate::chrome::Glyph;
+use crate::store::{Page, store};
+use crate::ui::toolbar;
+use crate::ui::{self, Icon, size};
 
 fn rank(level: &str) -> u8 {
     match level {
@@ -47,35 +49,44 @@ pub fn page() -> impl IntoElement {
 
     view()
         .flex_1()
-        .child(ui::page_header(
-            "Logs",
+        .child(toolbar::toolbar(
+            Page::Logs,
+            move || {
+                let n = rows.with(|r| r.len());
+                let lines = if n == 1 { "1 line".to_owned() } else { format!("{n} lines") };
+                if paused.with(Option::is_some) { format!("{lines} · paused") } else { lines }
+            },
             vec![
-                ui::search_field(query, "Search the log").w(px(220.0)).into_element(),
-                ui::segmented(
-                    vec![(LogLevel::Debug, "Debug"), (LogLevel::Info, "Info"), (LogLevel::Warning, "Warning"), (LogLevel::Error, "Error")],
-                    move || level.get(),
-                    set_level,
-                )
-                .into_element(),
-                ui::btn_icon_dyn(
-                    move || if paused.with(Option::is_some) { Icon::Play } else { Icon::Pause },
-                    move || -> SharedString { if paused.with(Option::is_some) { "Resume".into() } else { "Pause".into() } },
-                    Variant::Secondary,
-                )
-                .on_press(move || {
-                    if paused.with_untracked(Option::is_some) {
-                        paused.set(None);
-                    } else {
-                        paused.set(Some(live.get_untracked()));
-                    }
-                })
-                .into_element(),
-                ui::icon_btn(Icon::Trash, "Clear")
-                    .on_press(move || {
-                        store.svc().clear_logs();
-                        paused.set(None);
-                    })
-                    .into_element(),
+                toolbar::search("logs.search", "Search the log", query),
+                toolbar::choice(
+                    "logs.level",
+                    "Level",
+                    Glyph::Filter,
+                    vec!["Debug", "Info", "Warning", "Error"],
+                    move || match level.get() {
+                        LogLevel::Debug => 0,
+                        LogLevel::Info => 1,
+                        LogLevel::Warning => 2,
+                        _ => 3,
+                    },
+                    move |i| set_level([LogLevel::Debug, LogLevel::Info, LogLevel::Warning, LogLevel::Error][i.min(3)]),
+                ),
+                toolbar::button_dyn(
+                    "logs.pause",
+                    move || if paused.with(Option::is_some) { "Resume" } else { "Pause" },
+                    move || if paused.with(Option::is_some) { (Glyph::Resume, Icon::Play) } else { (Glyph::Pause, Icon::Pause) },
+                    move || {
+                        if paused.with_untracked(Option::is_some) {
+                            paused.set(None);
+                        } else {
+                            paused.set(Some(live.get_untracked()));
+                        }
+                    },
+                ),
+                toolbar::button("logs.clear", "Clear", Glyph::Clear, Icon::Trash, move || {
+                    store.svc().clear_logs();
+                    paused.set(None);
+                }),
             ],
         ))
         .child(
@@ -145,18 +156,5 @@ pub fn page() -> impl IntoElement {
                     None,
                 )
             }),
-        )
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .h(px(28.0))
-                .px_5()
-                .border_t_1()
-                .border_color(move || theme().border)
-                .child(ui::muted(move || -> SharedString {
-                    let n = rows.with(|r| r.len());
-                    if paused.with(Option::is_some) { format!("{n} lines · paused").into() } else { format!("{n} lines").into() }
-                })),
         )
 }

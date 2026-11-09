@@ -8,7 +8,8 @@
 
 use std::rc::Rc;
 
-use kairo_core::{CoreStatus, Service, Theme};
+use kairo_core::{CoreStatus, Live, Service, State, Theme};
+use nsh_app_kairo::chrome::{Tool, ToolEvent};
 use libadwaita as adw;
 use nsh_app_kairo::chrome;
 use nsh_app_kairo::store::Page;
@@ -78,6 +79,8 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let side_view = adw::ToolbarView::new();
     side_view.add_top_bar(&side_bar);
     side_view.set_content(Some(&side_scroll));
+    let footer = Footer::new();
+    side_view.add_bottom_bar(&footer.root);
     let sidebar = adw::NavigationPage::builder().title("Kairo").tag("sidebar").child(&side_view).build();
 
     let title = adw::WindowTitle::new("Overview", "");
@@ -97,7 +100,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
 
     // The NSH content in the GTK theme's colors, again when they change.
     let style = adw::StyleManager::default();
-    let sync = {
+    let apply = {
         let view = view.clone();
         let probe = list.clone();
         move || {
@@ -106,7 +109,12 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
             }
         }
     };
-    sync();
+    apply();
+    // Read once libadwaita has swapped its stylesheet (after the notify).
+    let sync = move || {
+        let apply = apply.clone();
+        glib::idle_add_local_once(move || apply());
+    };
     {
         let sync = sync.clone();
         style.connect_dark_notify(move |_| sync());
@@ -143,23 +151,31 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         }
     });
 
-    // The core's state: the subtitle, the counts, the color scheme.
+    // The page's tools, at the end of the content's header bar.
+    let tools = Rc::new(std::cell::RefCell::new(HeaderTools::default()));
+    let actions = gio::SimpleActionGroup::new();
+    window.insert_action_group("tool", Some(&actions));
+    let mut toolbar = chrome::bridge().toolbar.subscribe();
+    let title_tools = title.clone();
+    glib::spawn_future_local(async move {
+        loop {
+            let t = toolbar.borrow_and_update().clone();
+            tools.borrow_mut().show(&content_bar, &actions, &t.tools);
+            title_tools.set_subtitle(&t.subtitle);
+            if toolbar.changed().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // The core's state: the sidebar's footer, the counts, the color scheme.
     let mut state = svc.state();
     let mut live = svc.live();
     glib::spawn_future_local(async move {
         loop {
             let s = state.borrow_and_update().clone();
             let l = live.borrow_and_update().clone();
-            title.set_subtitle(&match &s.core {
-                CoreStatus::Running { .. } => format!(
-                    "{} · {} · ↓ {}  ↑ {}",
-                    s.core.title(),
-                    s.settings.mode.title(),
-                    kairo_core::speed(l.down),
-                    kairo_core::speed(l.up)
-                ),
-                other => other.title().to_owned(),
-            });
+            footer.update(&s, &l);
             let n = |v: usize| if v > 0 { v.to_string() } else { String::new() };
             counts[2].set_label(&n(s.profiles.profiles.len()));
             counts[3].set_label(&n(l.connections));
@@ -251,4 +267,172 @@ fn theme_json(probe: &impl IsA<gtk::Widget>) -> String {
         view = hex(view),
     );
     format!(r#"{{"cssVars": {{"theme": {{"radius": "12px", "radius-control": "6px"}}, "light": {{{tokens}}}, "dark": {{{tokens}}}}}}}"#)
+}
+
+/// The sidebar's foot: the core's state, the mode and the speeds.
+struct Footer {
+    root: gtk::Box,
+    dot: gtk::Label,
+    status: gtk::Label,
+    mode: gtk::Label,
+    up: gtk::Label,
+    down: gtk::Label,
+}
+
+impl Footer {
+    fn new() -> Footer {
+        let label = |classes: &[&str]| gtk::Label::builder().xalign(0.0).css_classes(classes.to_vec()).build();
+        let dot = gtk::Label::new(Some("●"));
+        let status = label(&["caption-heading"]);
+        status.set_hexpand(true);
+        let mode = label(&["caption", "dim-label"]);
+        let up = label(&["caption", "numeric", "dim-label"]);
+        up.set_hexpand(true);
+        let down = label(&["caption", "numeric", "dim-label"]);
+        down.set_hexpand(true);
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        top.append(&dot);
+        top.append(&status);
+        top.append(&mode);
+        let speeds = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        speeds.append(&up);
+        speeds.append(&down);
+        let root = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .margin_start(18)
+            .margin_end(18)
+            .margin_top(10)
+            .margin_bottom(12)
+            .build();
+        root.append(&top);
+        root.append(&speeds);
+        Footer { root, dot, status, mode, up, down }
+    }
+
+    fn update(&self, s: &State, l: &Live) {
+        self.status.set_label(s.core.title());
+        self.mode.set_label(s.settings.mode.title());
+        let tone = match &s.core {
+            CoreStatus::Running { .. } => "success",
+            CoreStatus::Starting | CoreStatus::Stopping => "warning",
+            CoreStatus::Failed { .. } => "error",
+            _ => "dim-label",
+        };
+        self.dot.set_css_classes(&[tone]);
+        let running = s.core.is_running();
+        self.up.set_visible(running);
+        self.down.set_visible(running);
+        self.up.set_label(&format!("↑ {}", kairo_core::speed(l.up)));
+        self.down.set_label(&format!("↓ {}", kairo_core::speed(l.down)));
+        self.root.update_property(&[gtk::accessible::Property::Label(&format!("{} · {}", s.core.title(), s.settings.mode.title()))]);
+    }
+}
+
+/// The widgets of the page's tools in the header bar.
+#[derive(Default)]
+struct HeaderTools {
+    shape: Vec<(&'static str, u8)>,
+    widgets: Vec<gtk::Widget>,
+}
+
+impl HeaderTools {
+    fn show(&mut self, bar: &adw::HeaderBar, actions: &gio::SimpleActionGroup, tools: &[Tool]) {
+        let shape: Vec<(&'static str, u8)> = tools
+            .iter()
+            .map(|t| {
+                (t.id(), match t {
+                    Tool::Search { .. } => 0,
+                    Tool::Button { .. } => 1,
+                    Tool::Choice { .. } => 2,
+                })
+            })
+            .collect();
+        if shape != self.shape {
+            for w in self.widgets.drain(..) {
+                bar.remove(&w);
+            }
+            for name in actions.list_actions() {
+                actions.remove_action(&name);
+            }
+            // pack_end puts each one left of the last: the last tool first.
+            for tool in tools.iter().rev() {
+                let w = make_tool(actions, tool);
+                bar.pack_end(&w);
+                self.widgets.push(w);
+            }
+            self.widgets.reverse();
+            self.shape = shape;
+        }
+        for (tool, w) in tools.iter().zip(&self.widgets) {
+            update_tool(actions, tool, w);
+        }
+    }
+}
+
+fn make_tool(actions: &gio::SimpleActionGroup, tool: &Tool) -> gtk::Widget {
+    match tool {
+        Tool::Search { id, placeholder, .. } => {
+            let entry = gtk::SearchEntry::builder().placeholder_text(*placeholder).width_chars(22).build();
+            entry.update_property(&[gtk::accessible::Property::Label(placeholder)]);
+            let id = *id;
+            entry.connect_search_changed(move |e| chrome::tool_event(ToolEvent::Search(id, e.text().to_string())));
+            entry.upcast()
+        }
+        Tool::Button { id, glyph, .. } => {
+            let b = gtk::Button::builder().child(&gtk::Image::from_gicon(&gio::ThemedIcon::from_names(glyph.icon()))).build();
+            let id = *id;
+            b.connect_clicked(move |_| chrome::tool_event(ToolEvent::Pressed(id)));
+            b.upcast()
+        }
+        Tool::Choice { id, label, glyph, options, .. } => {
+            let action = gio::SimpleAction::new_stateful(id, Some(glib::VariantTy::INT32), &0i32.to_variant());
+            let tid = *id;
+            action.connect_activate(move |a, v| {
+                if let Some(i) = v.and_then(|v| v.get::<i32>()) {
+                    a.set_state(&i.to_variant());
+                    chrome::tool_event(ToolEvent::Chose(tid, i as usize));
+                }
+            });
+            actions.add_action(&action);
+            let menu = gio::Menu::new();
+            for (i, o) in options.iter().enumerate() {
+                let item = gio::MenuItem::new(Some(o), None);
+                item.set_action_and_target_value(Some(&format!("tool.{id}")), Some(&(i as i32).to_variant()));
+                menu.append_item(&item);
+            }
+            let b = gtk::MenuButton::builder()
+                .menu_model(&menu)
+                .tooltip_text(*label)
+                .child(&gtk::Image::from_gicon(&gio::ThemedIcon::from_names(glyph.icon())))
+                .build();
+            b.update_property(&[gtk::accessible::Property::Label(label)]);
+            b.upcast()
+        }
+    }
+}
+
+fn update_tool(actions: &gio::SimpleActionGroup, tool: &Tool, w: &gtk::Widget) {
+    match tool {
+        Tool::Search { value, .. } => {
+            if let Some(e) = w.downcast_ref::<gtk::SearchEntry>()
+                && e.text() != value.as_str()
+            {
+                e.set_text(value);
+            }
+        }
+        Tool::Button { label, glyph, enabled, .. } => {
+            if let Some(b) = w.downcast_ref::<gtk::Button>() {
+                b.set_sensitive(*enabled);
+                b.set_tooltip_text(Some(label));
+                b.update_property(&[gtk::accessible::Property::Label(label)]);
+                b.set_child(Some(&gtk::Image::from_gicon(&gio::ThemedIcon::from_names(glyph.icon()))));
+            }
+        }
+        Tool::Choice { id, selected, .. } => {
+            if let Some(a) = actions.lookup_action(id).and_then(|a| a.downcast::<gio::SimpleAction>().ok()) {
+                a.set_state(&(*selected as i32).to_variant());
+            }
+        }
+    }
 }

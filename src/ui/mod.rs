@@ -2,6 +2,7 @@
 //! the controls every page composes. Pages never restyle base components.
 
 pub mod icons;
+pub mod toolbar;
 
 use nsh_base::{button, input, switch, theme, ButtonElement as Button, Input};
 

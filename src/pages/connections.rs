@@ -7,7 +7,9 @@ use kairo_core::model::Connection;
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
-use crate::store::{Snap, store};
+use crate::chrome::Glyph;
+use crate::store::{Page, Snap, store};
+use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, icon, size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,33 +55,32 @@ pub fn page() -> impl IntoElement {
 
     view()
         .flex_1()
-        .child(ui::page_header(
-            move || -> SharedString {
+        .child(toolbar::toolbar(
+            Page::Connections,
+            move || {
                 let (shown, all) = (count(), total());
-                if shown == all { format!("Connections  {all}").into() } else { format!("Connections  {shown} of {all}").into() }
+                let paused = if paused.with(Option::is_some) { " · paused" } else { "" };
+                if shown == all { format!("{all} open{paused}") } else { format!("{shown} of {all}{paused}") }
             },
             vec![
-                ui::search_field(query, "Host, process, rule or node").w(px(240.0)).into_element(),
-                ui::btn_icon_dyn(
-                    move || if paused.with(Option::is_some) { Icon::Play } else { Icon::Pause },
-                    move || -> SharedString { if paused.with(Option::is_some) { "Resume".into() } else { "Pause".into() } },
-                    Variant::Secondary,
-                )
-                .on_press(move || {
-                    if paused.with_untracked(Option::is_some) {
-                        paused.set(None);
-                    } else {
-                        paused.set(Some(store.connections.get_untracked()));
-                    }
+                toolbar::search("connections.search", "Host, process, rule or node", query),
+                toolbar::button_dyn(
+                    "connections.pause",
+                    move || if paused.with(Option::is_some) { "Resume" } else { "Pause" },
+                    move || if paused.with(Option::is_some) { (Glyph::Resume, Icon::Play) } else { (Glyph::Pause, Icon::Pause) },
+                    move || {
+                        if paused.with_untracked(Option::is_some) {
+                            paused.set(None);
+                        } else {
+                            paused.set(Some(store.connections.get_untracked()));
+                        }
+                    },
+                ),
+                toolbar::button("connections.close-all", "Close All", Glyph::CloseAll, Icon::Close, move || {
+                    let svc = store.svc();
+                    store.run_then(svc.close_all_connections(), move |_| paused.set(None));
                 })
-                .into_element(),
-                ui::btn_icon(Icon::Close, "Close All", Variant::Destructive)
-                    .disabled(move || total() == 0)
-                    .on_press(move || {
-                        let svc = store.svc();
-                        store.run_then(svc.close_all_connections(), move |_| paused.set(None));
-                    })
-                    .into_element(),
+                .enabled(move || total() > 0),
             ],
         ))
         .child(

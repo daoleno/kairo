@@ -99,6 +99,13 @@ impl Store {
             // The platform's sidebar and menus select pages too.
             follow(crate::chrome::bridge().page.subscribe(), move |p: &Page| store.page.set(*p));
             effect(move || crate::chrome::select(store.page.get()));
+            if let Some(mut events) = crate::chrome::bridge().take_events() {
+                spawn(async move {
+                    while let Some(event) = events.recv().await {
+                        crate::ui::toolbar::dispatch(event);
+                    }
+                });
+            }
         }
         store
     }

@@ -7,7 +7,9 @@ use kairo_core::model::{Rule, RuleProvider};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use crate::store::store;
+use crate::chrome::Glyph;
+use crate::store::{Page, store};
+use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,14 +78,16 @@ pub fn page() -> impl IntoElement {
 
     view()
         .flex_1()
-        .child(ui::page_header(
-            move || -> SharedString {
+        .child(toolbar::toolbar(
+            Page::Rules,
+            move || {
                 let (n, all) = (shown.with(|s| s.len()), rules.with(|r| r.len()));
-                if n == all { format!("Rules  {all}").into() } else { format!("Rules  {n} of {all}").into() }
+                if n == all { format!("{all} rules") } else { format!("{n} of {all}") }
             },
             vec![
-                ui::search_field(query, "Type, payload or target").w(px(240.0)).into_element(),
-                ui::icon_btn(Icon::Refresh, "Reload Rules").disabled(move || !running.get() || loading.get()).on_press(load).into_element(),
+                toolbar::search("rules.search", "Type, payload or target", query),
+                toolbar::button("rules.reload", "Reload Rules", Glyph::Refresh, Icon::Refresh, load)
+                    .enabled(move || running.get() && !loading.get()),
             ],
         ))
         .child(when(

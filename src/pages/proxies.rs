@@ -5,7 +5,9 @@ use kairo_core::model::{Group, Node};
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
-use crate::store::store;
+use crate::chrome::Glyph;
+use crate::store::{Page, store};
+use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, icon, size};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,14 +48,29 @@ pub fn page() -> impl IntoElement {
     let running = move || store.state.with(|s| s.core.is_running());
     view()
         .flex_1()
-        .child(ui::page_header(
-            "Proxies",
+        .child(ui::toolbar::toolbar(
+            Page::Proxies,
+            move || match current.get() {
+                Some(Selected::Group(name) | Selected::Provider(name)) => name,
+                None => String::new(),
+            },
             vec![
-                ui::search_field(query, "Filter nodes").w(px(200.0)).into_element(),
-                ui::segmented(vec![(Sort::Config, "Default"), (Sort::Delay, "Delay"), (Sort::Name, "Name")], move || sort.get(), move |s| sort.set(s))
-                    .w(px(210.0))
-                    .into_element(),
-                ui::icon_btn(Icon::Refresh, "Refresh").on_press(move || store.run(store.svc().refresh_proxies())).into_element(),
+                toolbar::search("proxies.filter", "Filter nodes", query),
+                toolbar::choice(
+                    "proxies.sort",
+                    "Sort",
+                    Glyph::Sort,
+                    vec!["Config Order", "Delay", "Name"],
+                    move || match sort.get() {
+                        Sort::Config => 0,
+                        Sort::Delay => 1,
+                        Sort::Name => 2,
+                    },
+                    move |i| sort.set([Sort::Config, Sort::Delay, Sort::Name][i.min(2)]),
+                ),
+                toolbar::button("proxies.refresh", "Refresh", Glyph::Refresh, Icon::Refresh, move || {
+                    store.run(store.svc().refresh_proxies())
+                }),
             ],
         ))
         .child(
