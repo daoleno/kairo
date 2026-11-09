@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kairo — a native client for mihomo</title>
-<meta name="description" content="Kairo runs the mihomo proxy core for you on macOS and Linux: subscriptions, nodes, system proxy and TUN, in a small native app.">
+<meta name="description" content="A clean, native mihomo client for macOS and Linux.">
 <meta property="og:title" content="Kairo — a native client for mihomo">
-<meta property="og:description" content="Subscriptions, nodes, system proxy and TUN, in a small native app for macOS and Linux.">
-<meta property="og:image" content="https://daoleno.github.io/kairo/shots/overview-light.webp">
+<meta property="og:description" content="A clean, native mihomo client for macOS and Linux.">
+<meta property="og:image" content="https://daoleno.github.io/kairo/shots/home-light.webp">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-512.png">
@@ -111,11 +111,12 @@ h2 { margin: 0; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.025em; lin
 .platforms figcaption span { color: var(--muted); }
 .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 40px 32px; margin-top: 36px; }
 .gallery figure { margin: 0; }
-.gallery figcaption { margin-top: 14px; font-size: 15px; }
+.gallery figcaption, .hero-shot figcaption { margin-top: 14px; font-size: 15px; }
+.hero-shot { margin: 0; }
 .gallery figcaption b { font-weight: 600; }
 .gallery figcaption span { color: var(--muted); }
 
-.facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 36px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 36px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .facts div { background: var(--bg); padding: 20px 22px; }
 .facts b { display: block; font-size: 15px; font-weight: 600; }
 .facts span { display: block; margin-top: 4px; font-size: 14px; color: var(--muted); }
@@ -160,7 +161,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 <main>
   <div class="wrap hero">
     <h1>mihomo, made native.</h1>
-    <p class="lede">Kairo runs the mihomo core for you. Subscriptions, nodes, system proxy and TUN, in a small app that looks at home on macOS and Linux.</p>
+    <p class="lede">A clean, native mihomo client for macOS and Linux.</p>
     <div class="actions">
       <a class="btn primary" id="primary" href="https://github.com/daoleno/kairo/releases/latest">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7.5 8 11.5l4-4M3 14h10"/></svg>
@@ -176,72 +177,70 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
         <button type="button" data-set="dark" aria-pressed="false">Dark</button>
       </div>
     </div>
-    <div class="window">
-      <img class="shot-light" src="shots/overview-light.webp" width="1181" height="789" alt="Kairo's overview: the core running, mode, system proxy and TUN switches, a live traffic graph, the active profile's usage and the main proxy group.">
-      <img class="shot-dark" src="shots/overview-dark.webp" width="1181" height="789" alt="The same overview in dark mode." loading="lazy">
-    </div>
+    <figure class="hero-shot">
+      <div class="window">
+        <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo's Home: a large switch, Connected through Hong Kong 04, and the Location, Route and Apps &amp; Sites rows.">
+        <img class="shot-dark" src="shots/home-dark.webp" width="1180" height="760" alt="Kairo's Home in dark mode." loading="lazy">
+      </div>
+      <figcaption><b>Home</b></figcaption>
+    </figure>
   </div>
 
   <section class="wrap" id="screens">
-    <h2>Everything the core can do, one click away.</h2>
     <div class="gallery">
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/proxies-light.webp" width="1181" height="789" alt="Proxies: groups on the left, the selected group's nodes with their delays on the right." loading="lazy">
-          <img class="shot-dark" src="shots/proxies-dark.webp" width="1181" height="789" alt="Proxies in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/location-light.webp" width="1180" height="760" alt="The Location popover: search, Fastest, and places grouped by region with their delays." loading="lazy">
+          <img class="shot-dark" src="shots/location-dark.webp" width="1180" height="760" alt="Locations in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Proxies.</b> <span>Pick a node, test a whole group, sort by delay.</span></figcaption>
+        <figcaption><b>Locations</b></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/connections-light.webp" width="1181" height="789" alt="Connections: a live table with one connection's details open beside it." loading="lazy">
-          <img class="shot-dark" src="shots/connections-dark.webp" width="1181" height="789" alt="Connections in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/apps-light.webp" width="1180" height="760" alt="Apps &amp; Sites: the subscription's per-app groups, each with one choice." loading="lazy">
+          <img class="shot-dark" src="shots/apps-dark.webp" width="1180" height="760" alt="Apps &amp; Sites in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Connections.</b> <span>Live, searchable, smooth with thousands of rows.</span></figcaption>
+        <figcaption><b>Apps &amp; Sites</b></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/profile-edit-light.webp" width="1181" height="789" alt="A profile's details and its YAML overrides editor." loading="lazy">
-          <img class="shot-dark" src="shots/profile-edit-dark.webp" width="1181" height="789" alt="The profile editor in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/groups-light.webp" width="1180" height="760" alt="Groups: the subscription's groups, and the selected group's members with their delays." loading="lazy">
+          <img class="shot-dark" src="shots/groups-dark.webp" width="1180" height="760" alt="Groups in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Profiles.</b> <span>Subscriptions with usage and expiry, overrides the core checks first.</span></figcaption>
+        <figcaption><b>Advanced</b></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/logs-light.webp" width="1181" height="789" alt="Logs: the core's log lines, live, with a level filter and search." loading="lazy">
-          <img class="shot-dark" src="shots/logs-dark.webp" width="1181" height="789" alt="Logs in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/connections-light.webp" width="1180" height="760" alt="Connections: a live, searchable table." loading="lazy">
+          <img class="shot-dark" src="shots/connections-dark.webp" width="1180" height="760" alt="Connections in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Logs, rules, DNS.</b> <span>See why a request went where it went.</span></figcaption>
+        <figcaption><b>Connections</b></figcaption>
       </figure>
     </div>
 
     <div class="facts">
-      <div><b>Core included</b><span>The official mihomo build ships inside. Open Kairo and it runs.</span></div>
-      <div><b>Updates itself</b><span>Signed updates, core included. One tap to restart.</span></div>
-      <div><b>System proxy that comes back</b><span>Restored on quit, on a crash, even after a kill.</span></div>
-      <div><b>TUN in one switch</b><span>A one-time grant for the core. Kairo itself never runs as root.</span></div>
-      <div><b>In the menu bar</b><span>Speeds, mode, system proxy and node switching from the tray.</span></div>
-      <div><b>Free software</b><span>GPL-3.0, like mihomo. Built in Rust on NSH, native AppKit and GTK 4.</span></div>
+      <div><b>Native</b><span>AppKit and Liquid Glass on the Mac, GTK 4 on Linux.</span></div>
+      <div><b>mihomo built in</b><span>The official core ships inside and updates with the app.</span></div>
+      <div><b>All of mihomo</b><span>Rules, groups, connections, logs, DNS and TUN.</span></div>
+      <div><b>In the menu bar</b><span>Connect and switch location without opening the window.</span></div>
     </div>
   </section>
 
   <section class="wrap" id="platforms">
-    <h2>At home on both.</h2>
-    <p class="sub">The same Kairo, drawn with AppKit on the Mac and GTK 4 on Linux, in the system's own frame.</p>
     <div class="platforms">
       <figure>
-        <div class="bare">
-          <img class="shot-light" src="shots/macos-overview-light.webp" width="1180" height="760" alt="Kairo's overview on macOS, in a native window." loading="lazy">
-          <img class="shot-dark" src="shots/macos-overview-dark.webp" width="1180" height="760" alt="Kairo's overview on macOS in dark mode." loading="lazy">
+        <div class="window">
+          <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo on GNOME." loading="lazy">
+          <img class="shot-dark" src="shots/home-dark.webp" width="1180" height="760" alt="Kairo on GNOME in dark mode." loading="lazy">
         </div>
-        <figcaption><b>macOS.</b> <span>AppKit, a menu bar item, Apple silicon and Intel.</span></figcaption>
+        <figcaption><b>GNOME</b></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/overview-light.webp" width="1181" height="789" alt="Kairo's overview on Linux with KDE Plasma." loading="lazy">
-          <img class="shot-dark" src="shots/overview-dark.webp" width="1181" height="789" alt="Kairo's overview on Linux in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/kde-home-light.webp" width="1180" height="760" alt="Kairo on KDE Plasma with Breeze." loading="lazy">
+          <img class="shot-dark" src="shots/kde-home-dark.webp" width="1180" height="760" alt="Kairo on KDE Plasma with Breeze Dark." loading="lazy">
         </div>
-        <figcaption><b>Linux.</b> <span>GTK 4, a tray icon, GNOME and KDE system proxy.</span></figcaption>
+        <figcaption><b>KDE Plasma</b></figcaption>
       </figure>
     </div>
   </section>

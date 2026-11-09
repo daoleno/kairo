@@ -1,15 +1,9 @@
 # Kairo
 
-A native desktop client for the [mihomo](https://github.com/MetaCubeX/mihomo) proxy core (Clash Meta), for
-Linux (GTK 4) and macOS (AppKit), written in Rust on [NSH](https://nsh.dev).
+A clean, native [mihomo](https://github.com/MetaCubeX/mihomo) client for macOS and Linux: AppKit on the Mac,
+GTK 4 and libadwaita on Linux, written in Rust on [NSH](https://nsh.dev).
 
-Kairo ships with the core and keeps it running: open it and the proxy is up. It manages your subscriptions, lets you pick nodes, and shows live
-traffic, connections, rules and logs. It can also set the system proxy or turn on TUN. The layout is dense and
-calm, with one accent colour, and it follows the system's light or dark appearance.
-
-![Overview on Linux](docs/screenshots/overview-light.png)
-
-<p align="center"><img src="docs/screenshots/macos-overview-light.png" width="720" alt="Overview on macOS"></p>
+![Kairo on Linux](docs/screenshots/home-light.png)
 
 ## What it does
 
@@ -20,14 +14,15 @@ calm, with one accent colour, and it follows the system's light or dark appearan
   background and verifies it (an Ed25519-signed manifest, plus `SHA256SUMS`). **Restart to Update** installs
   it, core included: the app bundle on macOS, the files of a `~/.local` install, or the `.deb` through
   `pkexec apt-get` (one password prompt).
-- **Profiles**: add a subscription URL or a YAML file. Kairo validates each one with the core before using it.
+- **Subscriptions**: add a subscription URL or a YAML file. Kairo validates each one with the core before using it.
   Subscriptions update on a schedule (the provider's interval or your own) or by hand. You can see usage and
   expiry, switch profiles with one click, and keep per-profile overrides in a YAML editor. Overrides merge
   into the profile, `prepend-rules` and friends are supported, and the core checks the result before Kairo
   applies it.
-- **Proxies**: see groups in config order, pick a node, and run delay tests for one node or a whole group.
+- **Locations**: Home picks the fastest place on its own (it skips the provider's info entries), or you pick one, grouped by region and sorted by delay. **Apps & Sites** holds the subscription's per-app groups.
+- **Groups** (under Advanced): see groups in config order, pick a node, and run delay tests for one node or a whole group.
   Nodes can be sorted by delay or name and filtered. Proxy providers support update and health check.
-- **Modes**: Rule, Global and Direct. Switch from the Overview or the tray; the sidebar shows the current mode.
+- **Route**: Smart, All Traffic and Direct (mihomo's Rule, Global and Direct). Switch from Home, the menu bar or the tray.
 - **System proxy**: works on macOS (`networksetup`), GNOME (gsettings) and KDE (kioslaverc). The previous
   settings are put back on quit, on SIGTERM or SIGINT, on a panic, and even after a SIGKILL or crash, thanks to
   a small guardian process. The next start also recovers any leftover state. Kairo only puts back what it
@@ -106,7 +101,7 @@ On first run Kairo takes ports 7897 and 9097, or the next free ones if another c
 ```
 src/main.rs          the launcher: window, tray, single instance, signals, guardian process
 src/lib.rs           the NSH root component (App) and the sidebar shell
-src/pages/*.rs       Overview, Proxies, Profiles, Connections, Rules, Logs, DNS, Settings
+src/pages/*.rs       Home, Apps & Sites, Groups, Subscriptions, Connections, Rules, Logs, DNS, Settings
 src/ui/              the small design system: tokens, rows, groups, segmented controls, icons
 crates/kairo-core    everything that is not UI:
   service.rs           the state (a tokio watch channel the UI subscribes to) and every action
