@@ -949,7 +949,9 @@ impl Service {
                         svc.restart_streams_hint();
                     }
                 }
-                if (prev.mixed_port != next.mixed_port || prev.bypass != next.bypass) && next.system_proxy {
+                if (prev.mixed_port != next.mixed_port || prev.bypass != next.bypass)
+                    && next.system_proxy
+                {
                     svc.apply_sysproxy(true);
                 }
             }
@@ -1164,8 +1166,12 @@ impl Service {
         if keep || current.as_ref().is_some_and(|c| c.name == best.name) {
             return Ok(current.map(|c| c.name));
         }
-        // A place picked by hand meanwhile wins.
-        if !self.settings().auto_location {
+        // A place picked by hand meanwhile wins (a provider's note is no place).
+        if !self.settings().auto_location
+            && current
+                .as_ref()
+                .is_some_and(|c| !crate::places::is_note(&c.name))
+        {
             return Ok(current.map(|c| c.name));
         }
         self.go_through(&best.name).await?;
@@ -1176,16 +1182,19 @@ impl Service {
     /// minutes while it stays automatic.
     async fn keep_fastest(&self) {
         static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !self.settings().auto_location || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            return;
-        }
         // Say so only when there is no real place yet: a new subscription, or
-        // a provider's note in use. Otherwise it checks quietly.
+        // a provider's note in use. Otherwise it checks quietly. A note is
+        // never somewhere to be, so Kairo moves off one even when the place
+        // is not automatic (a 0.1 install whose node was never picked).
         let on_note = self.main_group().is_some_and(|g| {
             crate::places::current(&self.0.proxies.borrow().groups, &g)
                 .is_none_or(|p| crate::places::is_note(&p.name))
         });
+        if !self.settings().auto_location && !on_note
+            || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
         let fresh = self
             .0
             .fresh

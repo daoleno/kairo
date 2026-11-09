@@ -171,24 +171,6 @@ pub fn page() -> impl IntoElement {
                                 ),
                             )
                             .into_element(),
-                            ui::setting_row_dyn(
-                                "Accent",
-                                move || -> SharedString {
-                                    let now = crate::accent::current().name;
-                                    let chosen = settings.with(|s| crate::accent::named(&s.accent).map(|a| a.name).unwrap_or(crate::accent::DEFAULT));
-                                    if chosen == now { "The switch, the place in use, and focus.".into() } else { "Takes effect when Kairo next opens.".into() }
-                                },
-                                ui::popup_button(
-                                    || crate::accent::ACCENTS.iter().map(|a| (a.name.to_owned(), a.title.to_owned())).collect::<Vec<_>>(),
-                                    move || settings.with(|s| crate::accent::named(&s.accent).map(|a| a.name).unwrap_or(crate::accent::DEFAULT).to_owned()),
-                                    move |name: String| {
-                                        let mut next = store.svc().settings();
-                                        next.accent = name;
-                                        store.run(store.svc().update_settings(next));
-                                    },
-                                ),
-                            )
-                            .into_element(),
                             ui::setting_row(
                                 "Launch at login",
                                 Some("Start Kairo when you log in."),

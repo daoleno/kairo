@@ -195,9 +195,10 @@ impl Settings {
     /// (another Clash client) holds those, the next free ones.
     pub fn load(paths: &Paths) -> Settings {
         let first_run = !paths.settings().exists();
-        let mut settings = std::fs::read(paths.settings())
-            .ok()
-            .and_then(|bytes| match serde_json::from_slice::<Settings>(&bytes) {
+        let bytes = std::fs::read(paths.settings()).ok();
+        let mut settings = bytes
+            .as_deref()
+            .and_then(|bytes| match serde_json::from_slice::<Settings>(bytes) {
                 Ok(s) => Some(s),
                 Err(err) => {
                     log::warn!("settings.json is unreadable ({err}); using defaults");
@@ -205,6 +206,16 @@ impl Settings {
                 }
             })
             .unwrap_or_default();
+        // Settings from before the automatic location (0.1): the node picked
+        // there stays, until the person asks for the fastest.
+        let upgraded = bytes
+            .as_deref()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+            .is_some_and(|v| v.is_object() && v.get("autoLocation").is_none());
+        if upgraded {
+            settings.auto_location = false;
+            let _ = settings.save(paths);
+        }
         if first_run {
             settings.mixed_port = free_port(settings.mixed_port, &[]);
             settings.controller_port = free_port(settings.controller_port, &[settings.mixed_port]);
@@ -261,6 +272,23 @@ mod tests {
         assert_eq!(s.controller_port, 9097);
         assert_eq!(s.mode, Mode::Rule);
         assert!(s.close_to_tray);
+    }
+
+    #[test]
+    fn an_upgrade_keeps_the_picked_node() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        std::fs::write(
+            paths.settings(),
+            br#"{"mixedPort": 7897, "systemProxy": false, "secret": "s"}"#,
+        )
+        .unwrap();
+        let s = Settings::load(&paths);
+        assert!(!s.auto_location && !s.system_proxy);
+        let again = Settings::load(&paths);
+        assert!(!again.auto_location);
+        let fresh = tempfile::tempdir().unwrap();
+        assert!(Settings::load(&Paths::new(fresh.path().to_path_buf())).auto_location);
     }
 
     #[test]
