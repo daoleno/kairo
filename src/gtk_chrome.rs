@@ -197,6 +197,26 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let tools = Rc::new(std::cell::RefCell::new(HeaderTools::default()));
     let actions = gio::SimpleActionGroup::new();
     window.insert_action_group("tool", Some(&actions));
+    // Ctrl+K and Ctrl+1…8 whatever has the focus (NSH's own keys fire only
+    // with the focus in its view; the header's fields and the sidebar are GTK's).
+    {
+        let palette = gio::SimpleAction::new("palette", None);
+        palette.connect_activate(|_, _| {
+            let _ = chrome::bridge().events.send(chrome::ToolEvent::Pressed("palette"));
+        });
+        window.add_action(&palette);
+        for (i, page) in nsh_app_kairo::GO.into_iter().enumerate() {
+            let go = gio::SimpleAction::new(&format!("go-{}", i + 1), None);
+            go.connect_activate(move |_, _| chrome::select(page));
+            window.add_action(&go);
+        }
+        if let Some(app) = window.application() {
+            app.set_accels_for_action("win.palette", &["<Control>k"]);
+            for i in 1..=8 {
+                app.set_accels_for_action(&format!("win.go-{i}"), &[&format!("<Control>{i}")]);
+            }
+        }
+    }
     // Ctrl+F: the page's search field, as in every GNOME app.
     {
         let tools = tools.clone();

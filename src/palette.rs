@@ -80,9 +80,21 @@ fn matches(c: &Command, q: &str) -> bool {
     q.split_whitespace().all(|w| hay.contains(&w.to_lowercase()))
 }
 
+thread_local! {
+    static OPEN: std::cell::Cell<Option<Signal<bool>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Opens the palette (a menu item or the chrome's shortcut).
+pub fn open() {
+    if let Some(open) = OPEN.with(|o| o.get()) {
+        open.set(true);
+    }
+}
+
 pub fn palette() -> impl IntoElement {
     let store = store();
     let open = signal(false);
+    OPEN.with(|o| o.set(Some(open)));
     on_key("mod+k", move |_| open.set(!open.get_untracked()));
     when(move || open.get(), move || panel(open, store))
 }

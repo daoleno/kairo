@@ -178,6 +178,11 @@ thread_local! {
 
 /// Carries out a tool's event from the chrome (the store calls it).
 pub fn dispatch(event: ToolEvent) {
+    // The window's own shortcuts (GTK accelerators), outside any page's tools.
+    if let ToolEvent::Pressed("palette") = event {
+        crate::palette::open();
+        return;
+    }
     let handler = HANDLERS.with(|h| {
         let h = h.borrow();
         let id = match &event {

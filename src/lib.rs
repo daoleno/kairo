@@ -66,7 +66,7 @@ pub fn App() -> impl IntoElement {
 }
 
 /// The pages ⌘1… open, in the sidebar's order.
-const GO: [Page; 8] = [Page::Overview, Page::Apps, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns];
+pub const GO: [Page; 8] = [Page::Overview, Page::Apps, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns];
 
 /// Fastest, then the quickest places (the rest are a search away on Home).
 fn location_items(store: Store) -> Vec<MenuItem> {
@@ -169,13 +169,13 @@ fn menus(store: Store) {
             conn.push(MenuItem::role(MenuRole::Quit));
         }
         menus.push(MenuItem::submenu("Connection", conn));
-        menus.push(MenuItem::submenu(
-            "Go",
+        let mut go = vec![MenuItem::new("Search Kairo…").shortcut("mod+k").on_select(crate::palette::open), MenuItem::separator()];
+        go.extend(
             GO.into_iter()
                 .enumerate()
-                .map(|(i, page)| MenuItem::new(page.title()).shortcut(["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8"][i]).on_select(move || store.page.set(page)))
-                .collect::<Vec<_>>(),
-        ));
+                .map(|(i, page)| MenuItem::new(page.title()).shortcut(["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8"][i]).on_select(move || store.page.set(page))),
+        );
+        menus.push(MenuItem::submenu("Go", go));
         menus.push(MenuItem::submenu(
             "Edit",
             [
