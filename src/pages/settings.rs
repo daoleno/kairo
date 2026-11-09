@@ -424,7 +424,7 @@ fn update_text(u: &UpdateStatus) -> String {
     match u {
         UpdateStatus::Idle => "Updates download by themselves".into(),
         UpdateStatus::Checking => "Checking for updates…".into(),
-        UpdateStatus::UpToDate => "Kairo is up to date".into(),
+        UpdateStatus::UpToDate { checked } => format!("Kairo is up to date · checked at {checked}"),
         UpdateStatus::Downloading { version, progress: Some(p) } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
         UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
         UpdateStatus::Ready { version } => format!("Kairo {version} is ready"),

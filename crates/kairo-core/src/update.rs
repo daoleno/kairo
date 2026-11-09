@@ -76,7 +76,8 @@ pub enum UpdateStatus {
     #[default]
     Idle,
     Checking,
-    UpToDate,
+    /// When the last check found nothing newer (`HH:MM`, local time).
+    UpToDate { checked: String },
     Downloading { version: String, progress: Option<f32> },
     /// Downloaded and verified: one tap installs it.
     Ready { version: String },
@@ -322,7 +323,7 @@ pub async fn check(svc: &Service) -> Result<Option<String>, String> {
     let result = check_inner(svc).await;
     match &result {
         Ok(None) if quiet => svc.set_update(previous),
-        Ok(None) => svc.set_update(UpdateStatus::UpToDate),
+        Ok(None) => svc.set_update(UpdateStatus::UpToDate { checked: crate::service::clock()[..5].to_owned() }),
         Ok(Some(_)) => {}
         Err(e) if quiet => {
             log::warn!("update: {e}");
