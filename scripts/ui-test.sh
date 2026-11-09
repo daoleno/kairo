@@ -9,7 +9,7 @@ KAIRO_TEST_CORE=${KAIRO_TEST_CORE:-$PWD/target/mihomo/mihomo}
 [ -x "$KAIRO_TEST_CORE" ] || { echo "no core: run scripts/fetch-mihomo.sh or set KAIRO_TEST_CORE" >&2; exit 1; }
 home=$(mktemp -d "${TMPDIR:-/tmp}/kairo-ui-test.XXXXXX")
 cat > "$home/settings.json" <<JSON
-{"mixedPort": 27897, "controllerPort": 29097, "corePath": "$KAIRO_TEST_CORE", "testTimeoutMs": 2000}
+{"mixedPort": 27897, "controllerPort": 29097, "corePath": "$KAIRO_TEST_CORE", "testTimeoutMs": 2000, "autoLocation": true}
 JSON
 python3 -I scripts/fixture.py --port 28080 > "$home/fixture.log" 2>&1 &
 fixture=$!
