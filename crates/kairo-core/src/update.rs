@@ -38,8 +38,9 @@ use crate::service::Service;
 /// The release workflow's signing key (public half; the private half is the
 /// `KAIRO_UPDATE_KEY` Actions secret).
 const PUBLIC_KEY: [u8; 32] = hex_literal(UPDATE_PUBLIC_KEY_HEX);
-const UPDATE_PUBLIC_KEY_HEX: &str =
-    "336a3afab474faf88ed05e20cfe862fde8e0ad0f65abbc0e9fc88a222add86bf";
+// One line: the release workflow reads it with sed.
+#[rustfmt::skip]
+const UPDATE_PUBLIC_KEY_HEX: &str = "336a3afab474faf88ed05e20cfe862fde8e0ad0f65abbc0e9fc88a222add86bf";
 
 const LATEST: &str = "https://github.com/daoleno/kairo/releases/latest/download";
 const RELEASES: &str = "https://github.com/daoleno/kairo/releases";
