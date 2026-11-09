@@ -13,12 +13,12 @@ use std::sync::Arc;
 use kairo_core::Service;
 use kairo_core::paths::Paths;
 
+#[cfg(target_os = "linux")]
+mod gtk_chrome;
 #[cfg(target_os = "macos")]
 mod mac_chrome;
 #[cfg(target_os = "macos")]
 mod mac_theme;
-#[cfg(target_os = "linux")]
-mod gtk_chrome;
 
 fn root() -> nsh_engine_root::Root {
     #[cfg(target_os = "macos")]
@@ -93,8 +93,15 @@ mod guardian {
 
     /// Starts the guardian for this process.
     pub fn spawn() {
-        let Ok(exe) = std::env::current_exe() else { return };
-        match Command::new(exe).arg(FLAG).stdin(Stdio::piped()).stdout(Stdio::null()).spawn() {
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        match Command::new(exe)
+            .arg(FLAG)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+        {
             Ok(mut child) => {
                 // The write end stays open for as long as this process lives
                 // (and, close-on-exec, is not inherited by the core).
@@ -115,9 +122,14 @@ mod guardian {
         while matches!(stdin.read(&mut buf), Ok(n) if n > 0) {}
         let paths = Paths::new(Paths::default_home());
         if paths.sysproxy_state().exists() || paths.core_pid().exists() {
-            log::warn!("Kairo ended without cleaning up: restoring the system proxy and stopping the core");
+            log::warn!(
+                "Kairo ended without cleaning up: restoring the system proxy and stopping the core"
+            );
             Service::restore_system_proxy_now(&paths);
-            if let Ok(rt) = kairo_core::tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            if let Ok(rt) = kairo_core::tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
                 rt.block_on(kairo_core::supervisor::stop_stale(&paths));
             }
         }
@@ -137,7 +149,12 @@ fn main() {
     let minimized = std::env::args().any(|a| a == "--minimized");
     // `--page <name>` opens on that page (screenshots, docs).
     let args: Vec<String> = std::env::args().collect();
-    if let Some(page) = args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1)).and_then(|n| nsh_app_kairo::store::Page::named(n)) {
+    if let Some(page) = args
+        .iter()
+        .position(|a| a == "--page")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|n| nsh_app_kairo::store::Page::named(n))
+    {
         nsh_app_kairo::chrome::select(page);
     }
     platform::run(minimized);
@@ -156,10 +173,10 @@ fn start_primary() -> Service {
 #[cfg(target_os = "linux")]
 mod platform {
     use super::*;
-    use nsh_platform_linux::gtk4 as gtk;
-    use nsh_platform_linux::{AppOptions, AppView, Appearance};
     use gtk::prelude::*;
     use gtk::{gio, glib};
+    use nsh_platform_linux::gtk4 as gtk;
+    use nsh_platform_linux::{AppOptions, AppView, Appearance};
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -182,7 +199,10 @@ mod platform {
         // leaves (before it touches the core or the system proxy).
         let native = std::env::var("KAIRO_SPIKE").as_deref() != Ok("nsh");
         nsh_app_kairo::chrome::set_native(native);
-        let app: gtk::Application = libadwaita::Application::builder().application_id(APP_ID).build().upcast();
+        let app: gtk::Application = libadwaita::Application::builder()
+            .application_id(APP_ID)
+            .build()
+            .upcast();
         if let Err(e) = app.register(None::<&gio::Cancellable>) {
             log::warn!("no session bus registration ({e}); running on our own");
         }
@@ -317,7 +337,9 @@ mod platform {
 
     fn present() {
         dispatch2::DispatchQueue::main().exec_async(|| {
-            let Some(mtm) = MainThreadMarker::new() else { return };
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
             let app = NSApplication::sharedApplication(mtm);
             #[allow(deprecated)]
             app.activateIgnoringOtherApps(true);
@@ -339,12 +361,17 @@ mod platform {
             });
         });
         svc.set_quit_hook(quit.clone());
-        let hooks = kairo_tray::Hooks { show: Arc::new(present), quit };
+        let hooks = kairo_tray::Hooks {
+            show: Arc::new(present),
+            quit,
+        };
         let tray_ok = kairo_tray::start(svc.clone(), hooks).is_ok();
         let settings = svc.settings();
         if (minimized || settings.start_minimized) && tray_ok {
             dispatch2::DispatchQueue::main().exec_async(|| {
-                let Some(mtm) = MainThreadMarker::new() else { return };
+                let Some(mtm) = MainThreadMarker::new() else {
+                    return;
+                };
                 for window in NSApplication::sharedApplication(mtm).windows().iter() {
                     window.orderOut(None);
                 }
@@ -384,7 +411,11 @@ mod platform {
         let svc = super::start_primary();
         nsh_platform_windows::run_app(
             AppSource::Rust(super::root()),
-            AppOptions { title: "Kairo".to_owned(), size: (1180, 760), ..Default::default() },
+            AppOptions {
+                title: "Kairo".to_owned(),
+                size: (1180, 760),
+                ..Default::default()
+            },
         );
         svc.shutdown();
     }

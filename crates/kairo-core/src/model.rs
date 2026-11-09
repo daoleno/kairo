@@ -114,7 +114,13 @@ pub fn groups_of(resp: &ProxiesResponse) -> Vec<Group> {
         name: p.name.clone(),
         kind: p.kind.clone(),
         now: p.now.clone().filter(|n| !n.is_empty()),
-        members: p.all.as_deref().unwrap_or(&[]).iter().map(|n| node(n)).collect(),
+        members: p
+            .all
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|n| node(n))
+            .collect(),
         hidden: p.hidden.unwrap_or(false),
         test_url: p.test_url.clone(),
     };
@@ -366,7 +372,10 @@ impl Connection {
             m.destination_ip.clone()
         };
         let (up_speed, down_speed) = match previous {
-            Some(p) => (raw.upload.saturating_sub(p.upload), raw.download.saturating_sub(p.download)),
+            Some(p) => (
+                raw.upload.saturating_sub(p.upload),
+                raw.download.saturating_sub(p.download),
+            ),
             None => (0, 0),
         };
         Connection {
@@ -374,10 +383,18 @@ impl Connection {
             host,
             port: m.destination_port,
             network: m.network,
-            inbound: if m.inbound_name.is_empty() { m.kind } else { format!("{} ({})", m.kind, m.inbound_name) },
+            inbound: if m.inbound_name.is_empty() {
+                m.kind
+            } else {
+                format!("{} ({})", m.kind, m.inbound_name)
+            },
             process: m.process,
             process_path: m.process_path,
-            source: if m.source_ip.is_empty() { String::new() } else { format!("{}:{}", m.source_ip, m.source_port) },
+            source: if m.source_ip.is_empty() {
+                String::new()
+            } else {
+                format!("{}:{}", m.source_ip, m.source_port)
+            },
             destination_ip: m.destination_ip,
             rule: raw.rule,
             rule_payload: raw.rule_payload,
@@ -398,10 +415,20 @@ impl Connection {
     /// Whether `query` (lowercase) matches the host, process, rule or chain.
     pub fn matches(&self, query: &str) -> bool {
         query.is_empty()
-            || [&self.host, &self.process, &self.rule, &self.rule_payload, &self.destination_ip, &self.network]
+            || [
+                &self.host,
+                &self.process,
+                &self.rule,
+                &self.rule_payload,
+                &self.destination_ip,
+                &self.network,
+            ]
+            .iter()
+            .any(|f| f.to_ascii_lowercase().contains(query))
+            || self
+                .chains
                 .iter()
-                .any(|f| f.to_ascii_lowercase().contains(query))
-            || self.chains.iter().any(|c| c.to_ascii_lowercase().contains(query))
+                .any(|c| c.to_ascii_lowercase().contains(query))
     }
 }
 

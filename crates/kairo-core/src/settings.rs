@@ -234,7 +234,8 @@ impl Settings {
         if self.test_timeout_ms < 100 {
             return Err("The delay test timeout is too short".into());
         }
-        url::Url::parse(&self.test_url).map_err(|_| "The delay test URL is not a URL".to_string())?;
+        url::Url::parse(&self.test_url)
+            .map_err(|_| "The delay test URL is not a URL".to_string())?;
         if !["mixed", "gvisor", "system"].contains(&self.tun_stack.as_str()) {
             return Err("Unknown TUN stack".into());
         }

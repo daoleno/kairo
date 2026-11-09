@@ -44,7 +44,11 @@ impl Page {
             "apps" => Some(Page::Apps),
             _ => None,
         };
-        old.or_else(|| Page::ALL.into_iter().find(|p| p.title().eq_ignore_ascii_case(name)))
+        old.or_else(|| {
+            Page::ALL
+                .into_iter()
+                .find(|p| p.title().eq_ignore_ascii_case(name))
+        })
     }
 
     /// Pages under Advanced (the sidebar folds them away).
@@ -118,14 +122,23 @@ impl Store {
             }
         });
         follow(live_rx, move |l: &Live| store.live.set(l.clone()));
-        follow(conn_rx, move |c: &Arc<Connections>| store.connections.set(Snap(c.clone())));
-        follow(prox_rx, move |p: &Arc<Proxies>| store.proxies.set(Snap(p.clone())));
+        follow(conn_rx, move |c: &Arc<Connections>| {
+            store.connections.set(Snap(c.clone()))
+        });
+        follow(prox_rx, move |p: &Arc<Proxies>| {
+            store.proxies.set(Snap(p.clone()))
+        });
         follow(log_rx, move |n: &u64| store.log_seq.set(*n));
         if crate::chrome::native() {
             // The platform's sidebar and menus select pages too.
-            follow(crate::chrome::bridge().page.subscribe(), move |p: &Page| store.page.set(*p));
+            follow(crate::chrome::bridge().page.subscribe(), move |p: &Page| {
+                store.page.set(*p)
+            });
             effect(move || crate::chrome::select(store.page.get()));
-            follow(crate::chrome::bridge().insets.subscribe(), move |i: &crate::chrome::Insets| store.insets.set(*i));
+            follow(
+                crate::chrome::bridge().insets.subscribe(),
+                move |i: &crate::chrome::Insets| store.insets.set(*i),
+            );
             if let Some(mut events) = crate::chrome::bridge().take_events() {
                 spawn(async move {
                     while let Some(event) = events.recv().await {
@@ -149,15 +162,21 @@ impl Store {
         }
         self.toast.set(Some((id, text.into(), error)));
         let toast = self.toast;
-        set_timeout(std::time::Duration::from_secs(if error { 6 } else { 3 }), move || {
-            if toast.get_untracked().is_some_and(|t| t.0 == id) {
-                toast.set(None);
-            }
-        });
+        set_timeout(
+            std::time::Duration::from_secs(if error { 6 } else { 3 }),
+            move || {
+                if toast.get_untracked().is_some_and(|t| t.0 == id) {
+                    toast.set(None);
+                }
+            },
+        );
     }
 
     /// Runs a service command; a failure becomes a message.
-    pub fn run<T: 'static>(&self, f: impl std::future::Future<Output = Result<T, String>> + 'static) {
+    pub fn run<T: 'static>(
+        &self,
+        f: impl std::future::Future<Output = Result<T, String>> + 'static,
+    ) {
         let store = *self;
         spawn(async move {
             if let Err(e) = f.await {
@@ -204,7 +223,10 @@ thread_local! {
 }
 
 /// Calls `each` with every new value of `rx`, on the engine thread.
-fn follow<T: Clone + Send + Sync + 'static>(mut rx: kairo_core::tokio::sync::watch::Receiver<T>, each: impl Fn(&T) + 'static) {
+fn follow<T: Clone + Send + Sync + 'static>(
+    mut rx: kairo_core::tokio::sync::watch::Receiver<T>,
+    each: impl Fn(&T) + 'static,
+) {
     spawn(async move {
         loop {
             if rx.changed().await.is_err() {

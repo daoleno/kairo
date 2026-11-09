@@ -11,7 +11,9 @@ use crate::paths::{Paths, write_atomic};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
-    #[error("The mihomo core is missing from this installation of Kairo. Reinstall Kairo to get it back.")]
+    #[error(
+        "The mihomo core is missing from this installation of Kairo. Reinstall Kairo to get it back."
+    )]
     NotBundled,
     #[error("The mihomo core bundled with Kairo does not run: {0}")]
     Broken(String),
@@ -34,7 +36,9 @@ pub async fn seed(paths: &Paths) -> Result<String, CoreError> {
     if installed.as_deref() == Some(version.as_str()) {
         return Ok(version);
     }
-    let bytes = tokio::fs::read(&bundled).await.map_err(|e| CoreError::Io(e.to_string()))?;
+    let bytes = tokio::fs::read(&bundled)
+        .await
+        .map_err(|e| CoreError::Io(e.to_string()))?;
     install_binary(paths, &bytes)?;
     log::info!("core {version} copied from {}", bundled.display());
     Ok(version)
@@ -58,7 +62,10 @@ pub fn install_binary(paths: &Paths, binary: &[u8]) -> Result<(), CoreError> {
 pub async fn binary_version(core: &Path) -> Option<String> {
     let out = tokio::time::timeout(
         Duration::from_secs(10),
-        tokio::process::Command::new(core).arg("-v").kill_on_drop(true).output(),
+        tokio::process::Command::new(core)
+            .arg("-v")
+            .kill_on_drop(true)
+            .output(),
     )
     .await
     .ok()?
@@ -70,7 +77,11 @@ pub fn parse_version(text: &str) -> Option<String> {
     text.split_whitespace()
         .find(|w| w.starts_with('v') && w[1..].chars().next().is_some_and(|c| c.is_ascii_digit()))
         .map(str::to_owned)
-        .or_else(|| text.split_whitespace().find(|w| w.starts_with("alpha")).map(str::to_owned))
+        .or_else(|| {
+            text.split_whitespace()
+                .find(|w| w.starts_with("alpha"))
+                .map(str::to_owned)
+        })
 }
 
 /// Whether `latest` is newer than `installed` (semantic versions with a `v`).
@@ -104,7 +115,11 @@ mod tests {
     fn fake_core(dir: &Path, version: &str) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let p = dir.join(format!("mihomo-{version}"));
-        std::fs::write(&p, format!("#!/bin/sh\necho Mihomo Meta {version} linux amd64\n")).unwrap();
+        std::fs::write(
+            &p,
+            format!("#!/bin/sh\necho Mihomo Meta {version} linux amd64\n"),
+        )
+        .unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         p
     }
@@ -120,18 +135,33 @@ mod tests {
         // First run: copied in.
         paths.bundled_core = Some(fake_core(dir.path(), "v1.19.33"));
         assert_eq!(seed(&paths).await.unwrap(), "v1.19.33");
-        assert_eq!(binary_version(&paths.core_bin()).await.as_deref(), Some("v1.19.33"));
+        assert_eq!(
+            binary_version(&paths.core_bin()).await.as_deref(),
+            Some("v1.19.33")
+        );
 
         // Same version: the copy (and any grant on it) is left alone.
-        let before = std::fs::metadata(paths.core_bin()).unwrap().modified().unwrap();
+        let before = std::fs::metadata(paths.core_bin())
+            .unwrap()
+            .modified()
+            .unwrap();
         std::thread::sleep(Duration::from_millis(20));
         seed(&paths).await.unwrap();
-        assert_eq!(std::fs::metadata(paths.core_bin()).unwrap().modified().unwrap(), before);
+        assert_eq!(
+            std::fs::metadata(paths.core_bin())
+                .unwrap()
+                .modified()
+                .unwrap(),
+            before
+        );
 
         // An app update brings another core: it replaces the copy.
         paths.bundled_core = Some(fake_core(dir.path(), "v1.19.34"));
         assert_eq!(seed(&paths).await.unwrap(), "v1.19.34");
-        assert_eq!(binary_version(&paths.core_bin()).await.as_deref(), Some("v1.19.34"));
+        assert_eq!(
+            binary_version(&paths.core_bin()).await.as_deref(),
+            Some("v1.19.34")
+        );
 
         // The bundle went missing: the copy keeps working.
         paths.bundled_core = Some(dir.path().join("gone"));

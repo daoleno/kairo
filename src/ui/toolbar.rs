@@ -22,7 +22,11 @@ type Shared<T> = Rc<dyn Fn() -> T>;
 
 /// One tool, with what it reads and does.
 pub enum Spec {
-    Search { id: &'static str, placeholder: &'static str, value: Signal<String> },
+    Search {
+        id: &'static str,
+        placeholder: &'static str,
+        value: Signal<String>,
+    },
     Button {
         id: &'static str,
         label: Shared<String>,
@@ -44,11 +48,21 @@ pub enum Spec {
 
 /// A search field bound to `value`.
 pub fn search(id: &'static str, placeholder: &'static str, value: Signal<String>) -> Spec {
-    Spec::Search { id, placeholder, value }
+    Spec::Search {
+        id,
+        placeholder,
+        value,
+    }
 }
 
 /// A button showing `glyph` (and `icon` where NSH draws it), named `label`.
-pub fn button(id: &'static str, label: &'static str, glyph: Glyph, icon: Icon, press: impl Fn() + 'static) -> Spec {
+pub fn button(
+    id: &'static str,
+    label: &'static str,
+    glyph: Glyph,
+    icon: Icon,
+    press: impl Fn() + 'static,
+) -> Spec {
     Spec::Button {
         id,
         label: Rc::new(move || label.to_owned()),
@@ -89,7 +103,14 @@ pub fn choice(
     selected: impl Fn() -> usize + 'static,
     choose: impl Fn(usize) + 'static,
 ) -> Spec {
-    Spec::Choice { id, label, glyph, options, selected: Rc::new(selected), choose: Rc::new(choose) }
+    Spec::Choice {
+        id,
+        label,
+        glyph,
+        options,
+        selected: Rc::new(selected),
+        choose: Rc::new(choose),
+    }
 }
 
 impl Spec {
@@ -117,11 +138,41 @@ impl Spec {
 
     fn tool(&self) -> Tool {
         match self {
-            Spec::Search { id, placeholder, value } => Tool::Search { id, placeholder, value: value.get() },
-            Spec::Button { id, label, glyph, enabled, .. } => Tool::Button { id, label: label(), glyph: glyph(), enabled: enabled() },
-            Spec::Choice { id, label, glyph, options, selected, .. } => {
-                Tool::Choice { id, label, glyph: *glyph, options: options.clone(), selected: selected() }
-            }
+            Spec::Search {
+                id,
+                placeholder,
+                value,
+            } => Tool::Search {
+                id,
+                placeholder,
+                value: value.get(),
+            },
+            Spec::Button {
+                id,
+                label,
+                glyph,
+                enabled,
+                ..
+            } => Tool::Button {
+                id,
+                label: label(),
+                glyph: glyph(),
+                enabled: enabled(),
+            },
+            Spec::Choice {
+                id,
+                label,
+                glyph,
+                options,
+                selected,
+                ..
+            } => Tool::Choice {
+                id,
+                label,
+                glyph: *glyph,
+                options: options.clone(),
+                selected: selected(),
+            },
         }
     }
 
@@ -136,29 +187,53 @@ impl Spec {
     /// The tool as NSH draws it.
     fn element(self) -> AnyElement {
         match self {
-            Spec::Search { placeholder, value, .. } => search_field(value, placeholder).w(px(220.0)).into_element(),
-            Spec::Button { label, icon, enabled, prominent, press, .. } => {
+            Spec::Search {
+                placeholder, value, ..
+            } => search_field(value, placeholder).w(px(220.0)).into_element(),
+            Spec::Button {
+                label,
+                icon,
+                enabled,
+                prominent,
+                press,
+                ..
+            } => {
                 if prominent {
                     let l = label.clone();
-                    super::btn_icon_dyn(move || icon(), move || -> SharedString { l().into() }, Variant::Primary)
-                        .disabled(move || !enabled())
-                        .on_press(move || press())
-                        .into_element()
+                    super::btn_icon_dyn(
+                        move || icon(),
+                        move || -> SharedString { l().into() },
+                        Variant::Primary,
+                    )
+                    .disabled(move || !enabled())
+                    .on_press(move || press())
+                    .into_element()
                 } else {
                     let l = label.clone();
-                    super::btn_icon_dyn(move || icon(), move || -> SharedString { l().into() }, Variant::Secondary)
-                        .disabled(move || !enabled())
-                        .on_press(move || press())
-                        .into_element()
+                    super::btn_icon_dyn(
+                        move || icon(),
+                        move || -> SharedString { l().into() },
+                        Variant::Secondary,
+                    )
+                    .disabled(move || !enabled())
+                    .on_press(move || press())
+                    .into_element()
                 }
             }
-            Spec::Choice { options, selected, choose, .. } => {
+            Spec::Choice {
+                options,
+                selected,
+                choose,
+                ..
+            } => {
                 // Few choices, all in sight: a segmented control.
                 let selected = stored(selected);
                 let choose = stored(choose);
-                super::segmented(options.iter().enumerate().map(|(i, o)| (i, *o)).collect(), move || selected.with(|f| f()), move |i| {
-                    choose.with(|f| f(i))
-                })
+                super::segmented(
+                    options.iter().enumerate().map(|(i, o)| (i, *o)).collect(),
+                    move || selected.with(|f| f()),
+                    move |i| choose.with(|f| f(i)),
+                )
                 .into_element()
             }
         }
@@ -224,7 +299,12 @@ pub fn toolbar(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<S
     toolbar_with(page, subtitle, tools, true)
 }
 
-fn toolbar_with(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<Spec>, room: bool) -> View {
+fn toolbar_with(
+    page: Page,
+    subtitle: impl Fn() -> String + 'static,
+    tools: Vec<Spec>,
+    room: bool,
+) -> View {
     if chrome::native() {
         let specs = Rc::new(tools);
         HANDLERS.with(|h| {
@@ -235,7 +315,11 @@ fn toolbar_with(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
         {
             let specs = specs.clone();
             effect(move || {
-                let next = Toolbar { page: Some(page), subtitle: subtitle(), tools: specs.iter().map(Spec::tool).collect() };
+                let next = Toolbar {
+                    page: Some(page),
+                    subtitle: subtitle(),
+                    tools: specs.iter().map(Spec::tool).collect(),
+                };
                 chrome::bridge().toolbar.send_if_modified(|t| {
                     let changed = *t != next;
                     if changed {
@@ -263,7 +347,9 @@ fn toolbar_with(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
         });
         // Room for the window's toolbar where it floats over the content.
         let store = crate::store::store();
-        return view().flex_shrink_0().h(move || px(if room { store.insets.get().top } else { 0.0 }));
+        return view()
+            .flex_shrink_0()
+            .h(move || px(if room { store.insets.get().top } else { 0.0 }));
     }
     view()
         .h(px(HEADER_HEIGHT))
@@ -282,7 +368,11 @@ fn toolbar_with(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
                 .flex_row()
                 .items_baseline()
                 .gap_2()
-                .child(title(page.title()).text_size(px(size::large() + 2.0)).number_of_lines(1))
+                .child(
+                    title(page.title())
+                        .text_size(px(size::large() + 2.0))
+                        .number_of_lines(1),
+                )
                 .child(
                     text(move || -> SharedString { subtitle().into() })
                         .text_size(px(size::small()))

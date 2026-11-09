@@ -3,8 +3,8 @@
 
 pub mod accent;
 pub mod chrome;
-pub mod palette;
 mod pages;
+pub mod palette;
 mod shell;
 pub mod store;
 pub mod ui;
@@ -48,7 +48,10 @@ pub fn App() -> impl IntoElement {
     });
 
     if os() == Os::MacOs && !chrome::native() {
-        nsh_core::element::desktop::set_title_bar(nsh_core::desktop::TitleBarStyle::Hidden, Some(px(ui::HEADER_HEIGHT)));
+        nsh_core::element::desktop::set_title_bar(
+            nsh_core::desktop::TitleBarStyle::Hidden,
+            Some(px(ui::HEADER_HEIGHT)),
+        );
     }
     // macOS has a menu bar; GTK apps on Linux keep their window free of one.
     if os() == Os::MacOs {
@@ -66,27 +69,59 @@ pub fn App() -> impl IntoElement {
 }
 
 /// The pages ⌘1… open, in the sidebar's order.
-pub const GO: [Page; 8] = [Page::Overview, Page::Apps, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns];
+pub const GO: [Page; 8] = [
+    Page::Overview,
+    Page::Apps,
+    Page::Proxies,
+    Page::Profiles,
+    Page::Connections,
+    Page::Rules,
+    Page::Logs,
+    Page::Dns,
+];
 
 /// Fastest, then the quickest places (the rest are a search away on Home).
 fn location_items(store: Store) -> Vec<MenuItem> {
     use kairo_core::places;
     let auto = store.state.with(|s| s.settings.auto_location);
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
-    let (now, mut list) = store.proxies.with(|p| match places::main_group(&p.0.groups, &preferred) {
-        Some(g) => (places::current(&p.0.groups, g).map(|c| c.name), places::places(&p.0.groups, g)),
-        None => (None, vec![]),
-    });
+    let (now, mut list) =
+        store
+            .proxies
+            .with(|p| match places::main_group(&p.0.groups, &preferred) {
+                Some(g) => (
+                    places::current(&p.0.groups, g).map(|c| c.name),
+                    places::places(&p.0.groups, g),
+                ),
+                None => (None, vec![]),
+            });
     list.retain(|p| !p.is_group);
     list.sort_by_key(|p| match p.delay {
         Some(d) if d > 0 => d,
         _ => u32::MAX,
     });
-    let mut items = vec![MenuItem::new("Fastest").checked(auto).on_select(move || store.run(store.svc().set_location(None))), MenuItem::separator()];
+    let mut items = vec![
+        MenuItem::new("Fastest")
+            .checked(auto)
+            .on_select(move || store.run(store.svc().set_location(None))),
+        MenuItem::separator(),
+    ];
     for p in list.into_iter().take(12) {
         let name = p.name.clone();
-        let title = format!("{}{}{}", p.flag.map(|f| f + "  ").unwrap_or_default(), p.title, p.delay.filter(|d| *d > 0).map(|d| format!("   {d} ms")).unwrap_or_default());
-        items.push(MenuItem::new(title).checked(!auto && now.as_deref() == Some(name.as_str())).on_select(move || store.run(store.svc().set_location(Some(name.clone())))));
+        let title = format!(
+            "{}{}{}",
+            p.flag.map(|f| f + "  ").unwrap_or_default(),
+            p.title,
+            p.delay
+                .filter(|d| *d > 0)
+                .map(|d| format!("   {d} ms"))
+                .unwrap_or_default()
+        );
+        items.push(
+            MenuItem::new(title)
+                .checked(!auto && now.as_deref() == Some(name.as_str()))
+                .on_select(move || store.run(store.svc().set_location(Some(name.clone())))),
+        );
     }
     items.push(MenuItem::separator());
     items.push(MenuItem::new("All Locations…").on_select(move || store.page.set(Page::Overview)));
@@ -108,21 +143,27 @@ fn menus(store: Store) {
                 [
                     MenuItem::role(MenuRole::About),
                     match store.state.with(|s| s.update.clone()) {
-                        kairo_core::UpdateStatus::Ready { version } => MenuItem::new(format!("Restart to Update to {version}")).on_select({
-                            let svc = svc.clone();
-                            move || store.run(svc.restart_to_update())
-                        }),
+                        kairo_core::UpdateStatus::Ready { version } => {
+                            MenuItem::new(format!("Restart to Update to {version}")).on_select({
+                                let svc = svc.clone();
+                                move || store.run(svc.restart_to_update())
+                            })
+                        }
                         _ => MenuItem::new("Check for Updates…").on_select({
                             let svc = svc.clone();
-                            move || store.run_then(svc.check_for_update(), move |r| {
-                                if let Ok(None) = r {
-                                    store.info("Kairo is up to date");
-                                }
-                            })
+                            move || {
+                                store.run_then(svc.check_for_update(), move |r| {
+                                    if let Ok(None) = r {
+                                        store.info("Kairo is up to date");
+                                    }
+                                })
+                            }
                         }),
                     },
                     MenuItem::separator(),
-                    MenuItem::new("Settings…").shortcut("mod+,").on_select(move || store.page.set(Page::Settings)),
+                    MenuItem::new("Settings…")
+                        .shortcut("mod+,")
+                        .on_select(move || store.page.set(Page::Settings)),
                     MenuItem::separator(),
                     MenuItem::role(MenuRole::Hide),
                     MenuItem::role(MenuRole::HideOthers),
@@ -132,16 +173,26 @@ fn menus(store: Store) {
             ));
         }
         let mut conn = vec![
-            MenuItem::new(if running { "Disconnect" } else { "Connect" }).disabled(!has_profile).on_select({
-                let svc = svc.clone();
-                move || store.run(svc.connect(!running))
-            }),
+            MenuItem::new(if running { "Disconnect" } else { "Connect" })
+                .disabled(!has_profile)
+                .on_select({
+                    let svc = svc.clone();
+                    move || store.run(svc.connect(!running))
+                }),
             MenuItem::separator(),
             MenuItem::submenu("Location", location_items(store)),
         ];
-        for (m, title) in [(kairo_core::Mode::Rule, "Smart Route"), (kairo_core::Mode::Global, "All Traffic"), (kairo_core::Mode::Direct, "Direct")] {
+        for (m, title) in [
+            (kairo_core::Mode::Rule, "Smart Route"),
+            (kairo_core::Mode::Global, "All Traffic"),
+            (kairo_core::Mode::Direct, "Direct"),
+        ] {
             let svc = svc.clone();
-            conn.push(MenuItem::new(title).checked(mode == m).on_select(move || store.run(svc.set_mode(m))));
+            conn.push(
+                MenuItem::new(title)
+                    .checked(mode == m)
+                    .on_select(move || store.run(svc.set_mode(m))),
+            );
         }
         conn.push(MenuItem::separator());
         conn.push(MenuItem::submenu(
@@ -165,16 +216,29 @@ fn menus(store: Store) {
         ));
         if !mac {
             conn.push(MenuItem::separator());
-            conn.push(MenuItem::new("Settings…").shortcut("mod+,").on_select(move || store.page.set(Page::Settings)));
+            conn.push(
+                MenuItem::new("Settings…")
+                    .shortcut("mod+,")
+                    .on_select(move || store.page.set(Page::Settings)),
+            );
             conn.push(MenuItem::role(MenuRole::Quit));
         }
         menus.push(MenuItem::submenu("Connection", conn));
-        let mut go = vec![MenuItem::new("Search Kairo…").shortcut("mod+k").on_select(crate::palette::open), MenuItem::separator()];
-        go.extend(
-            GO.into_iter()
-                .enumerate()
-                .map(|(i, page)| MenuItem::new(page.title()).shortcut(["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8"][i]).on_select(move || store.page.set(page))),
-        );
+        let mut go = vec![
+            MenuItem::new("Search Kairo…")
+                .shortcut("mod+k")
+                .on_select(crate::palette::open),
+            MenuItem::separator(),
+        ];
+        go.extend(GO.into_iter().enumerate().map(|(i, page)| {
+            MenuItem::new(page.title())
+                .shortcut(
+                    [
+                        "mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8",
+                    ][i],
+                )
+                .on_select(move || store.page.set(page))
+        }));
         menus.push(MenuItem::submenu("Go", go));
         menus.push(MenuItem::submenu(
             "Edit",
@@ -190,7 +254,11 @@ fn menus(store: Store) {
         ));
         menus.push(MenuItem::submenu(
             "Window",
-            [MenuItem::role(MenuRole::Minimize), MenuItem::role(MenuRole::Zoom), MenuItem::role(MenuRole::Close)],
+            [
+                MenuItem::role(MenuRole::Minimize),
+                MenuItem::role(MenuRole::Zoom),
+                MenuItem::role(MenuRole::Close),
+            ],
         ));
         set_application_menu(menus);
     });

@@ -17,9 +17,16 @@ pub fn page() -> impl IntoElement {
     let store = store();
     // Only a change of this rebuilds the page (not every state update).
     let has_profile = computed(move || store.state.with(|s| s.profiles.active.is_some()));
-    view().flex_1().child(toolbar::floating(Page::Overview, String::new, vec![])).child(dynamic(move || {
-        if has_profile.get() { untracked(home).into_element() } else { untracked(welcome).into_element() }
-    }))
+    view()
+        .flex_1()
+        .child(toolbar::floating(Page::Overview, String::new, vec![]))
+        .child(dynamic(move || {
+            if has_profile.get() {
+                untracked(home).into_element()
+            } else {
+                untracked(welcome).into_element()
+            }
+        }))
 }
 
 // --- Welcome ------------------------------------------------------------------------
@@ -124,20 +131,36 @@ fn welcome() -> impl IntoElement {
 
 fn is_link(s: &str) -> bool {
     let s = s.trim();
-    (s.starts_with("https://") || s.starts_with("http://")) && s.len() > 10 && !s.contains(char::is_whitespace)
+    (s.starts_with("https://") || s.starts_with("http://"))
+        && s.len() > 10
+        && !s.contains(char::is_whitespace)
 }
 
 /// What went wrong, in plain words, with the way out.
-fn problem_box(message: impl Fn() -> String + Copy + 'static, retry: impl Fn() + Copy + 'static) -> View {
+fn problem_box(
+    message: impl Fn() -> String + Copy + 'static,
+    retry: impl Fn() + Copy + 'static,
+) -> View {
     let explained = move || explain(&message());
     view()
         .gap_3()
         .p_4()
         .rounded(px(18.0))
         .bg(move || theme().destructive.opacity(0.08))
-        .child(text(move || explained().0).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
-        .child(when(move || explained().1.is_some(), move || ui::muted(move || explained().1.unwrap_or_default())))
-        .child(view().flex_row().child(ui::capsule("Try Again", false).on_press(move || retry())))
+        .child(
+            text(move || explained().0)
+                .text_size(px(size::body()))
+                .font_weight(FontWeight::MEDIUM),
+        )
+        .child(when(
+            move || explained().1.is_some(),
+            move || ui::muted(move || explained().1.unwrap_or_default()),
+        ))
+        .child(
+            view()
+                .flex_row()
+                .child(ui::capsule("Try Again", false).on_press(move || retry())),
+        )
 }
 
 /// A failure in the user's words: the headline and a hint.
@@ -149,14 +172,27 @@ pub fn explain(e: &str) -> (String, Option<String>) {
         );
     }
     let low = e.to_lowercase();
-    if low.contains("http 401") || low.contains("http 403") || low.contains("http 404") || low.contains("http 410") {
+    if low.contains("http 401")
+        || low.contains("http 403")
+        || low.contains("http 404")
+        || low.contains("http 410")
+    {
         return (
             "The provider refused this link.".into(),
-            Some(format!("It may have expired or been reset ({e}). Copy a fresh link from your provider.")),
+            Some(format!(
+                "It may have expired or been reset ({e}). Copy a fresh link from your provider."
+            )),
         );
     }
-    if low.contains("timed out") || low.contains("could not connect") || low.contains("dns") || low.contains("resolve") {
-        return ("Kairo can't reach the provider.".into(), Some("Check that this Mac or PC is online, then try again.".into()));
+    if low.contains("timed out")
+        || low.contains("could not connect")
+        || low.contains("dns")
+        || low.contains("resolve")
+    {
+        return (
+            "Kairo can't reach the provider.".into(),
+            Some("Check that this Mac or PC is online, then try again.".into()),
+        );
     }
     if low.contains("base64 node list") {
         return (
@@ -165,7 +201,10 @@ pub fn explain(e: &str) -> (String, Option<String>) {
         );
     }
     if low.contains("not valid yaml") || low.contains("no proxies") {
-        return ("This link doesn't give a config Kairo can use.".into(), Some(format!("Check you copied the whole link. ({e})")));
+        return (
+            "This link doesn't give a config Kairo can use.".into(),
+            Some(format!("Check you copied the whole link. ({e})")),
+        );
     }
     (e.to_owned(), None)
 }
@@ -229,7 +268,10 @@ fn home() -> impl IntoElement {
 fn hero() -> impl IntoElement {
     let store = store();
     let state = computed(conn);
-    let on = move || matches!(state.get(), Conn::On | Conn::Connecting(_)) && !matches!(state.get(), Conn::Connecting("Disconnecting…"));
+    let on = move || {
+        matches!(state.get(), Conn::On | Conn::Connecting(_))
+            && !matches!(state.get(), Conn::Connecting("Disconnecting…"))
+    };
     let headline = move || -> SharedString {
         match state.get() {
             Conn::Off => "Not Connected".into(),
@@ -240,11 +282,17 @@ fn hero() -> impl IntoElement {
     };
     let detail = move || -> SharedString {
         let auto = store.state.with(|s| s.settings.auto_location);
-        let sysproxy_off = store.state.with(|s| s.sysproxy_supported && !s.settings.system_proxy && !s.settings.tun);
+        let sysproxy_off = store
+            .state
+            .with(|s| s.sysproxy_supported && !s.settings.system_proxy && !s.settings.tun);
         match state.get() {
             Conn::On => match current_place() {
                 Some(p) => {
-                    let mut parts = vec![format!("{}{}", p.flag.map(|f| f + " ").unwrap_or_default(), p.title)];
+                    let mut parts = vec![format!(
+                        "{}{}",
+                        p.flag.map(|f| f + " ").unwrap_or_default(),
+                        p.title
+                    )];
                     if let Some(d) = p.delay.filter(|d| *d > 0) {
                         parts.push(format!("{d} ms"));
                     }
@@ -271,23 +319,62 @@ fn hero() -> impl IntoElement {
             big_switch(on, move |next| store.run(store.svc().connect(next)))
                 .disabled(move || matches!(state.get(), Conn::Connecting(_))),
         )
-        .child(text(headline).text_size(px(size::display())).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header).mt_2())
-        .child(ui::muted(detail).text_size(px(size::body() + 1.0)).text_center().number_of_lines(2))
+        .child(
+            text(headline)
+                .text_size(px(size::display()))
+                .font_weight(FontWeight::SEMIBOLD)
+                .role(AccessibilityRole::Header)
+                .mt_2(),
+        )
+        .child(
+            ui::muted(detail)
+                .text_size(px(size::body() + 1.0))
+                .text_center()
+                .number_of_lines(2),
+        )
         .child(when(
             move || matches!(state.get(), Conn::Failed(_)),
             move || {
+                // The reason is the line above; this is only the advice, if any.
                 let hint = move || match state.get() {
-                    Conn::Failed(m) => explain(&m).1.unwrap_or(m),
+                    Conn::Failed(m) => explain(&m).1.unwrap_or_default(),
                     _ => String::new(),
                 };
                 view()
                     .items_center()
                     .gap_3()
-                    .child(ui::muted(hint).text_center().max_w(px(440.0)))
+                    .child(when(
+                        move || !hint().is_empty(),
+                        move || ui::muted(hint).text_center().max_w(px(440.0)),
+                    ))
                     .child(fix_button(move || match state.get() {
                         Conn::Failed(m) => m,
                         _ => String::new(),
                     }))
+            },
+        ))
+        // A problem it keeps running through (a port in use): said quietly,
+        // with the way out.
+        .child(when(
+            move || matches!(state.get(), Conn::On) && store.state.with(|s| s.warning.is_some()),
+            move || {
+                let warning = move || store.state.with(|s| s.warning.clone().unwrap_or_default());
+                view()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .max_w(px(460.0))
+                            .child(ui::dot(ui::warning))
+                            .child(
+                                ui::muted(move || -> SharedString { warning().into() })
+                                    .text_center(),
+                            ),
+                    )
+                    .child(fix_button(warning))
             },
         ))
 }
@@ -298,11 +385,25 @@ fn fix_button(message: impl Fn() -> String + Copy + 'static) -> impl IntoElement
     dynamic(move || {
         let m = message().to_lowercase();
         untracked(move || {
-            if m.contains("address already in use") || m.contains("port") && m.contains("in use") {
+            if m.contains("address already in use")
+                || m.contains("used by another program")
+                || m.contains("port") && m.contains("in use")
+            {
+                let controller = m.contains("controller port");
                 ui::capsule("Use a Free Port", true)
                     .on_press(move || {
                         let mut next = store.svc().settings();
-                        next.mixed_port = kairo_core::settings::free_port(next.mixed_port + 1, &[next.controller_port]);
+                        if controller {
+                            next.controller_port = kairo_core::settings::free_port(
+                                next.controller_port + 1,
+                                &[next.mixed_port],
+                            );
+                        } else {
+                            next.mixed_port = kairo_core::settings::free_port(
+                                next.mixed_port + 1,
+                                &[next.controller_port],
+                            );
+                        }
                         store.run_then(store.svc().update_settings(next), move |r| {
                             if r.is_ok() {
                                 store.run(store.svc().connect(true));
@@ -311,16 +412,23 @@ fn fix_button(message: impl Fn() -> String + Copy + 'static) -> impl IntoElement
                     })
                     .into_element()
             } else if m.contains("tun") && (m.contains("permission") || m.contains("privilege")) {
-                ui::capsule("Allow TUN…", true).on_press(move || store.run(store.svc().grant_tun())).into_element()
+                ui::capsule("Allow TUN…", true)
+                    .on_press(move || store.run(store.svc().grant_tun()))
+                    .into_element()
             } else {
-                ui::capsule("Try Again", true).on_press(move || store.run(store.svc().connect(true))).into_element()
+                ui::capsule("Try Again", true)
+                    .on_press(move || store.run(store.svc().connect(true)))
+                    .into_element()
             }
         })
     })
 }
 
 /// A large switch: the page's one decision.
-fn big_switch(on: impl Fn() -> bool + Copy + 'static, set: impl Fn(bool) + Copy + 'static) -> Button {
+fn big_switch(
+    on: impl Fn() -> bool + Copy + 'static,
+    set: impl Fn(bool) + Copy + 'static,
+) -> Button {
     let (w, h, pad) = (104.0_f32, 60.0_f32, 5.0_f32);
     let knob = h - pad * 2.0;
     nsh_base::button()
@@ -350,7 +458,11 @@ fn big_switch(on: impl Fn() -> bool + Copy + 'static, set: impl Fn(bool) + Copy 
 
 /// Location, route, apps and sites.
 fn choices() -> impl IntoElement {
-    ui::rows(vec![location_row().into_element(), route_row().into_element(), apps_row().into_element()])
+    ui::rows(vec![
+        location_row().into_element(),
+        route_row().into_element(),
+        apps_row().into_element(),
+    ])
 }
 
 fn location_row() -> impl IntoElement {
@@ -382,14 +494,28 @@ fn location_row() -> impl IntoElement {
         .trigger(
             ui::row_view()
                 .cursor_pointer()
-                .child(text(move || place.get().and_then(|p| p.flag).unwrap_or_else(|| "◎".into())).text_size(px(size::large() + 2.0)))
+                .child(
+                    text(move || {
+                        place
+                            .get()
+                            .and_then(|p| p.flag)
+                            .unwrap_or_else(|| "◎".into())
+                    })
+                    .text_size(px(size::large() + 2.0)),
+                )
                 .child(
                     view()
                         .flex_1()
                         .min_w(px(0.0))
                         .gap_0p5()
                         .child(ui::body("Location"))
-                        .child(ui::muted(move || -> SharedString { if auto() { "Fastest, automatically".into() } else { "Chosen by you".into() } })),
+                        .child(ui::muted(move || -> SharedString {
+                            if auto() {
+                                "Fastest, automatically".into()
+                            } else {
+                                "Chosen by you".into()
+                            }
+                        })),
                 )
                 .child(ui::muted(value).tabular_nums().number_of_lines(1))
                 .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground)),
@@ -401,10 +527,18 @@ fn location_row() -> impl IntoElement {
 fn test_if_stale() {
     let store = store();
     let (untested, total, testing) = store.proxies.with_untracked(|p| {
-        let preferred = store.state.with_untracked(|s| s.settings.tray_group.clone());
-        let Some(g) = places::main_group(&p.0.groups, &preferred) else { return (0, 0, true) };
+        let preferred = store
+            .state
+            .with_untracked(|s| s.settings.tray_group.clone());
+        let Some(g) = places::main_group(&p.0.groups, &preferred) else {
+            return (0, 0, true);
+        };
         let all = places::places(&p.0.groups, g);
-        (all.iter().filter(|p| p.delay.is_none()).count(), all.len(), !p.0.testing.is_empty())
+        (
+            all.iter().filter(|p| p.delay.is_none()).count(),
+            all.len(),
+            !p.0.testing.is_empty(),
+        )
     });
     if total > 0 && untested * 2 >= total && !testing {
         spawn(store.svc().test_places());
@@ -419,9 +553,18 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
     let regions = move || {
         let q = query.get().to_lowercase();
         store.proxies.with(|p| {
-            let Some(g) = places::main_group(&p.0.groups, &preferred()) else { return (None, vec![], false) };
+            let Some(g) = places::main_group(&p.0.groups, &preferred()) else {
+                return (None, vec![], false);
+            };
             let current = places::current(&p.0.groups, g).map(|c| c.name);
-            let all: Vec<Place> = places::places(&p.0.groups, g).into_iter().filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q) || p.region.to_lowercase().contains(&q)).collect();
+            let all: Vec<Place> = places::places(&p.0.groups, g)
+                .into_iter()
+                .filter(|p| {
+                    q.is_empty()
+                        || p.name.to_lowercase().contains(&q)
+                        || p.region.to_lowercase().contains(&q)
+                })
+                .collect();
             (current, places::by_region(&all), !p.0.testing.is_empty())
         })
     };
@@ -445,21 +588,29 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
                 .gap_2()
                 .p_3()
                 .child(ui::search_field(query, "Search locations").flex_1())
-                .child(
-                    ui::icon_btn(Icon::Bolt, "Test Again").on_press(move || {
-                        spawn(store.svc().test_places());
-                    }),
-                ),
+                .child(ui::icon_btn(Icon::Bolt, "Test Again").on_press(move || {
+                    spawn(store.svc().test_places());
+                })),
         )
         .child(
             scroll().flex_shrink(1.0).child(
                 view()
                     .px_2()
                     .pb_2()
-                    .child(place_row(None, move || auto(), move || {
-                        let fastest = store.proxies.with(|p| places::main_group(&p.0.groups, &preferred()).and_then(|g| places::fastest(&p.0.groups, g)));
-                        fastest.map(|f| format!("{} · {}", f.title, ui::delay_text(f.delay))).unwrap_or_default()
-                    }, pick))
+                    .child(place_row(
+                        None,
+                        move || auto(),
+                        move || {
+                            let fastest = store.proxies.with(|p| {
+                                places::main_group(&p.0.groups, &preferred())
+                                    .and_then(|g| places::fastest(&p.0.groups, g))
+                            });
+                            fastest
+                                .map(|f| format!("{} · {}", f.title, ui::delay_text(f.delay)))
+                                .unwrap_or_default()
+                        },
+                        pick,
+                    ))
                     .child(dynamic(move || {
                         let (now, regions, testing) = regions();
                         let manual = !auto();
@@ -469,10 +620,16 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
                                 view()
                                     .child(ui::section_label(region).px_3().pt_3().pb_1())
                                     .children(list.into_iter().map(move |p| {
-                                        let is_now = manual && now.as_deref() == Some(p.name.as_str());
+                                        let is_now =
+                                            manual && now.as_deref() == Some(p.name.as_str());
                                         let name = p.name.clone();
-                                        let delay = if testing && p.delay.is_none() { "…".to_owned() } else { ui::delay_text(p.delay).to_string() };
-                                        place_line(p, is_now, delay).on_press(move || pick(Some(name.clone())))
+                                        let delay = if testing && p.delay.is_none() {
+                                            "…".to_owned()
+                                        } else {
+                                            ui::delay_text(p.delay).to_string()
+                                        };
+                                        place_line(p, is_now, delay)
+                                            .on_press(move || pick(Some(name.clone())))
                                     }))
                             }))
                         })
@@ -482,7 +639,12 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
 }
 
 /// "Fastest": Kairo keeps it on the fastest place.
-fn place_row(_: Option<()>, chosen: impl Fn() -> bool + 'static, detail: impl Fn() -> String + 'static, pick: impl Fn(Option<String>) + 'static) -> Button {
+fn place_row(
+    _: Option<()>,
+    chosen: impl Fn() -> bool + 'static,
+    detail: impl Fn() -> String + 'static,
+    pick: impl Fn(Option<String>) + 'static,
+) -> Button {
     nsh_base::button()
         .on_press(move || pick(None))
         .flex_row()
@@ -496,7 +658,9 @@ fn place_row(_: Option<()>, chosen: impl Fn() -> bool + 'static, detail: impl Fn
         .child(icon(Icon::Bolt, 15.0).text_color(move || theme().primary))
         .child(ui::body("Fastest").font_weight(FontWeight::MEDIUM).flex_1())
         .child(ui::muted(detail).tabular_nums())
-        .child(view().w(px(16.0)).child(when(chosen, || icon(Icon::Check, 14.0).text_color(move || theme().primary))))
+        .child(view().w(px(16.0)).child(when(chosen, || {
+            icon(Icon::Check, 14.0).text_color(move || theme().primary)
+        })))
 }
 
 fn place_line(p: Place, chosen: bool, delay: String) -> Button {
@@ -513,17 +677,36 @@ fn place_line(p: Place, chosen: bool, delay: String) -> Button {
         .cursor_pointer()
         .hover(|s| s.bg(move || theme().accent))
         .style_when(move || chosen, |s| s.bg(move || ui::selection()))
-        .child(text(p.flag.clone().or_else(|| places::region_flag(p.region)).unwrap_or_else(|| "◎".into())).w(px(20.0)))
+        .child(
+            text(
+                p.flag
+                    .clone()
+                    .or_else(|| places::region_flag(p.region))
+                    .unwrap_or_else(|| "◎".into()),
+            )
+            .w(px(20.0)),
+        )
         .child(ui::body(p.title.clone()).flex_1().number_of_lines(1))
-        .child(text(delay).text_size(px(size::small())).tabular_nums().text_color(move || tone))
-        .child(view().w(px(16.0)).child(chosen.then(|| icon(Icon::Check, 14.0).text_color(move || theme().primary))))
+        .child(
+            text(delay)
+                .text_size(px(size::small()))
+                .tabular_nums()
+                .text_color(move || tone),
+        )
+        .child(
+            view()
+                .w(px(16.0))
+                .child(chosen.then(|| icon(Icon::Check, 14.0).text_color(move || theme().primary))),
+        )
 }
 
 fn route_row() -> impl IntoElement {
     let store = store();
     let mode = move || store.state.with(|s| s.settings.mode);
     let detail = move || -> SharedString {
-        let place = current_place().map(|p| p.title).unwrap_or_else(|| "your location".into());
+        let place = current_place()
+            .map(|p| p.title)
+            .unwrap_or_else(|| "your location".into());
         match mode() {
             Mode::Rule => format!("Local sites go direct; the rest through {place}.").into(),
             Mode::Global => format!("Everything goes through {place}.").into(),
@@ -531,10 +714,23 @@ fn route_row() -> impl IntoElement {
         }
     };
     ui::row_view()
-        .child(view().flex_1().min_w(px(0.0)).gap_0p5().child(ui::body("Route")).child(ui::muted(detail).number_of_lines(2)))
-        .child(ui::segmented(vec![(Mode::Rule, "Smart"), (Mode::Global, "All"), (Mode::Direct, "Direct")], mode, move |m| {
-            store.run(store.svc().set_mode(m))
-        }))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap_0p5()
+                .child(ui::body("Route"))
+                .child(ui::muted(detail).number_of_lines(2)),
+        )
+        .child(ui::segmented(
+            vec![
+                (Mode::Rule, "Smart"),
+                (Mode::Global, "All"),
+                (Mode::Direct, "Direct"),
+            ],
+            mode,
+            move |m| store.run(store.svc().set_mode(m)),
+        ))
 }
 
 fn apps_row() -> impl IntoElement {
@@ -542,7 +738,9 @@ fn apps_row() -> impl IntoElement {
     let summary = move || -> SharedString {
         let preferred = store.state.with(|s| s.settings.tray_group.clone());
         store.proxies.with(|p| {
-            let Some(main) = places::main_group(&p.0.groups, &preferred) else { return "".into() };
+            let Some(main) = places::main_group(&p.0.groups, &preferred) else {
+                return "".into();
+            };
             let apps = places::app_choices(&p.0.groups, &main.name);
             if apps.is_empty() {
                 return "Your subscription has no per-app choices.".into();
@@ -550,9 +748,18 @@ fn apps_row() -> impl IntoElement {
             let own = apps.iter().filter(|a| !a.follows_main).count();
             let names: Vec<&str> = apps.iter().take(3).map(|a| a.group.as_str()).collect();
             if own == 0 {
-                format!("{} and {} more follow your location", names.join(", "), apps.len().saturating_sub(3)).into()
+                format!(
+                    "{} and {} more follow your location",
+                    names.join(", "),
+                    apps.len().saturating_sub(3)
+                )
+                .into()
             } else {
-                format!("{} follow your location · {own} go their own way", apps.len() - own).into()
+                format!(
+                    "{} follow your location · {own} go their own way",
+                    apps.len() - own
+                )
+                .into()
             }
         })
     };
@@ -561,7 +768,14 @@ fn apps_row() -> impl IntoElement {
         .child(
             ui::row_view()
                 .cursor_pointer()
-                .child(view().flex_1().min_w(px(0.0)).gap_0p5().child(ui::body("Apps & Sites")).child(ui::muted(summary).number_of_lines(1)))
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap_0p5()
+                        .child(ui::body("Apps & Sites"))
+                        .child(ui::muted(summary).number_of_lines(1)),
+                )
                 .child(icon(Icon::ChevronRight, 13.0).text_color(move || theme().muted_foreground)),
         )
 }
@@ -579,13 +793,24 @@ fn traffic() -> impl IntoElement {
             let h = height;
             let points: Vec<u64> = live.history.iter().map(|t| t.down + t.up).collect();
             // A quiet baseline the width of the strip, under everything.
-            let mut p = Painter::new().begin_path().move_to(0.0, h - 3.0).line_to(w, h - 3.0).stroke_color(quiet).line_width(2.0).line_cap(LineCap::Round).stroke();
+            let mut p = Painter::new()
+                .begin_path()
+                .move_to(0.0, h - 3.0)
+                .line_to(w, h - 3.0)
+                .stroke_color(quiet)
+                .line_width(2.0)
+                .line_cap(LineCap::Round)
+                .stroke();
             if points.len() < 2 || w <= 0.0 || points.iter().all(|v| *v == 0) {
                 return p;
             }
             let peak = points.iter().copied().max().unwrap_or(0).max(32 * 1024) as f32 * 1.2;
             // Nothing flowing: a quiet baseline, not the accent.
-            let line = if points.iter().all(|v| *v == 0) { quiet } else { line };
+            let line = if points.iter().all(|v| *v == 0) {
+                quiet
+            } else {
+                line
+            };
             let n = kairo_core::service::HISTORY;
             let len = points.len();
             let x = |i: usize| w - (len - 1 - i) as f32 * (w / (n - 1) as f32);
@@ -595,10 +820,17 @@ fn traffic() -> impl IntoElement {
             for i in 1..len {
                 let (px0, py0) = (x(i - 1), y(points[i - 1]));
                 let (px1, py1) = (x(i), y(points[i]));
-                p = p.quadratic_curve_to(point(px(px0), px(py0)), point(px((px0 + px1) / 2.0), px((py0 + py1) / 2.0)));
+                p = p.quadratic_curve_to(
+                    point(px(px0), px(py0)),
+                    point(px((px0 + px1) / 2.0), px((py0 + py1) / 2.0)),
+                );
             }
             p = p.line_to(x(len - 1), y(points[len - 1]));
-            p.stroke_color(line).line_width(2.5).line_cap(LineCap::Round).line_join(LineJoin::Round).stroke()
+            p.stroke_color(line)
+                .line_width(2.5)
+                .line_cap(LineCap::Round)
+                .line_join(LineJoin::Round)
+                .stroke()
         })
     })
     .h(px(height))
@@ -614,7 +846,9 @@ fn traffic() -> impl IntoElement {
                 .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down)))
                 .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
                 .child(view().flex_1())
-                .child(ui::link_btn("Activity").on_press(move || store.page.set(Page::Connections))),
+                .child(
+                    ui::link_btn("Activity").on_press(move || store.page.set(Page::Connections)),
+                ),
         )
         .child(graph)
 }
@@ -625,14 +859,23 @@ fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
         .items_center()
         .gap_1()
         .child(icon(glyph, 12.0).text_color(move || theme().muted_foreground))
-        .child(text(move || kairo_core::speed(value())).text_size(px(size::small())).tabular_nums().text_color(move || theme().muted_foreground))
+        .child(
+            text(move || kairo_core::speed(value()))
+                .text_size(px(size::small()))
+                .tabular_nums()
+                .text_color(move || theme().muted_foreground),
+        )
 }
 
 /// The subscription: usage, expiry and a failed update, quietly.
 fn plan() -> impl IntoElement {
     let store = store();
     let profile = move || store.state.with(|s| s.profiles.active_profile().cloned());
-    let updating = move || store.state.with(|s| profile().is_some_and(|p| s.updating.contains(&p.id)));
+    let updating = move || {
+        store
+            .state
+            .with(|s| profile().is_some_and(|p| s.updating.contains(&p.id)))
+    };
     dynamic(move || {
         let Some(p) = profile() else { return None };
         let busy = updating();
@@ -641,18 +884,30 @@ fn plan() -> impl IntoElement {
             let mut parts = vec![p.name.clone()];
             if let Some(u) = p.usage {
                 if u.total > 0 {
-                    parts.push(format!("{} of {}", kairo_core::bytes(u.used()), kairo_core::bytes(u.total)));
+                    parts.push(format!(
+                        "{} of {}",
+                        kairo_core::bytes(u.used()),
+                        kairo_core::bytes(u.total)
+                    ));
                 }
                 if let Some(t) = u.expire {
                     let days = (t - kairo_core::profile::now()) / 86400;
-                    parts.push(if days < 0 { "expired".into() } else { format!("{days} days left") });
+                    parts.push(if days < 0 {
+                        "expired".into()
+                    } else {
+                        format!("{days} days left")
+                    });
                 }
             }
             let failed = p.last_error.clone();
             view()
                 .gap_1()
                 .px_1()
-                .child(ui::muted(parts.join(" · ")).text_size(px(size::small())).tabular_nums())
+                .child(
+                    ui::muted(parts.join(" · "))
+                        .text_size(px(size::small()))
+                        .tabular_nums(),
+                )
                 .child(failed.map(move |e| {
                     let id = id.clone();
                     view()
@@ -660,14 +915,21 @@ fn plan() -> impl IntoElement {
                         .items_center()
                         .gap_2()
                         .child(
-                            ui::muted(format!("Couldn't update the subscription — using the saved copy. {}", explain(&e).0))
-                                .text_size(px(size::small()))
-                                .flex_1()
-                                .number_of_lines(2),
+                            ui::muted(format!(
+                                "Couldn't update the subscription — using the saved copy. {}",
+                                explain(&e).0
+                            ))
+                            .text_size(px(size::small()))
+                            .flex_1()
+                            .number_of_lines(2),
                         )
-                        .child(ui::link_btn(if busy { "Updating…" } else { "Retry" }).disabled(busy).on_press(move || {
-                            store.run(store.svc().update_profile(id.clone()))
-                        }))
+                        .child(
+                            ui::link_btn(if busy { "Updating…" } else { "Retry" })
+                                .disabled(busy)
+                                .on_press(move || {
+                                    store.run(store.svc().update_profile(id.clone()))
+                                }),
+                        )
                 }))
         }))
     })

@@ -68,9 +68,13 @@ pub fn page() -> impl IntoElement {
                     },
                     move |i| sort.set([Sort::Config, Sort::Delay, Sort::Name][i.min(2)]),
                 ),
-                toolbar::button("proxies.refresh", "Refresh", Glyph::Refresh, Icon::Refresh, move || {
-                    store.run(store.svc().refresh_proxies())
-                }),
+                toolbar::button(
+                    "proxies.refresh",
+                    "Refresh",
+                    Glyph::Refresh,
+                    Icon::Refresh,
+                    move || store.run(store.svc().refresh_proxies()),
+                ),
             ],
         ))
         .child(
@@ -83,9 +87,19 @@ pub fn page() -> impl IntoElement {
                     .child(view().flex_1().min_w(px(0.0)).child(dynamic(move || {
                         let cur = current.get();
                         untracked(move || match cur {
-                            Some(Selected::Group(name)) => group_detail(name, query, sort).into_element(),
-                            Some(Selected::Provider(name)) => provider_detail(name, query).into_element(),
-                            None => ui::empty_state(Icon::Proxies, "No groups", "This profile has no proxy groups.", None).into_element(),
+                            Some(Selected::Group(name)) => {
+                                group_detail(name, query, sort).into_element()
+                            }
+                            Some(Selected::Provider(name)) => {
+                                provider_detail(name, query).into_element()
+                            }
+                            None => ui::empty_state(
+                                Icon::Proxies,
+                                "No groups",
+                                "This profile has no proxy groups.",
+                                None,
+                            )
+                            .into_element(),
                         })
                     })))
             })
@@ -94,13 +108,22 @@ pub fn page() -> impl IntoElement {
                     Icon::Proxies,
                     "The core is not running",
                     "Groups and nodes appear here once the core starts.",
-                    Some(ui::btn_icon(Icon::Play, "Start Core", Variant::Primary).on_press(move || store.run(store.svc().start_core())).into_element()),
+                    Some(
+                        ui::btn_icon(Icon::Play, "Start Core", Variant::Primary)
+                            .on_press(move || store.run(store.svc().start_core()))
+                            .into_element(),
+                    ),
                 )
             }),
         )
 }
 
-fn list_row(label: SharedString, detail: impl IntoReactive<SharedString>, is: impl Fn() -> bool + Copy + 'static, on_press: impl Fn() + 'static) -> impl IntoElement {
+fn list_row(
+    label: SharedString,
+    detail: impl IntoReactive<SharedString>,
+    is: impl Fn() -> bool + Copy + 'static,
+    on_press: impl Fn() + 'static,
+) -> impl IntoElement {
     button()
         .selected(is)
         .on_press(on_press)
@@ -112,11 +135,24 @@ fn list_row(label: SharedString, detail: impl IntoReactive<SharedString>, is: im
         .cursor_pointer()
         .hover(|s| s.bg(move || theme().accent))
         .style_when(is, |s| s.bg(move || ui::selection()))
-        .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM).number_of_lines(1))
-        .child(text(detail).text_size(px(size::small())).text_color(move || theme().muted_foreground).number_of_lines(1))
+        .child(
+            text(label)
+                .text_size(px(size::body()))
+                .font_weight(FontWeight::MEDIUM)
+                .number_of_lines(1),
+        )
+        .child(
+            text(detail)
+                .text_size(px(size::small()))
+                .text_color(move || theme().muted_foreground)
+                .number_of_lines(1),
+        )
 }
 
-fn group_list(current: Memo<Option<Selected>>, selected: Signal<Option<Selected>>) -> impl IntoElement {
+fn group_list(
+    current: Memo<Option<Selected>>,
+    selected: Signal<Option<Selected>>,
+) -> impl IntoElement {
     let store = store();
     let groups = computed(move || store.proxies.with(|p| p.0.groups.clone()));
     let providers = computed(move || store.proxies.with(|p| p.0.providers.clone()));
@@ -131,7 +167,13 @@ fn group_list(current: Memo<Option<Selected>>, selected: Signal<Option<Selected>
                 .gap_0p5()
                 .child(ui::section_label("Groups").px_2p5().pt_1().pb_1())
                 .child(each(
-                    move || groups.get().into_iter().filter(|g| !g.hidden).collect::<Vec<Group>>(),
+                    move || {
+                        groups
+                            .get()
+                            .into_iter()
+                            .filter(|g| !g.hidden)
+                            .collect::<Vec<Group>>()
+                    },
                     |g: &Group| g.name.clone(),
                     move |g, _| {
                         let g = g.get_untracked();
@@ -158,7 +200,9 @@ fn group_list(current: Memo<Option<Selected>>, selected: Signal<Option<Selected>
                                 })
                             }
                         };
-                        list_row(name.clone().into(), detail, is, move || selected.set(Some(key.clone())))
+                        list_row(name.clone().into(), detail, is, move || {
+                            selected.set(Some(key.clone()))
+                        })
                     },
                 ))
                 .child(when(
@@ -175,12 +219,16 @@ fn group_list(current: Memo<Option<Selected>>, selected: Signal<Option<Selected>
                                     let key = Selected::Provider(p.name.clone());
                                     let is = {
                                         let key = key.clone();
-                                        let m = computed(move || current.get().as_ref() == Some(&key));
+                                        let m =
+                                            computed(move || current.get().as_ref() == Some(&key));
                                         move || m.get()
                                     };
                                     list_row(
                                         p.name.clone().into(),
-                                        SharedString::from(format!("{} · {}/{} alive", p.vehicle, p.alive, p.count)),
+                                        SharedString::from(format!(
+                                            "{} · {}/{} alive",
+                                            p.vehicle, p.alive, p.count
+                                        )),
                                         is,
                                         move || selected.set(Some(key.clone())),
                                     )
@@ -193,7 +241,11 @@ fn group_list(current: Memo<Option<Selected>>, selected: Signal<Option<Selected>
 
 fn sorted(members: &[Node], query: &str, sort: Sort) -> Vec<Node> {
     let q = query.trim().to_lowercase();
-    let mut out: Vec<Node> = members.iter().filter(|m| q.is_empty() || m.name.to_lowercase().contains(&q)).cloned().collect();
+    let mut out: Vec<Node> = members
+        .iter()
+        .filter(|m| q.is_empty() || m.name.to_lowercase().contains(&q))
+        .cloned()
+        .collect();
     match sort {
         Sort::Config => {}
         Sort::Name => out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
@@ -208,8 +260,18 @@ fn sorted(members: &[Node], query: &str, sort: Sort) -> Vec<Node> {
 fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl IntoElement {
     let store = store();
     let gname = name.clone();
-    let group = computed(move || store.proxies.with(|p| p.0.groups.iter().find(|g| g.name == gname).cloned()));
-    let nodes = computed(move || group.with(|g| g.as_ref().map(|g| sorted(&g.members, &query.get(), sort.get())).unwrap_or_default()));
+    let group = computed(move || {
+        store
+            .proxies
+            .with(|p| p.0.groups.iter().find(|g| g.name == gname).cloned())
+    });
+    let nodes = computed(move || {
+        group.with(|g| {
+            g.as_ref()
+                .map(|g| sorted(&g.members, &query.get(), sort.get()))
+                .unwrap_or_default()
+        })
+    });
     let tname = name.clone();
     let testing_group = computed(move || store.proxies.with(|p| p.0.testing.contains(&tname)));
     let testing_group = move || testing_group.get();
@@ -231,89 +293,134 @@ fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl
                         .flex_1()
                         .min_w(px(0.0))
                         .gap_0p5()
-                        .child(text(header_name).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
+                        .child(
+                            text(header_name)
+                                .text_size(px(size::large()))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .number_of_lines(1),
+                        )
                         .child(ui::muted(move || -> SharedString {
                             group.with(|g| match g {
                                 Some(g) => {
-                                    let how = if g.selectable() { "pick a node" } else { "picks automatically" };
-                                    format!("{} · {} members · {how}", g.kind_title(), g.members.len()).into()
+                                    let how = if g.selectable() {
+                                        "pick a node"
+                                    } else {
+                                        "picks automatically"
+                                    };
+                                    format!(
+                                        "{} · {} members · {how}",
+                                        g.kind_title(),
+                                        g.members.len()
+                                    )
+                                    .into()
                                 }
                                 None => "".into(),
                             })
                         })),
                 )
                 .child(
-                    ui::btn_icon(Icon::Bolt, move || -> SharedString { if testing_group() { "Testing…".into() } else { "Test All".into() } }, Variant::Secondary)
-                        .disabled(testing_group)
-                        .on_press(move || store.run(store.svc().test_group(test_name.clone()))),
+                    ui::btn_icon(
+                        Icon::Bolt,
+                        move || -> SharedString {
+                            if testing_group() {
+                                "Testing…".into()
+                            } else {
+                                "Test All".into()
+                            }
+                        },
+                        Variant::Secondary,
+                    )
+                    .disabled(testing_group)
+                    .on_press(move || store.run(store.svc().test_group(test_name.clone()))),
                 ),
         )
         .child(node_list(name, group, nodes))
 }
 
-fn node_list(group_name: String, group: Memo<Option<Group>>, nodes: Memo<Vec<Node>>) -> impl IntoElement {
+fn node_list(
+    group_name: String,
+    group: Memo<Option<Group>>,
+    nodes: Memo<Vec<Node>>,
+) -> impl IntoElement {
     let store = store();
     let selectable = move || group.with(|g| g.as_ref().is_some_and(|g| g.selectable()));
     let now = move || group.with(|g| g.as_ref().and_then(|g| g.now.clone()));
-    virtual_list(move || nodes.with(Vec::len), move |at| {
-        let node = computed(move || nodes.with(|n| n.get(at.index()).cloned()));
-        let name = move || node.with(|n| n.as_ref().map(|n| n.name.clone()).unwrap_or_default());
-        let is_now = move || now().is_some_and(|n| n == name());
-        let delay = move || node.with(|n| n.as_ref().and_then(|n| n.delay));
-        let testing = move || store.proxies.with(|p| p.0.testing.contains(&name()));
-        let gname = group_name.clone();
-        button()
-            .on_press(move || {
-                if selectable() && !is_now() {
-                    store.run(store.svc().select(gname.clone(), name()));
-                }
-            })
-            .accessibility_label(move || -> SharedString { name().into() })
-            .selected(is_now)
-            .flex_row()
-            .items_center()
-            .gap_3()
-            .h(px(36.0))
-            .px_5()
-            .cursor_pointer()
-            .hover(|s| s.bg(move || theme().accent))
-            .child(
-                view()
-                    .w(px(16.0))
-                    .items_center()
-                    .child(icon(Icon::Check, 14.0).text_color(move || theme().primary).style_when(move || !is_now(), |s| s.opacity(0.0))),
-            )
-            .child(
-                text(move || -> SharedString { name().into() })
-                    .text_size(px(size::body()))
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .number_of_lines(1)
-                    .font_weight(FontWeight::NORMAL)
-                    .style_when(is_now, |s| s.font_weight(FontWeight::MEDIUM).text_color(move || theme().primary)),
-            )
-            .child(
-                text(move || -> SharedString { node.with(|n| n.as_ref().map(|n| type_label(n)).unwrap_or_default()).into() })
+    virtual_list(
+        move || nodes.with(Vec::len),
+        move |at| {
+            let node = computed(move || nodes.with(|n| n.get(at.index()).cloned()));
+            let name =
+                move || node.with(|n| n.as_ref().map(|n| n.name.clone()).unwrap_or_default());
+            let is_now = move || now().is_some_and(|n| n == name());
+            let delay = move || node.with(|n| n.as_ref().and_then(|n| n.delay));
+            let testing = move || store.proxies.with(|p| p.0.testing.contains(&name()));
+            let gname = group_name.clone();
+            button()
+                .on_press(move || {
+                    if selectable() && !is_now() {
+                        store.run(store.svc().select(gname.clone(), name()));
+                    }
+                })
+                .accessibility_label(move || -> SharedString { name().into() })
+                .selected(is_now)
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .h(px(36.0))
+                .px_5()
+                .cursor_pointer()
+                .hover(|s| s.bg(move || theme().accent))
+                .child(
+                    view().w(px(16.0)).items_center().child(
+                        icon(Icon::Check, 14.0)
+                            .text_color(move || theme().primary)
+                            .style_when(move || !is_now(), |s| s.opacity(0.0)),
+                    ),
+                )
+                .child(
+                    text(move || -> SharedString { name().into() })
+                        .text_size(px(size::body()))
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .number_of_lines(1)
+                        .font_weight(FontWeight::NORMAL)
+                        .style_when(is_now, |s| {
+                            s.font_weight(FontWeight::MEDIUM)
+                                .text_color(move || theme().primary)
+                        }),
+                )
+                .child(
+                    text(move || -> SharedString {
+                        node.with(|n| n.as_ref().map(|n| type_label(n)).unwrap_or_default())
+                            .into()
+                    })
                     .text_size(px(size::small()))
                     .text_color(move || theme().muted_foreground)
                     .w(px(110.0))
                     .number_of_lines(1),
-            )
-            .child(
-                text(move || -> SharedString { if testing() { "…".into() } else { ui::delay_text(delay()) } })
+                )
+                .child(
+                    text(move || -> SharedString {
+                        if testing() {
+                            "…".into()
+                        } else {
+                            ui::delay_text(delay())
+                        }
+                    })
                     .text_size(px(size::body()))
                     .tabular_nums()
                     .text_right()
                     .w(px(72.0))
                     .text_color(move || ui::delay_tone(delay())),
-            )
-            .child(
-                ui::icon_btn(Icon::Bolt, "Test")
-                    .size(px(24.0))
-                    .disabled(testing)
-                    .on_press(move || store.run(store.svc().test_node(name(), None))),
-            )
-    })
+                )
+                .child(
+                    ui::icon_btn(Icon::Bolt, "Test")
+                        .size(px(24.0))
+                        .disabled(testing)
+                        .on_press(move || store.run(store.svc().test_node(name(), None))),
+                )
+        },
+    )
     .keys(move || nodes.with(|n| n.iter().map(|n| n.name.clone()).collect::<Vec<_>>()))
     .estimated_item_size(px(36.0))
     .content_padding_top(px(4.0))
@@ -339,7 +446,11 @@ fn kind_name(kind: &str) -> &str {
 }
 
 fn type_label(n: &Node) -> String {
-    let mut s = if n.is_group { "Group".to_owned() } else { kind_name(&n.kind).to_owned() };
+    let mut s = if n.is_group {
+        "Group".to_owned()
+    } else {
+        kind_name(&n.kind).to_owned()
+    };
     if n.udp {
         s.push_str(" · UDP");
     }
@@ -349,7 +460,11 @@ fn type_label(n: &Node) -> String {
 fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
     let store = store();
     let pname = name.clone();
-    let provider = computed(move || store.proxies.with(|p| p.0.providers.iter().find(|x| x.name == pname).cloned()));
+    let provider = computed(move || {
+        store
+            .proxies
+            .with(|p| p.0.providers.iter().find(|x| x.name == pname).cloned())
+    });
     let tname = name.clone();
     let testing = computed(move || store.proxies.with(|p| p.0.testing.contains(&tname)));
     let testing = move || testing.get();
@@ -372,7 +487,11 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                     view()
                         .flex_1()
                         .gap_0p5()
-                        .child(text(name.clone()).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD))
+                        .child(
+                            text(name.clone())
+                                .text_size(px(size::large()))
+                                .font_weight(FontWeight::SEMIBOLD),
+                        )
                         .child(ui::muted(move || -> SharedString {
                             provider.with(|p| match p {
                                 Some(p) => format!(
@@ -380,23 +499,43 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                                     p.vehicle,
                                     p.count,
                                     p.alive,
-                                    p.updated_at.as_ref().map(|u| format!(" · updated {}", u.split('T').next().unwrap_or(u))).unwrap_or_default()
+                                    p.updated_at
+                                        .as_ref()
+                                        .map(|u| format!(
+                                            " · updated {}",
+                                            u.split('T').next().unwrap_or(u)
+                                        ))
+                                        .unwrap_or_default()
                                 )
                                 .into(),
                                 None => "".into(),
                             })
                         })),
                 )
-                .child(ui::btn_icon(Icon::Bolt, move || -> SharedString { if testing() { "Checking…".into() } else { "Health Check".into() } }, Variant::Secondary)
+                .child(
+                    ui::btn_icon(
+                        Icon::Bolt,
+                        move || -> SharedString {
+                            if testing() {
+                                "Checking…".into()
+                            } else {
+                                "Health Check".into()
+                            }
+                        },
+                        Variant::Secondary,
+                    )
                     .disabled(testing)
-                    .on_press(move || store.run(store.svc().healthcheck_provider(n1.clone()))))
-                .child(ui::btn_icon(Icon::Refresh, "Update", Variant::Secondary).on_press(move || {
-                    store.run_then(store.svc().update_provider(n2.clone()), move |r| {
-                        if r.is_ok() {
-                            store.info("Provider updated");
-                        }
-                    })
-                })),
+                    .on_press(move || store.run(store.svc().healthcheck_provider(n1.clone()))),
+                )
+                .child(
+                    ui::btn_icon(Icon::Refresh, "Update", Variant::Secondary).on_press(move || {
+                        store.run_then(store.svc().update_provider(n2.clone()), move |r| {
+                            if r.is_ok() {
+                                store.info("Provider updated");
+                            }
+                        })
+                    }),
+                ),
         )
         .child(dynamic(move || {
             let info = provider.with(|p| p.as_ref().and_then(|p| p.info));
@@ -406,7 +545,11 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                     .gap_3()
                     .child(info.map(|i| {
                         let used = i.upload + i.download;
-                        let fraction = if i.total > 0 { used as f32 / i.total as f32 } else { 0.0 };
+                        let fraction = if i.total > 0 {
+                            used as f32 / i.total as f32
+                        } else {
+                            0.0
+                        };
                         ui::card()
                             .p_4()
                             .gap_2()
@@ -416,10 +559,14 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                                 "{} of {} · {}",
                                 kairo_core::bytes(used),
                                 kairo_core::bytes(i.total),
-                                crate::pages::overview::expiry_text((i.expire > 0).then_some(i.expire))
+                                crate::pages::overview::expiry_text(
+                                    (i.expire > 0).then_some(i.expire)
+                                )
                             )))
                     }))
-                    .child(ui::muted("Nodes from this provider appear in the groups that use it."))
+                    .child(ui::muted(
+                        "Nodes from this provider appear in the groups that use it.",
+                    ))
             })
         }))
 }

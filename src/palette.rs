@@ -17,8 +17,18 @@ struct Command {
     run: std::rc::Rc<dyn Fn(Store)>,
 }
 
-fn cmd(title: impl Into<String>, detail: impl Into<String>, glyph: Icon, run: impl Fn(Store) + 'static) -> Command {
-    Command { title: title.into(), detail: detail.into(), glyph, run: std::rc::Rc::new(run) }
+fn cmd(
+    title: impl Into<String>,
+    detail: impl Into<String>,
+    glyph: Icon,
+    run: impl Fn(Store) + 'static,
+) -> Command {
+    Command {
+        title: title.into(),
+        detail: detail.into(),
+        glyph,
+        run: std::rc::Rc::new(run),
+    }
 }
 
 fn commands(store: Store) -> Vec<Command> {
@@ -26,27 +36,72 @@ fn commands(store: Store) -> Vec<Command> {
     let has_profile = store.state.with(|s| s.profiles.active.is_some());
     let mut out = Vec::new();
     if has_profile {
-        out.push(cmd(if running { "Disconnect" } else { "Connect" }, "Connection", Icon::Shield, move |s| s.run(s.svc().connect(!running))));
+        out.push(cmd(
+            if running { "Disconnect" } else { "Connect" },
+            "Connection",
+            Icon::Shield,
+            move |s| s.run(s.svc().connect(!running)),
+        ));
     }
-    for (m, title) in [(Mode::Rule, "Route: Smart"), (Mode::Global, "Route: All Traffic"), (Mode::Direct, "Route: Direct")] {
-        out.push(cmd(title, "Connection", Icon::Rules, move |s| s.run(s.svc().set_mode(m))));
+    for (m, title) in [
+        (Mode::Rule, "Route: Smart"),
+        (Mode::Global, "Route: All Traffic"),
+        (Mode::Direct, "Route: Direct"),
+    ] {
+        out.push(cmd(title, "Connection", Icon::Rules, move |s| {
+            s.run(s.svc().set_mode(m))
+        }));
     }
-    out.push(cmd("Location: Fastest", "Kairo keeps the fastest place", Icon::Bolt, |s| s.run(s.svc().set_location(None))));
-    out.push(cmd("Test Locations", "Measure every place's delay", Icon::Bolt, |s| s.run(s.svc().test_places())));
+    out.push(cmd(
+        "Location: Fastest",
+        "Kairo keeps the fastest place",
+        Icon::Bolt,
+        |s| s.run(s.svc().set_location(None)),
+    ));
+    out.push(cmd(
+        "Test Locations",
+        "Measure every place's delay",
+        Icon::Bolt,
+        |s| s.run(s.svc().test_places()),
+    ));
     for page in Page::ALL {
-        out.push(cmd(format!("Go to {}", page.title()), if page.advanced() { "Advanced" } else { "Page" }, Icon::ChevronRight, move |s| s.page.set(page)));
+        out.push(cmd(
+            format!("Go to {}", page.title()),
+            if page.advanced() { "Advanced" } else { "Page" },
+            Icon::ChevronRight,
+            move |s| s.page.set(page),
+        ));
     }
-    out.push(cmd("Add Subscription…", "Subscriptions", Icon::Plus, |s| s.page.set(Page::Profiles)));
-    out.push(cmd("Update Subscriptions", "Subscriptions", Icon::Refresh, |s| {
-        s.run_then(s.svc().update_all_profiles(), move |r| {
-            if r.is_ok() {
-                s.info("Subscriptions updated");
-            }
-        })
+    out.push(cmd(
+        "Add Subscription…",
+        "Subscriptions",
+        Icon::Plus,
+        |s| s.page.set(Page::Profiles),
+    ));
+    out.push(cmd(
+        "Update Subscriptions",
+        "Subscriptions",
+        Icon::Refresh,
+        |s| {
+            s.run_then(s.svc().update_all_profiles(), move |r| {
+                if r.is_ok() {
+                    s.info("Subscriptions updated");
+                }
+            })
+        },
+    ));
+    out.push(cmd("Restart Core", "Advanced", Icon::Restart, |s| {
+        s.run(s.svc().restart_core())
     }));
-    out.push(cmd("Restart Core", "Advanced", Icon::Restart, |s| s.run(s.svc().restart_core())));
-    out.push(cmd("Close All Connections", "Advanced", Icon::Close, |s| s.run(s.svc().close_all_connections())));
-    out.push(cmd("Update GeoIP and GeoSite", "Advanced", Icon::Download, |s| s.run(s.svc().update_geo())));
+    out.push(cmd("Close All Connections", "Advanced", Icon::Close, |s| {
+        s.run(s.svc().close_all_connections())
+    }));
+    out.push(cmd(
+        "Update GeoIP and GeoSite",
+        "Advanced",
+        Icon::Download,
+        |s| s.run(s.svc().update_geo()),
+    ));
     out.push(cmd("Check for Updates", "Kairo", Icon::Download, |s| {
         s.run_then(s.svc().check_for_update(), move |r| {
             if let Ok(None) = r {
@@ -56,17 +111,32 @@ fn commands(store: Store) -> Vec<Command> {
     }));
     // Every place, by delay.
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
-    let mut list = store.proxies.with(|p| places::main_group(&p.0.groups, &preferred).map(|g| places::places(&p.0.groups, g)).unwrap_or_default());
+    let mut list = store.proxies.with(|p| {
+        places::main_group(&p.0.groups, &preferred)
+            .map(|g| places::places(&p.0.groups, g))
+            .unwrap_or_default()
+    });
     list.sort_by_key(|p| match p.delay {
         Some(d) if d > 0 => d,
         _ => u32::MAX,
     });
     for p in list {
         let name = p.name.clone();
-        let flag = p.flag.clone().or_else(|| places::region_flag(p.region)).unwrap_or_default();
+        let flag = p
+            .flag
+            .clone()
+            .or_else(|| places::region_flag(p.region))
+            .unwrap_or_default();
         out.push(cmd(
             format!("{flag} {}", p.title).trim().to_owned(),
-            format!("Location · {}{}", p.region, p.delay.filter(|d| *d > 0).map(|d| format!(" · {d} ms")).unwrap_or_default()),
+            format!(
+                "Location · {}{}",
+                p.region,
+                p.delay
+                    .filter(|d| *d > 0)
+                    .map(|d| format!(" · {d} ms"))
+                    .unwrap_or_default()
+            ),
             Icon::Globe,
             move |s| s.run(s.svc().set_location(Some(name.clone()))),
         ));
@@ -77,7 +147,8 @@ fn commands(store: Store) -> Vec<Command> {
 /// Words in any order, each a prefix of a word of the title or detail.
 fn matches(c: &Command, q: &str) -> bool {
     let hay = format!("{} {}", c.title, c.detail).to_lowercase();
-    q.split_whitespace().all(|w| hay.contains(&w.to_lowercase()))
+    q.split_whitespace()
+        .all(|w| hay.contains(&w.to_lowercase()))
 }
 
 thread_local! {
@@ -107,7 +178,11 @@ fn panel(open: Signal<bool>, store: Store) -> impl IntoElement {
         let all = all.clone();
         move || {
             let q = query.get();
-            all.iter().filter(|c| q.trim().is_empty() || matches(c, &q)).take(40).cloned().collect::<Vec<_>>()
+            all.iter()
+                .filter(|c| q.trim().is_empty() || matches(c, &q))
+                .take(40)
+                .cloned()
+                .collect::<Vec<_>>()
         }
     };
     let shown = std::rc::Rc::new(shown);
@@ -125,9 +200,13 @@ fn panel(open: Signal<bool>, store: Store) -> impl IntoElement {
     on_key("escape", move |_| open.set(false));
     {
         let shown = shown.clone();
-        on_key("down", move |_| selected.set((selected.get_untracked() + 1).min(shown().len().saturating_sub(1))));
+        on_key("down", move |_| {
+            selected.set((selected.get_untracked() + 1).min(shown().len().saturating_sub(1)))
+        });
     }
-    on_key("up", move |_| selected.set(selected.get_untracked().saturating_sub(1)));
+    on_key("up", move |_| {
+        selected.set(selected.get_untracked().saturating_sub(1))
+    });
     let submit = run.clone();
     view()
         .absolute()
@@ -155,7 +234,9 @@ fn panel(open: Signal<bool>, store: Store) -> impl IntoElement {
                         .gap_3()
                         .px_4()
                         .h(px(52.0))
-                        .child(icon(Icon::Search, 16.0).text_color(move || theme().muted_foreground))
+                        .child(
+                            icon(Icon::Search, 16.0).text_color(move || theme().muted_foreground),
+                        )
                         .child(
                             input()
                                 .value(move || query.get())
@@ -173,32 +254,48 @@ fn panel(open: Signal<bool>, store: Store) -> impl IntoElement {
                         ),
                 )
                 .child(view().h(px(1.0)).bg(move || theme().border.opacity(0.6)))
-                .child(scroll().flex_shrink(1.0).child(view().p_2().child(dynamic(move || {
-                    let list = shown();
-                    let sel = selected.get();
-                    untracked(move || {
-                        view().children(list.into_iter().enumerate().map(move |(i, c)| {
-                            let is = i == sel;
-                            let run_one = c.run.clone();
-                            nsh_base::button()
-                                .on_press(move || {
-                                    open.set(false);
-                                    run_one(store);
-                                })
-                                .flex_row()
-                                .items_center()
-                                .gap_3()
-                                .h(px(40.0))
-                                .px_3()
-                                .rounded(px(12.0))
-                                .cursor_pointer()
-                                .hover(|s| s.bg(move || theme().accent))
-                                .style_when(move || is, |s| s.bg(move || ui::selection()))
-                                .child(icon(c.glyph, 15.0).text_color(move || if is { theme().primary } else { theme().muted_foreground }))
-                                .child(ui::body(c.title.clone()).flex_1().number_of_lines(1))
-                                .child(ui::muted(c.detail.clone()).text_size(px(size::small())).number_of_lines(1))
-                        }))
-                    })
-                })))),
+                .child(
+                    scroll()
+                        .flex_shrink(1.0)
+                        .child(view().p_2().child(dynamic(move || {
+                            let list = shown();
+                            let sel = selected.get();
+                            untracked(move || {
+                                view().children(list.into_iter().enumerate().map(move |(i, c)| {
+                                    let is = i == sel;
+                                    let run_one = c.run.clone();
+                                    nsh_base::button()
+                                        .on_press(move || {
+                                            open.set(false);
+                                            run_one(store);
+                                        })
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_3()
+                                        .h(px(40.0))
+                                        .px_3()
+                                        .rounded(px(12.0))
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(move || theme().accent))
+                                        .style_when(move || is, |s| s.bg(move || ui::selection()))
+                                        .child(icon(c.glyph, 15.0).text_color(move || {
+                                            if is {
+                                                theme().primary
+                                            } else {
+                                                theme().muted_foreground
+                                            }
+                                        }))
+                                        .child(
+                                            ui::body(c.title.clone()).flex_1().number_of_lines(1),
+                                        )
+                                        .child(
+                                            ui::muted(c.detail.clone())
+                                                .text_size(px(size::small()))
+                                                .number_of_lines(1),
+                                        )
+                                }))
+                            })
+                        }))),
+                ),
         )
 }

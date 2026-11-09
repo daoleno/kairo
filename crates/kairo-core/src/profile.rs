@@ -38,10 +38,13 @@ impl Usage {
             };
             let value = value.trim();
             // Some providers send floats ("1.2e10") or empty values.
-            let number = value
-                .parse::<u64>()
-                .ok()
-                .or_else(|| value.parse::<f64>().ok().filter(|v| *v >= 0.0).map(|v| v as u64));
+            let number = value.parse::<u64>().ok().or_else(|| {
+                value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| *v >= 0.0)
+                    .map(|v| v as u64)
+            });
             match (key.trim().to_ascii_lowercase().as_str(), number) {
                 ("upload", Some(n)) => (usage.upload, any) = (n, true),
                 ("download", Some(n)) => (usage.download, any) = (n, true),
@@ -246,12 +249,18 @@ fn looks_like_prose(text: &str) -> bool {
         && text.lines().count() <= 12
         && !text.lines().any(|l| {
             let l = l.trim_start();
-            l.starts_with('-') || l.split_once(':').is_some_and(|(k, _)| !k.is_empty() && !k.contains(char::is_whitespace) && k.is_ascii())
+            l.starts_with('-')
+                || l.split_once(':').is_some_and(|(k, _)| {
+                    !k.is_empty() && !k.contains(char::is_whitespace) && k.is_ascii()
+                })
         })
 }
 
 fn looks_like_html(text: &str) -> bool {
-    let head = text.get(..text.len().min(200)).unwrap_or(text).to_ascii_lowercase();
+    let head = text
+        .get(..text.len().min(200))
+        .unwrap_or(text)
+        .to_ascii_lowercase();
     head.starts_with("<!doctype html") || head.starts_with("<html") || head.contains("<body")
 }
 
@@ -313,10 +322,13 @@ pub async fn download(url: &str, proxy: Option<&str>) -> Result<Download, Profil
         .timeout(std::time::Duration::from_secs(30))
         .connect_timeout(std::time::Duration::from_secs(10));
     builder = match proxy {
-        Some(p) => builder.proxy(reqwest::Proxy::all(p).map_err(|e| ProfileError::Download(e.to_string()))?),
+        Some(p) => builder
+            .proxy(reqwest::Proxy::all(p).map_err(|e| ProfileError::Download(e.to_string()))?),
         None => builder.no_proxy(),
     };
-    let client = builder.build().map_err(|e| ProfileError::Download(e.to_string()))?;
+    let client = builder
+        .build()
+        .map_err(|e| ProfileError::Download(e.to_string()))?;
     let response = client
         .get(url)
         .send()
@@ -334,13 +346,21 @@ pub async fn download(url: &str, proxy: Option<&str>) -> Result<Download, Profil
     };
     let usage = header("subscription-userinfo").and_then(|h| Usage::parse(&h));
     let name = header("content-disposition").and_then(|h| filename_of(&h));
-    let interval_hours = header("profile-update-interval").and_then(|h| h.trim().parse::<f64>().ok()).map(|h| h.max(0.0).round() as u32);
+    let interval_hours = header("profile-update-interval")
+        .and_then(|h| h.trim().parse::<f64>().ok())
+        .map(|h| h.max(0.0).round() as u32);
     let web_page = header("profile-web-page-url");
     let body = response
         .text()
         .await
         .map_err(|e| ProfileError::Download(short_error(&e)))?;
-    Ok(Download { body, usage, name, interval_hours, web_page })
+    Ok(Download {
+        body,
+        usage,
+        name,
+        interval_hours,
+        web_page,
+    })
 }
 
 fn short_error(e: &reqwest::Error) -> String {
@@ -477,7 +497,10 @@ mod tests {
 
     #[test]
     fn filename_from_disposition() {
-        assert_eq!(filename_of("attachment; filename=\"My Sub.yaml\""), Some("My Sub".into()));
+        assert_eq!(
+            filename_of("attachment; filename=\"My Sub.yaml\""),
+            Some("My Sub".into())
+        );
         assert_eq!(
             filename_of("attachment; filename*=UTF-8''%E6%9C%BA%E5%9C%BA.yaml; filename=x.yaml"),
             Some("机场".into())
@@ -489,14 +512,25 @@ mod tests {
     fn provider_notices_in_their_words() {
         let zh = "请登录系统网站后台，或在系统网站后台的订阅(SS/Trojan)页面开启订阅获取。每次开启后，订阅可获取有效时间为：10 分钟";
         assert_eq!(inspect(zh), Err(ProfileError::Notice(zh.into())));
-        assert_eq!(inspect("Subscription expired.\nRenew at the dashboard"), Err(ProfileError::Notice("Subscription expired. Renew at the dashboard".into())));
+        assert_eq!(
+            inspect("Subscription expired.\nRenew at the dashboard"),
+            Err(ProfileError::Notice(
+                "Subscription expired. Renew at the dashboard".into()
+            ))
+        );
         assert_eq!(
             inspect("<!DOCTYPE html><html><body><h1>Login required</h1></body></html>"),
             Err(ProfileError::Notice("Login required".into()))
         );
-        assert_eq!(ProfileError::Notice("x".into()).to_string(), "Your provider says: x");
+        assert_eq!(
+            ProfileError::Notice("x".into()).to_string(),
+            "Your provider says: x"
+        );
         // Configs and broken YAML stay what they were.
-        assert!(matches!(inspect("port: 7890\nproxies: [\n"), Err(ProfileError::Yaml(_))));
+        assert!(matches!(
+            inspect("port: 7890\nproxies: [\n"),
+            Err(ProfileError::Yaml(_))
+        ));
         assert_eq!(inspect("port: 7890"), Err(ProfileError::NoProxies));
     }
 
@@ -504,14 +538,25 @@ mod tests {
     fn inspect_counts_and_rejects() {
         let text = "proxies:\n  - {name: a, type: direct}\nproxy-groups:\n  - {name: G, type: select, proxies: [a]}\nrules:\n  - MATCH,G\n";
         let stats = inspect(text).unwrap();
-        assert_eq!(stats, ConfigStats { proxies: 1, providers: 0, groups: 1, rules: 1 });
+        assert_eq!(
+            stats,
+            ConfigStats {
+                proxies: 1,
+                providers: 0,
+                groups: 1,
+                rules: 1
+            }
+        );
         assert_eq!(inspect("   "), Err(ProfileError::Empty));
         assert_eq!(inspect("port: 7890\n"), Err(ProfileError::NoProxies));
         assert_eq!(
             inspect("dm1lc3M6Ly9leUoySWpvaU1pSXNJbkJ6SWpvaWRHVnpkQ0o5"),
             Err(ProfileError::NodeList)
         );
-        assert!(matches!(inspect("proxies: [unclosed"), Err(ProfileError::Yaml(_))));
+        assert!(matches!(
+            inspect("proxies: [unclosed"),
+            Err(ProfileError::Yaml(_))
+        ));
     }
 
     #[test]
@@ -519,7 +564,10 @@ mod tests {
         let mut p = Profile {
             id: "x".into(),
             name: "x".into(),
-            source: Source::Remote { url: "https://e.com/s".into(), interval_hours: 12 },
+            source: Source::Remote {
+                url: "https://e.com/s".into(),
+                interval_hours: 12,
+            },
             updated_at: Some(1000),
             usage: None,
             web_page: None,
@@ -531,12 +579,18 @@ mod tests {
         assert!(p.update_due(1000 + 12 * 3600));
         p.updated_at = None;
         assert!(p.update_due(0));
-        p.source = Source::Remote { url: "u".into(), interval_hours: 0 };
+        p.source = Source::Remote {
+            url: "u".into(),
+            interval_hours: 0,
+        };
         assert!(!p.update_due(i64::MAX / 2));
         p.source = Source::Local { origin: None };
         assert!(!p.update_due(i64::MAX / 2));
         // A failed one keeps its config and tries again an hour later.
-        p.source = Source::Remote { url: "u".into(), interval_hours: 12 };
+        p.source = Source::Remote {
+            url: "u".into(),
+            interval_hours: 12,
+        };
         p.updated_at = Some(1000);
         p.last_error = Some("Your provider says: log in".into());
         p.failed_at = Some(5000);
@@ -553,7 +607,9 @@ mod tests {
         index.profiles.push(Profile {
             id: new_id(),
             name: "Local".into(),
-            source: Source::Local { origin: Some("/tmp/a.yaml".into()) },
+            source: Source::Local {
+                origin: Some("/tmp/a.yaml".into()),
+            },
             updated_at: Some(now()),
             usage: None,
             web_page: None,
@@ -570,7 +626,10 @@ mod tests {
 
     #[test]
     fn name_from_host() {
-        assert_eq!(name_from_url("https://sub.example.com/api?token=1"), "sub.example.com");
+        assert_eq!(
+            name_from_url("https://sub.example.com/api?token=1"),
+            "sub.example.com"
+        );
         assert_eq!(name_from_url("nonsense"), "Subscription");
     }
 }

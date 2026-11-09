@@ -57,8 +57,24 @@ pub fn page() -> impl IntoElement {
             let r = svc.dns_query(n.clone(), k.to_owned()).await;
             let millis = started.elapsed().as_millis();
             let lookup = match r {
-                Ok(resp) => Lookup { id, name: n, kind: k, status: resp.status, millis, answers: resp.answer.unwrap_or_default(), error: None },
-                Err(e) => Lookup { id, name: n, kind: k, status: -1, millis, answers: vec![], error: Some(e) },
+                Ok(resp) => Lookup {
+                    id,
+                    name: n,
+                    kind: k,
+                    status: resp.status,
+                    millis,
+                    answers: resp.answer.unwrap_or_default(),
+                    error: None,
+                },
+                Err(e) => Lookup {
+                    id,
+                    name: n,
+                    kind: k,
+                    status: -1,
+                    millis,
+                    answers: vec![],
+                    error: Some(e),
+                },
             };
             history.update(|h| {
                 h.insert(0, lookup);
@@ -138,7 +154,11 @@ fn result_card(l: Lookup) -> impl IntoElement {
             "{} · {} {} · {} ms",
             status_name(l.status),
             l.answers.len(),
-            if l.answers.len() == 1 { "answer" } else { "answers" },
+            if l.answers.len() == 1 {
+                "answer"
+            } else {
+                "answers"
+            },
             l.millis
         ),
     };
@@ -149,8 +169,18 @@ fn result_card(l: Lookup) -> impl IntoElement {
             .gap_2()
             .px_4()
             .py_2p5()
-            .child(ui::dot(move || if ok { ui::success() } else { theme().destructive }))
-            .child(ui::body(format!("{}  {}", l.name, l.kind)).font_weight(FontWeight::SEMIBOLD).selectable(true))
+            .child(ui::dot(move || {
+                if ok {
+                    ui::success()
+                } else {
+                    theme().destructive
+                }
+            }))
+            .child(
+                ui::body(format!("{}  {}", l.name, l.kind))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .selectable(true),
+            )
             .child(view().flex_1())
             .child(ui::muted(summary)),
     );
@@ -174,10 +204,30 @@ fn result_card(l: Lookup) -> impl IntoElement {
                     .gap_3()
                     .px_4()
                     .py_1p5()
-                    .child(ui::body(a.name.trim_end_matches('.').to_owned()).flex_1().min_w(px(0.0)).number_of_lines(1).selectable(true))
-                    .child(ui::body(dns_type_name(a.kind)).w(px(64.0)).text_color(move || theme().muted_foreground))
-                    .child(ui::body(format!("{} s", a.ttl)).w(px(64.0)).tabular_nums().text_color(move || theme().muted_foreground))
-                    .child(ui::body(a.data.clone()).flex_1().min_w(px(0.0)).selectable(true)),
+                    .child(
+                        ui::body(a.name.trim_end_matches('.').to_owned())
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .number_of_lines(1)
+                            .selectable(true),
+                    )
+                    .child(
+                        ui::body(dns_type_name(a.kind))
+                            .w(px(64.0))
+                            .text_color(move || theme().muted_foreground),
+                    )
+                    .child(
+                        ui::body(format!("{} s", a.ttl))
+                            .w(px(64.0))
+                            .tabular_nums()
+                            .text_color(move || theme().muted_foreground),
+                    )
+                    .child(
+                        ui::body(a.data.clone())
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .selectable(true),
+                    ),
             );
         }
     }
@@ -185,7 +235,10 @@ fn result_card(l: Lookup) -> impl IntoElement {
 }
 
 fn col_head(label: &'static str, w: Option<f32>) -> Text {
-    let t = text(label).text_size(px(size::small())).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground);
+    let t = text(label)
+        .text_size(px(size::small()))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(move || theme().muted_foreground);
     match w {
         Some(w) => t.w(px(w)),
         None => t.flex_1().min_w(px(0.0)),

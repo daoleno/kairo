@@ -5,7 +5,9 @@ use std::path::PathBuf;
 const ID: &str = "dev.kairo.app";
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 /// The command that starts this app (inside an .app bundle, its executable).
@@ -28,7 +30,9 @@ fn entry_path() -> PathBuf {
 
 #[cfg(target_os = "macos")]
 fn entry_path() -> PathBuf {
-    home().join("Library/LaunchAgents").join(format!("{ID}.plist"))
+    home()
+        .join("Library/LaunchAgents")
+        .join(format!("{ID}.plist"))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -40,7 +44,11 @@ fn entry_path() -> PathBuf {
 pub fn entry(exe: &str, minimized: bool) -> String {
     let flag = if minimized { " --minimized" } else { "" };
     if cfg!(target_os = "macos") {
-        let extra = if minimized { "\n    <string>--minimized</string>" } else { "" };
+        let extra = if minimized {
+            "\n    <string>--minimized</string>"
+        } else {
+            ""
+        };
         format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>{ID}</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>{exe}</string>{extra}\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>ProcessType</key>\n  <string>Interactive</string>\n</dict>\n</plist>\n"
         )
@@ -63,7 +71,8 @@ pub fn set(on: bool, minimized: bool) -> Result<(), String> {
     let path = entry_path();
     if on {
         let exe = executable()?;
-        crate::paths::write_atomic(&path, entry(&exe, minimized).as_bytes()).map_err(|e| e.to_string())
+        crate::paths::write_atomic(&path, entry(&exe, minimized).as_bytes())
+            .map_err(|e| e.to_string())
     } else {
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),

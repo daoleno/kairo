@@ -6,7 +6,11 @@ pub fn expiry_text(expire: Option<i64>) -> String {
         Some(t) => {
             let days = (t - kairo_core::profile::now()) / 86400;
             let date = date_of(t);
-            if days < 0 { format!("Expired {date}") } else { format!("Expires {date} · {days} d left") }
+            if days < 0 {
+                format!("Expired {date}")
+            } else {
+                format!("Expires {date} · {days} d left")
+            }
         }
     }
 }

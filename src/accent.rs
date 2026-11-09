@@ -18,10 +18,30 @@ pub struct Accent {
 }
 
 pub const ACCENTS: [Accent; 4] = [
-    Accent { name: "graphite", title: "Graphite", light: ["#1d1d1f", "#ffffff", "#1d1d1f"], dark: ["#f2f2f4", "#1d1d1f", "#f2f2f4"] },
-    Accent { name: "ember", title: "Ember", light: ["#e0552f", "#ffffff", "#c2431f"], dark: ["#ff6a3d", "#ffffff", "#ff8a65"] },
-    Accent { name: "iris", title: "Iris", light: ["#6b55d6", "#ffffff", "#5a43c4"], dark: ["#9d8bff", "#17112e", "#b2a5ff"] },
-    Accent { name: "gold", title: "Gold", light: ["#b07d12", "#ffffff", "#8f6409"], dark: ["#e3b34f", "#241a00", "#ebc46e"] },
+    Accent {
+        name: "graphite",
+        title: "Graphite",
+        light: ["#1d1d1f", "#ffffff", "#1d1d1f"],
+        dark: ["#f2f2f4", "#1d1d1f", "#f2f2f4"],
+    },
+    Accent {
+        name: "ember",
+        title: "Ember",
+        light: ["#e0552f", "#ffffff", "#c2431f"],
+        dark: ["#ff6a3d", "#ffffff", "#ff8a65"],
+    },
+    Accent {
+        name: "iris",
+        title: "Iris",
+        light: ["#6b55d6", "#ffffff", "#5a43c4"],
+        dark: ["#9d8bff", "#17112e", "#b2a5ff"],
+    },
+    Accent {
+        name: "gold",
+        title: "Gold",
+        light: ["#b07d12", "#ffffff", "#8f6409"],
+        dark: ["#e3b34f", "#241a00", "#ebc46e"],
+    },
 ];
 
 /// The default, when nothing else is asked for.
@@ -42,7 +62,10 @@ pub fn current() -> Accent {
 }
 
 pub fn named(name: &str) -> Option<Accent> {
-    ACCENTS.iter().copied().find(|a| a.name.eq_ignore_ascii_case(name.trim()))
+    ACCENTS
+        .iter()
+        .copied()
+        .find(|a| a.name.eq_ignore_ascii_case(name.trim()))
 }
 
 fn rgb(hex: &str) -> Option<(f32, f32, f32)> {
@@ -50,7 +73,11 @@ fn rgb(hex: &str) -> Option<(f32, f32, f32)> {
     if h.len() != 6 {
         return None;
     }
-    let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok().map(|v| v as f32 / 255.0);
+    let p = |i: usize| {
+        u8::from_str_radix(&h[i..i + 2], 16)
+            .ok()
+            .map(|v| v as f32 / 255.0)
+    };
     Some((p(0)?, p(2)?, p(4)?))
 }
 
@@ -62,7 +89,11 @@ fn hex((r, g, b): (f32, f32, f32)) -> String {
 /// `a` over `b` at `alpha`.
 pub fn mix(a: &str, b: &str, alpha: f32) -> String {
     match (rgb(a), rgb(b)) {
-        (Some(a), Some(b)) => hex((a.0 * alpha + b.0 * (1.0 - alpha), a.1 * alpha + b.1 * (1.0 - alpha), a.2 * alpha + b.2 * (1.0 - alpha))),
+        (Some(a), Some(b)) => hex((
+            a.0 * alpha + b.0 * (1.0 - alpha),
+            a.1 * alpha + b.1 * (1.0 - alpha),
+            a.2 * alpha + b.2 * (1.0 - alpha),
+        )),
         _ => a.to_owned(),
     }
 }
@@ -70,12 +101,24 @@ pub fn mix(a: &str, b: &str, alpha: f32) -> String {
 /// A theme (`theme.json`'s shape) with the accent's tokens in both appearances.
 pub fn apply(theme: &str) -> String {
     let accent = current();
-    let Ok(mut v) = serde_json::from_str::<Value>(theme) else { return theme.to_owned() };
+    let Ok(mut v) = serde_json::from_str::<Value>(theme) else {
+        return theme.to_owned();
+    };
     if let Some(vars) = v.get_mut("cssVars").and_then(Value::as_object_mut) {
         for (key, [fill, on, text]) in [("light", accent.light), ("dark", accent.dark)] {
-            let Some(set) = vars.get_mut(key).and_then(Value::as_object_mut) else { continue };
-            let base = set.get("background").and_then(Value::as_str).unwrap_or(if key == "dark" { "#1e1e20" } else { "#ffffff" }).to_owned();
-            let card = set.get("card").and_then(Value::as_str).unwrap_or(&base).to_owned();
+            let Some(set) = vars.get_mut(key).and_then(Value::as_object_mut) else {
+                continue;
+            };
+            let base = set
+                .get("background")
+                .and_then(Value::as_str)
+                .unwrap_or(if key == "dark" { "#1e1e20" } else { "#ffffff" })
+                .to_owned();
+            let card = set
+                .get("card")
+                .and_then(Value::as_str)
+                .unwrap_or(&base)
+                .to_owned();
             let mut put = |k: &str, c: String| {
                 set.insert(k.to_owned(), Value::String(c));
             };
@@ -94,7 +137,9 @@ mod tests {
     #[test]
     fn mixes_and_applies() {
         assert_eq!(super::mix("#ffffff", "#000000", 0.5), "#808080");
-        let t = super::apply(r##"{"cssVars":{"theme":{},"light":{"background":"#ffffff","primary":"#007aff"},"dark":{"background":"#000000"}}}"##);
+        let t = super::apply(
+            r##"{"cssVars":{"theme":{},"light":{"background":"#ffffff","primary":"#007aff"},"dark":{"background":"#000000"}}}"##,
+        );
         assert!(!t.contains("#007aff"));
         for a in super::ACCENTS {
             for c in a.light.iter().chain(a.dark.iter()) {

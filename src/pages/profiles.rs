@@ -7,8 +7,8 @@ use nsh_base::{alert_dialog, button, editor, theme};
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
 
-use crate::pages::overview::expiry_text;
 use crate::chrome::Glyph;
+use crate::pages::overview::expiry_text;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, icon, size};
@@ -27,7 +27,8 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
     let store = store();
     let adding = signal(false);
     let profiles = computed(move || store.state.with(|s| s.profiles.profiles.clone()));
-    let any_remote = move || profiles.with(|p| p.iter().any(|p| matches!(p.source, Source::Remote { .. })));
+    let any_remote =
+        move || profiles.with(|p| p.iter().any(|p| matches!(p.source, Source::Remote { .. })));
     let updating_all = move || store.state.with(|s| !s.updating.is_empty());
     view()
         .flex_1()
@@ -97,10 +98,12 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
     let busy = signal(false);
     // Why the last try failed, until the next: in the provider's words, with Retry.
     let problem = signal(None::<String>);
-    let valid = move || url.with(|u| {
-        let u = u.trim();
-        u.starts_with("http://") || u.starts_with("https://")
-    });
+    let valid = move || {
+        url.with(|u| {
+            let u = u.trim();
+            u.starts_with("http://") || u.starts_with("https://")
+        })
+    };
     let submit = move || {
         if !valid() || busy.get_untracked() {
             return;
@@ -108,7 +111,10 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
         busy.set(true);
         problem.set(None);
         let n = name.get_untracked().trim().to_owned();
-        let f = store.svc().add_remote(url.get_untracked().trim().to_owned(), (!n.is_empty()).then_some(n));
+        let f = store.svc().add_remote(
+            url.get_untracked().trim().to_owned(),
+            (!n.is_empty()).then_some(n),
+        );
         spawn(async move {
             let r = f.await;
             busy.set(false);
@@ -125,7 +131,12 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
         let svc = store.svc();
         spawn(async move {
             let picked = pick_paths(
-                OpenDialog::files().filter(FileFilter::new("Clash / mihomo config", ["yaml", "yml", "txt"])).title("Import a Config"),
+                OpenDialog::files()
+                    .filter(FileFilter::new(
+                        "Clash / mihomo config",
+                        ["yaml", "yml", "txt"],
+                    ))
+                    .title("Import a Config"),
             )
             .await;
             match picked {
@@ -149,16 +160,22 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
         .gap_3()
         .child(ui::section_label("New Subscription"))
         .child(
-            view()
-                .gap_1()
-                .child(ui::muted("Subscription URL"))
-                .child(ui::field(url, "https://example.com/subscribe?token=…").on_submit(move |_: &str| submit())),
+            view().gap_1().child(ui::muted("Subscription URL")).child(
+                ui::field(url, "https://example.com/subscribe?token=…")
+                    .on_submit(move |_: &str| submit()),
+            ),
         )
         .child(
             view()
                 .gap_1()
-                .child(ui::muted("Name (optional; the provider's name is used otherwise)"))
-                .child(ui::field(name, "My Provider").w(px(320.0)).on_submit(move |_: &str| submit())),
+                .child(ui::muted(
+                    "Name (optional; the provider's name is used otherwise)",
+                ))
+                .child(
+                    ui::field(name, "My Provider")
+                        .w(px(320.0))
+                        .on_submit(move |_: &str| submit()),
+                ),
         )
         .child(when(
             move || problem.with(|p| p.is_some()),
@@ -169,9 +186,20 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
                     .p_3()
                     .rounded(px(14.0))
                     .bg(move || theme().destructive.opacity(0.08))
-                    .child(text(move || said().0).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
-                    .child(when(move || said().1.is_some(), move || ui::muted(move || said().1.unwrap_or_default())))
-                    .child(view().flex_row().child(ui::capsule("Retry", false).on_press(move || submit())))
+                    .child(
+                        text(move || said().0)
+                            .text_size(px(size::body()))
+                            .font_weight(FontWeight::MEDIUM),
+                    )
+                    .child(when(
+                        move || said().1.is_some(),
+                        move || ui::muted(move || said().1.unwrap_or_default()),
+                    ))
+                    .child(
+                        view()
+                            .flex_row()
+                            .child(ui::capsule("Retry", false).on_press(move || submit())),
+                    )
             },
         ))
         .child(
@@ -182,16 +210,32 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
                 .mt_1()
                 .child(ui::btn_icon(Icon::File, "Import File…", Variant::Ghost).on_press(import))
                 .child(view().flex_1())
-                .child(ui::muted(move || -> SharedString { if busy.get() { "Downloading…".into() } else { "".into() } }))
+                .child(ui::muted(move || -> SharedString {
+                    if busy.get() {
+                        "Downloading…".into()
+                    } else {
+                        "".into()
+                    }
+                }))
                 .child(ui::btn("Cancel", Variant::Secondary).on_press(move || adding.set(false)))
-                .child(ui::btn("Add", Variant::Primary).disabled(move || !valid() || busy.get()).on_press(submit)),
+                .child(
+                    ui::btn("Add", Variant::Primary)
+                        .disabled(move || !valid() || busy.get())
+                        .on_press(submit),
+                ),
         )
 }
 
 fn source_text(p: &Profile) -> String {
     match &p.source {
-        Source::Remote { url, interval_hours } => {
-            let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_else(|| url.clone());
+        Source::Remote {
+            url,
+            interval_hours,
+        } => {
+            let host = url::Url::parse(url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_else(|| url.clone());
             match interval_hours {
                 0 => format!("{host} · updated by hand"),
                 h => format!("{host} · every {h} h"),
@@ -202,7 +246,9 @@ fn source_text(p: &Profile) -> String {
 }
 
 pub fn ago(at: Option<i64>) -> String {
-    let Some(at) = at else { return "never updated".into() };
+    let Some(at) = at else {
+        return "never updated".into();
+    };
     let ago = kairo_core::profile::now() - at;
     match ago {
         i64::MIN..=59 => "updated just now".into(),
@@ -228,7 +274,11 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
     let id = p.get_untracked().id.clone();
     let active = {
         let id = id.clone();
-        let m = computed(move || store.state.with(|s| s.profiles.active.as_deref() == Some(id.as_str())));
+        let m = computed(move || {
+            store
+                .state
+                .with(|s| s.profiles.active.as_deref() == Some(id.as_str()))
+        });
         move || m.get()
     };
     let updating = {
@@ -262,10 +312,22 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
                     .size(px(14.0))
                     .rounded_full()
                     .border(px(1.5))
-                    .border_color(move || if active() { theme().primary } else { theme().input })
+                    .border_color(move || {
+                        if active() {
+                            theme().primary
+                        } else {
+                            theme().input
+                        }
+                    })
                     .items_center()
                     .justify_center()
-                    .child(view().size(px(6.0)).rounded_full().bg(move || theme().primary).style_when(move || !active(), |s| s.invisible())),
+                    .child(
+                        view()
+                            .size(px(6.0))
+                            .rounded_full()
+                            .bg(move || theme().primary)
+                            .style_when(move || !active(), |s| s.invisible()),
+                    ),
             ),
         )
         .child(
@@ -278,11 +340,27 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
                         .flex_row()
                         .items_center()
                         .gap_2()
-                        .child(text(move || -> SharedString { p.with(|p| p.name.clone()).into() }).text_size(px(size::body())).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
+                        .child(
+                            text(move || -> SharedString { p.with(|p| p.name.clone()).into() })
+                                .text_size(px(size::body()))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .number_of_lines(1),
+                        )
                         .child(when(active, || ui::badge("Active"))),
                 )
                 .child(ui::muted(move || -> SharedString {
-                    p.with(|p| format!("{} · {}", source_text(p), if updating() { "updating…".to_owned() } else { ago(p.updated_at) })).into()
+                    p.with(|p| {
+                        format!(
+                            "{} · {}",
+                            source_text(p),
+                            if updating() {
+                                "updating…".to_owned()
+                            } else {
+                                ago(p.updated_at)
+                            }
+                        )
+                    })
+                    .into()
                 }))
                 .child(when(
                     move || p.with(|p| p.usage.is_some()),
@@ -291,24 +369,46 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
                             .gap_1()
                             .pt_1()
                             .max_w(px(420.0))
-                            .child(ui::meter(move || p.with(|p| p.usage.as_ref().and_then(|u| u.fraction()).unwrap_or(0.0) as f32)))
+                            .child(ui::meter(move || {
+                                p.with(|p| {
+                                    p.usage.as_ref().and_then(|u| u.fraction()).unwrap_or(0.0)
+                                        as f32
+                                })
+                            }))
                             .child(ui::muted(move || -> SharedString {
                                 p.with(|p| {
-                                    let Some(u) = &p.usage else { return String::new() };
+                                    let Some(u) = &p.usage else {
+                                        return String::new();
+                                    };
                                     let used = kairo_core::bytes(u.used());
-                                    let amount = if u.total > 0 { format!("{used} of {}", kairo_core::bytes(u.total)) } else { format!("{used} used") };
+                                    let amount = if u.total > 0 {
+                                        format!("{used} of {}", kairo_core::bytes(u.total))
+                                    } else {
+                                        format!("{used} used")
+                                    };
                                     format!("{amount} · {}", expiry_text(u.expire))
                                 })
                                 .into()
                             }))
                     },
                 ))
-                .child(ui::muted(move || -> SharedString { p.with(stats_text).into() }))
+                .child(ui::muted(move || -> SharedString {
+                    p.with(stats_text).into()
+                }))
                 .child(when(
                     move || p.with(|p| p.last_error.is_some()),
                     move || {
                         text(move || -> SharedString {
-                            p.with(|p| format!("Couldn't update — using the saved copy. {}", crate::pages::home::explain(p.last_error.as_deref().unwrap_or_default()).0)).into()
+                            p.with(|p| {
+                                format!(
+                                    "Couldn't update — using the saved copy. {}",
+                                    crate::pages::home::explain(
+                                        p.last_error.as_deref().unwrap_or_default()
+                                    )
+                                    .0
+                                )
+                            })
+                            .into()
                         })
                         .text_size(px(size::small()))
                         .text_color(move || theme().muted_foreground)
@@ -322,9 +422,14 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
                 .gap_0p5()
                 .child(when(remote, move || {
                     let id = id_update.clone();
-                    ui::icon_btn(Icon::Refresh, "Update").disabled(updating).on_press(move || store.run(store.svc().update_profile(id.clone())))
+                    ui::icon_btn(Icon::Refresh, "Update")
+                        .disabled(updating)
+                        .on_press(move || store.run(store.svc().update_profile(id.clone())))
                 }))
-                .child(ui::icon_btn(Icon::Edit, "Edit").on_press(move || editing.set(Some(id_edit.clone()))))
+                .child(
+                    ui::icon_btn(Icon::Edit, "Edit")
+                        .on_press(move || editing.set(Some(id_edit.clone()))),
+                )
                 .child(ui::icon_btn(Icon::Trash, "Delete").on_press(move || {
                     let id = id_delete.clone();
                     let name = p.with_untracked(|p| p.name.clone());
@@ -362,7 +467,11 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
     let store = store();
     let profile = {
         let id = id.clone();
-        computed(move || store.state.with(|s| s.profiles.profiles.iter().find(|p| p.id == id).cloned()))
+        computed(move || {
+            store
+                .state
+                .with(|s| s.profiles.profiles.iter().find(|p| p.id == id).cloned())
+        })
     };
     let initial = untracked(|| profile.get()).unwrap_or_else(|| Profile {
         id: id.clone(),
@@ -376,7 +485,10 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
         stats: Default::default(),
     });
     let (url0, hours0) = match &initial.source {
-        Source::Remote { url, interval_hours } => (Some(url.clone()), *interval_hours),
+        Source::Remote {
+            url,
+            interval_hours,
+        } => (Some(url.clone()), *interval_hours),
         Source::Local { .. } => (None, 0),
     };
     let remote = url0.is_some();
@@ -387,16 +499,22 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
         profile.with(|p| {
             let Some(p) = p else { return false };
             let (u0, h0) = match &p.source {
-                Source::Remote { url, interval_hours } => (url.clone(), *interval_hours),
+                Source::Remote {
+                    url,
+                    interval_hours,
+                } => (url.clone(), *interval_hours),
                 Source::Local { .. } => (String::new(), 0),
             };
             name.with(|n| n.trim() != p.name)
-                || (remote && (url.with(|u| u.trim() != u0) || hours.with(|h| h.trim() != h0.to_string())))
+                || (remote
+                    && (url.with(|u| u.trim() != u0) || hours.with(|h| h.trim() != h0.to_string())))
         })
     };
     let details_valid = move || {
         name.with(|n| !n.trim().is_empty())
-            && (!remote || (url.with(|u| u.trim().starts_with("http")) && hours.with(|h| h.trim().parse::<u32>().is_ok())))
+            && (!remote
+                || (url.with(|u| u.trim().starts_with("http"))
+                    && hours.with(|h| h.trim().parse::<u32>().is_ok())))
     };
 
     let svc = store.svc();
@@ -413,13 +531,18 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
         move || {
             checking.set(true);
             status.set(None);
-            store.run_then(store.svc().check_config(profile_text.clone(), draft.get_untracked()), move |r| {
-                checking.set(false);
-                status.set(Some(match r {
-                    Ok(()) => (true, "The core accepts this configuration.".to_owned()),
-                    Err(e) => (false, e),
-                }));
-            });
+            store.run_then(
+                store
+                    .svc()
+                    .check_config(profile_text.clone(), draft.get_untracked()),
+                move |r| {
+                    checking.set(false);
+                    status.set(Some(match r {
+                        Ok(()) => (true, "The core accepts this configuration.".to_owned()),
+                        Err(e) => (false, e),
+                    }));
+                },
+            );
         }
     };
     let save = {
@@ -428,16 +551,19 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
             checking.set(true);
             status.set(None);
             let text = draft.get_untracked();
-            store.run_then(store.svc().save_override(id.clone(), text.clone()), move |r| {
-                checking.set(false);
-                match r {
-                    Ok(()) => {
-                        saved.set(text);
-                        status.set(Some((true, "Saved and applied.".to_owned())));
+            store.run_then(
+                store.svc().save_override(id.clone(), text.clone()),
+                move |r| {
+                    checking.set(false);
+                    match r {
+                        Ok(()) => {
+                            saved.set(text);
+                            status.set(Some((true, "Saved and applied.".to_owned())));
+                        }
+                        Err(e) => status.set(Some((false, e))),
                     }
-                    Err(e) => status.set(Some((false, e))),
-                }
-            });
+                },
+            );
         }
     };
     let save_details = {

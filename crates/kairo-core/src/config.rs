@@ -94,7 +94,11 @@ fn sub<'a>(map: &'a mut Mapping, key: &str) -> &'a mut Mapping {
 }
 
 /// The final config: profile + override + Kairo's settings.
-pub fn build(profile: &str, override_text: &str, settings: &Settings) -> Result<String, ConfigError> {
+pub fn build(
+    profile: &str,
+    override_text: &str,
+    settings: &Settings,
+) -> Result<String, ConfigError> {
     let mut config = parse_mapping(profile).map_err(ConfigError::Profile)?;
     let patch = parse_mapping(override_text).map_err(ConfigError::Override)?;
     merge(&mut config, patch);
@@ -106,7 +110,15 @@ pub fn build(profile: &str, override_text: &str, settings: &Settings) -> Result<
 pub fn apply_settings(config: &mut Mapping, s: &Settings) {
     // One inbound, on the port the system proxy uses; profile ports would clash
     // with other clients.
-    for key in ["port", "socks-port", "redir-port", "tproxy-port", "external-controller-unix", "external-controller-tls", "external-controller-pipe"] {
+    for key in [
+        "port",
+        "socks-port",
+        "redir-port",
+        "tproxy-port",
+        "external-controller-unix",
+        "external-controller-tls",
+        "external-controller-pipe",
+    ] {
         config.remove(key);
     }
     set(config, "mixed-port", s.mixed_port);
@@ -117,7 +129,11 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
     set(config, "ipv6", s.ipv6);
     set(config, "mode", s.mode.as_str());
     set(config, "log-level", s.log_level.as_str());
-    set(config, "external-controller", format!("127.0.0.1:{}", s.controller_port));
+    set(
+        config,
+        "external-controller",
+        format!("127.0.0.1:{}", s.controller_port),
+    );
     set(config, "secret", s.secret.clone());
     // Remember the nodes picked in select groups across restarts.
     let profile = sub(config, "profile");
@@ -134,7 +150,11 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
             set(tun, "auto-detect-interface", true);
         }
         if !tun.contains_key("dns-hijack") {
-            set(tun, "dns-hijack", Value::Sequence(vec!["any:53".into(), "tcp://any:53".into()]));
+            set(
+                tun,
+                "dns-hijack",
+                Value::Sequence(vec!["any:53".into(), "tcp://any:53".into()]),
+            );
         }
         // TUN needs the core's DNS to resolve what it captures.
         let dns = sub(config, "dns");
@@ -149,7 +169,11 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
                 set(
                     dns,
                     "nameserver",
-                    Value::Sequence(vec!["223.5.5.5".into(), "119.29.29.29".into(), "8.8.8.8".into()]),
+                    Value::Sequence(vec![
+                        "223.5.5.5".into(),
+                        "119.29.29.29".into(),
+                        "8.8.8.8".into(),
+                    ]),
                 );
             }
         }
@@ -199,7 +223,10 @@ pub fn explain(output: &str) -> String {
         .lines()
         .filter(|l| {
             let l = l.to_ascii_lowercase();
-            l.contains("error") || l.contains("fatal") || l.contains("failed") || l.contains("invalid")
+            l.contains("error")
+                || l.contains("fatal")
+                || l.contains("failed")
+                || l.contains("invalid")
         })
         .map(|l| {
             // logrus: time="..." level=error msg="..."
@@ -257,10 +284,16 @@ rules:
         assert!(m.get("port").is_none());
         assert!(m.get("socks-port").is_none());
         assert_eq!(get(&m, "mixed-port").as_u64(), Some(17890));
-        assert_eq!(get(&m, "external-controller").as_str(), Some("127.0.0.1:19090"));
+        assert_eq!(
+            get(&m, "external-controller").as_str(),
+            Some("127.0.0.1:19090")
+        );
         assert_eq!(get(&m, "secret").as_str(), Some("mine"));
         assert_eq!(get(&m, "mode").as_str(), Some("rule"));
-        assert_eq!(get(get(&m, "tun").as_mapping().unwrap(), "enable").as_bool(), Some(false));
+        assert_eq!(
+            get(get(&m, "tun").as_mapping().unwrap(), "enable").as_bool(),
+            Some(false)
+        );
         // Untouched parts stay.
         assert_eq!(get(&m, "rules").as_sequence().unwrap().len(), 2);
     }
@@ -279,8 +312,15 @@ append-proxies:
         let out = build(PROFILE, over, &Settings::default()).unwrap();
         let m = parse_mapping(&out).unwrap();
         let dns = get(&m, "dns").as_mapping().unwrap();
-        assert_eq!(get(dns, "enable").as_bool(), Some(true), "kept from the profile");
-        assert_eq!(get(dns, "nameserver").as_sequence().unwrap()[0].as_str(), Some("9.9.9.9"));
+        assert_eq!(
+            get(dns, "enable").as_bool(),
+            Some(true),
+            "kept from the profile"
+        );
+        assert_eq!(
+            get(dns, "nameserver").as_sequence().unwrap()[0].as_str(),
+            Some("9.9.9.9")
+        );
         let rules = get(&m, "rules").as_sequence().unwrap();
         assert_eq!(rules[0].as_str(), Some("DOMAIN,kairo.dev,DIRECT"));
         assert_eq!(rules.len(), 3);
@@ -293,10 +333,17 @@ append-proxies:
         let m = parse_mapping(&build("proxies: []\n", "", &Settings::default()).unwrap()).unwrap();
         let dns = get(&m, "dns").as_mapping().unwrap();
         assert_eq!(get(dns, "enable").as_bool(), Some(true));
-        assert_eq!(get(dns, "nameserver").as_sequence().unwrap()[0].as_str(), Some("system"));
+        assert_eq!(
+            get(dns, "nameserver").as_sequence().unwrap()[0].as_str(),
+            Some("system")
+        );
         // A profile's own DNS, even off, is left alone.
-        let m = parse_mapping(&build("dns: {enable: false}\n", "", &Settings::default()).unwrap()).unwrap();
-        assert_eq!(get(get(&m, "dns").as_mapping().unwrap(), "enable").as_bool(), Some(false));
+        let m = parse_mapping(&build("dns: {enable: false}\n", "", &Settings::default()).unwrap())
+            .unwrap();
+        assert_eq!(
+            get(get(&m, "dns").as_mapping().unwrap(), "enable").as_bool(),
+            Some(false)
+        );
     }
 
     #[test]
@@ -316,9 +363,18 @@ append-proxies:
 
     #[test]
     fn bad_yaml_is_reported_by_source() {
-        assert!(matches!(build("a: [", "", &Settings::default()), Err(ConfigError::Profile(_))));
-        assert!(matches!(build(PROFILE, "b: [", &Settings::default()), Err(ConfigError::Override(_))));
-        assert!(matches!(build("- a\n- b", "", &Settings::default()), Err(ConfigError::Profile(_))));
+        assert!(matches!(
+            build("a: [", "", &Settings::default()),
+            Err(ConfigError::Profile(_))
+        ));
+        assert!(matches!(
+            build(PROFILE, "b: [", &Settings::default()),
+            Err(ConfigError::Override(_))
+        ));
+        assert!(matches!(
+            build("- a\n- b", "", &Settings::default()),
+            Err(ConfigError::Profile(_))
+        ));
     }
 
     #[test]

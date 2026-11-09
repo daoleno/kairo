@@ -34,9 +34,21 @@ pub fn page() -> impl IntoElement {
         let preferred = store.state.with(|s| s.settings.tray_group.clone());
         store.proxies.with(|p| {
             let groups = &p.0.groups;
-            let Some(main) = places::main_group(groups, &preferred) else { return (String::new(), vec![], vec![]) };
-            let direct: Vec<String> = groups.iter().filter(|g| g.selectable() && g.name != main.name && g.now.as_deref() == Some("DIRECT")).map(|g| g.name.clone()).collect();
-            (main.name.clone(), places::app_choices(groups, &main.name), direct)
+            let Some(main) = places::main_group(groups, &preferred) else {
+                return (String::new(), vec![], vec![]);
+            };
+            let direct: Vec<String> = groups
+                .iter()
+                .filter(|g| {
+                    g.selectable() && g.name != main.name && g.now.as_deref() == Some("DIRECT")
+                })
+                .map(|g| g.name.clone())
+                .collect();
+            (
+                main.name.clone(),
+                places::app_choices(groups, &main.name),
+                direct,
+            )
         })
     };
     view()

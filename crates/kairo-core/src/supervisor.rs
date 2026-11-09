@@ -90,7 +90,10 @@ impl CoreProcess {
     }
 
     pub fn tail(&self) -> Vec<String> {
-        self.tail.lock().map(|t| t.iter().cloned().collect()).unwrap_or_default()
+        self.tail
+            .lock()
+            .map(|t| t.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Whether it is still running.
@@ -107,7 +110,11 @@ impl CoreProcess {
             Ok(s) => (s.code(), signal_of(&s)),
             Err(_) => (None, None),
         };
-        Exit { code, signal, tail: self.tail() }
+        Exit {
+            code,
+            signal,
+            tail: self.tail(),
+        }
     }
 
     /// Asks it to stop, then kills it after a grace period.
@@ -117,7 +124,10 @@ impl CoreProcess {
             unsafe {
                 libc::kill(pid as i32, libc::SIGTERM);
             }
-            if tokio::time::timeout(Duration::from_secs(3), self.child.wait()).await.is_ok() {
+            if tokio::time::timeout(Duration::from_secs(3), self.child.wait())
+                .await
+                .is_ok()
+            {
                 let _ = std::fs::remove_file(paths.core_pid());
                 return;
             }
@@ -192,7 +202,11 @@ fn is_our_core(pid: i32, paths: &Paths) -> bool {
     #[cfg(target_os = "linux")]
     {
         std::fs::read(format!("/proc/{pid}/cmdline"))
-            .map(|c| String::from_utf8_lossy(&c).replace('\0', " ").contains(&runtime))
+            .map(|c| {
+                String::from_utf8_lossy(&c)
+                    .replace('\0', " ")
+                    .contains(&runtime)
+            })
             .unwrap_or(false)
     }
     #[cfg(not(target_os = "linux"))]
@@ -220,7 +234,11 @@ mod tests {
             ],
         };
         assert_eq!(e.reason(), "Parse config error: proxy 'x' not found");
-        let e = Exit { code: Some(2), signal: None, tail: vec![] };
+        let e = Exit {
+            code: Some(2),
+            signal: None,
+            tail: vec![],
+        };
         assert_eq!(e.reason(), "The core exited with code 2");
     }
 }

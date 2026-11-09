@@ -6,8 +6,9 @@ use std::cell::RefCell;
 
 use block2::RcBlock;
 use objc2_app_kit::{
-    NSAppearance, NSAppearanceNameAccessibilityHighContrastAqua, NSAppearanceNameAccessibilityHighContrastDarkAqua,
-    NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSColor, NSColorSpace, NSWorkspace,
+    NSAppearance, NSAppearanceNameAccessibilityHighContrastAqua,
+    NSAppearanceNameAccessibilityHighContrastDarkAqua, NSAppearanceNameAqua,
+    NSAppearanceNameDarkAqua, NSColor, NSColorSpace, NSWorkspace,
 };
 use serde_json::{Map, Value};
 
@@ -18,7 +19,12 @@ impl Rgba {
     /// This color over `base` (opaque).
     fn over(self, base: Rgba) -> Rgba {
         let a = self.3;
-        Rgba(self.0 * a + base.0 * (1.0 - a), self.1 * a + base.1 * (1.0 - a), self.2 * a + base.2 * (1.0 - a), 1.0)
+        Rgba(
+            self.0 * a + base.0 * (1.0 - a),
+            self.1 * a + base.1 * (1.0 - a),
+            self.2 * a + base.2 * (1.0 - a),
+            1.0,
+        )
     }
 
     fn alpha(self, a: f64) -> Rgba {
@@ -34,7 +40,12 @@ impl Rgba {
 fn rgba(color: &NSColor) -> Rgba {
     // Catalog colors resolve in the drawing appearance when converted.
     match color.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace()) {
-        Some(c) => Rgba(c.redComponent(), c.greenComponent(), c.blueComponent(), c.alphaComponent()),
+        Some(c) => Rgba(
+            c.redComponent(),
+            c.greenComponent(),
+            c.blueComponent(),
+            c.alphaComponent(),
+        ),
         None => Rgba(0.5, 0.5, 0.5, 1.0),
     }
 }
@@ -64,28 +75,43 @@ fn palette(name: &objc2_app_kit::NSAppearanceName, dark: bool) -> Map<String, Va
         put("popover", control);
         put("popover-foreground", label.over(control));
         put("primary", accent);
-        put("primary-foreground", rgba(&NSColor::alternateSelectedControlTextColor()).over(accent));
+        put(
+            "primary-foreground",
+            rgba(&NSColor::alternateSelectedControlTextColor()).over(accent),
+        );
         put("secondary", fill(if dark { 0.10 } else { 0.05 }));
         put("secondary-foreground", label.over(window));
         put("muted", fill(0.05));
-        put("muted-foreground", rgba(&NSColor::secondaryLabelColor()).over(window));
+        put(
+            "muted-foreground",
+            rgba(&NSColor::secondaryLabelColor()).over(window),
+        );
         put("accent", fill(if dark { 0.08 } else { 0.05 }));
         put("accent-foreground", label.over(window));
         put("destructive", rgba(&NSColor::systemRedColor()).over(window));
         put("border", rgba(&NSColor::separatorColor()).over(window));
         put("input", fill(if dark { 0.18 } else { 0.15 }));
-        put("ring", rgba(&NSColor::keyboardFocusIndicatorColor()).over(window));
+        put(
+            "ring",
+            rgba(&NSColor::keyboardFocusIndicatorColor()).over(window),
+        );
         put("sidebar", window);
         put("sidebar-foreground", label.over(window));
         put("sidebar-accent", fill(0.08));
         put("sidebar-accent-foreground", label.over(window));
-        put("sidebar-border", rgba(&NSColor::separatorColor()).over(window));
+        put(
+            "sidebar-border",
+            rgba(&NSColor::separatorColor()).over(window),
+        );
         put("sidebar-primary", accent);
         put("success", rgba(&NSColor::systemGreenColor()).over(window));
         put("warning", rgba(&NSColor::systemOrangeColor()).over(window));
         put("track", fill(if dark { 0.16 } else { 0.12 }));
         put("selection", accent.alpha(0.16).over(card));
-        put("graph-up", rgba(&NSColor::tertiaryLabelColor()).over(window));
+        put(
+            "graph-up",
+            rgba(&NSColor::tertiaryLabelColor()).over(window),
+        );
         put("subtle", control);
     });
     appearance.performAsCurrentDrawingAppearance(&block);
@@ -99,7 +125,10 @@ pub fn theme_json(base: &str) -> String {
     // SAFETY: AppKit's constant appearance names.
     let (light, dark) = unsafe {
         if contrast {
-            (NSAppearanceNameAccessibilityHighContrastAqua, NSAppearanceNameAccessibilityHighContrastDarkAqua)
+            (
+                NSAppearanceNameAccessibilityHighContrastAqua,
+                NSAppearanceNameAccessibilityHighContrastDarkAqua,
+            )
         } else {
             (NSAppearanceNameAqua, NSAppearanceNameDarkAqua)
         }

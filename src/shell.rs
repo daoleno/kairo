@@ -3,8 +3,8 @@
 
 use kairo_core::CoreStatus;
 use nsh_base::{button, theme};
-use nsh_core::element::desktop::title_bar;
 use nsh_core::GlassEffect;
+use nsh_core::element::desktop::title_bar;
 use nsh_core::prelude::*;
 
 use crate::pages;
@@ -56,9 +56,25 @@ fn nav_item(page: Page) -> impl IntoElement {
         .text_color(move || theme().sidebar_foreground)
         .hover(|s| s.bg(move || theme().sidebar_accent.opacity(0.6)))
         .style_when(selected, |s| s.bg(move || theme().sidebar_accent))
-        .child(icon(page_icon(page), 16.0).text_color(move || if selected() { theme().sidebar_primary } else { theme().muted_foreground }))
-        .child(text(page.title()).text_size(px(size::body())).flex_1().font_weight(FontWeight::MEDIUM))
-        .child(text(move || count().unwrap_or_default()).text_size(px(size::small())).tabular_nums().text_color(move || theme().muted_foreground))
+        .child(icon(page_icon(page), 16.0).text_color(move || {
+            if selected() {
+                theme().sidebar_primary
+            } else {
+                theme().muted_foreground
+            }
+        }))
+        .child(
+            text(page.title())
+                .text_size(px(size::body()))
+                .flex_1()
+                .font_weight(FontWeight::MEDIUM),
+        )
+        .child(
+            text(move || count().unwrap_or_default())
+                .text_size(px(size::small()))
+                .tabular_nums()
+                .text_color(move || theme().muted_foreground),
+        )
 }
 
 fn core_footer() -> impl IntoElement {
@@ -83,8 +99,17 @@ fn core_footer() -> impl IntoElement {
                 .items_center()
                 .gap_2()
                 .child(ui::dot(tone))
-                .child(text(move || store.state.with(|s| s.plain())).text_size(px(size::small())).font_weight(FontWeight::MEDIUM).flex_1())
-                .child(text(move || store.state.with(|s| s.settings.mode.route())).text_size(px(size::small())).text_color(move || theme().muted_foreground)),
+                .child(
+                    text(move || store.state.with(|s| s.plain()))
+                        .text_size(px(size::small()))
+                        .font_weight(FontWeight::MEDIUM)
+                        .flex_1(),
+                )
+                .child(
+                    text(move || store.state.with(|s| s.settings.mode.route()))
+                        .text_size(px(size::small()))
+                        .text_color(move || theme().muted_foreground),
+                ),
         )
         .child(
             view()
@@ -95,7 +120,11 @@ fn core_footer() -> impl IntoElement {
         )
         // A downloaded Kairo update: one tap installs it and restarts.
         .child(when(
-            move || store.state.with(|s| matches!(s.update, kairo_core::UpdateStatus::Ready { .. })),
+            move || {
+                store
+                    .state
+                    .with(|s| matches!(s.update, kairo_core::UpdateStatus::Ready { .. }))
+            },
             pages::settings::update_button,
         ))
 }
@@ -107,30 +136,62 @@ fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
         .items_center()
         .gap_1()
         .child(icon(glyph, 12.0).text_color(move || theme().muted_foreground))
-        .child(text(move || kairo_core::speed(value())).text_size(px(size::small())).tabular_nums().number_of_lines(1))
+        .child(
+            text(move || kairo_core::speed(value()))
+                .text_size(px(size::small()))
+                .tabular_nums()
+                .number_of_lines(1),
+        )
 }
 
 fn sidebar() -> impl IntoElement {
     let groups: [&[Page]; 3] = [
         &[Page::Overview, Page::Apps],
-        &[Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns],
+        &[
+            Page::Proxies,
+            Page::Profiles,
+            Page::Connections,
+            Page::Rules,
+            Page::Logs,
+            Page::Dns,
+        ],
         &[Page::Settings],
     ];
     let glass = crate::chrome::glass_sidebar();
     view()
         .w(px(SIDEBAR_WIDTH))
         .flex_shrink_0()
-        .style_when(move || !glass, |s| s.bg(move || theme().sidebar).border_r_1().border_color(move || theme().sidebar_border))
-        .style_when(move || glass, |s| s.m_2().rounded(px(18.0)).glass_effect(GlassEffect::Regular))
+        .style_when(
+            move || !glass,
+            |s| {
+                s.bg(move || theme().sidebar)
+                    .border_r_1()
+                    .border_color(move || theme().sidebar_border)
+            },
+        )
+        .style_when(
+            move || glass,
+            |s| s.m_2().rounded(px(18.0)).glass_effect(GlassEffect::Regular),
+        )
         .window_drag(true)
         // Room for macOS's traffic lights when the title bar is hidden.
-        .pt(move || if title_bar().top > px(0.0) { title_bar().top + px(6.0) } else { px(12.0) })
+        .pt(move || {
+            if title_bar().top > px(0.0) {
+                title_bar().top + px(6.0)
+            } else {
+                px(12.0)
+            }
+        })
         .child(
             view()
                 .flex_1()
                 .px_2()
                 .gap_4()
-                .children(groups.into_iter().map(|pages| view().gap_0p5().children(pages.iter().map(|p| nav_item(*p))))),
+                .children(groups.into_iter().map(|pages| {
+                    view()
+                        .gap_0p5()
+                        .children(pages.iter().map(|p| nav_item(*p)))
+                })),
         )
         .child(core_footer())
 }
@@ -140,7 +201,11 @@ fn toast() -> impl IntoElement {
     when(
         move || store.toast.with(|t| t.is_some()),
         move || {
-            let message = move || store.toast.with(|t| t.as_ref().map(|t| t.1.clone()).unwrap_or_default());
+            let message = move || {
+                store
+                    .toast
+                    .with(|t| t.as_ref().map(|t| t.1.clone()).unwrap_or_default())
+            };
             let error = move || store.toast.with(|t| t.as_ref().is_some_and(|t| t.2));
             view()
                 .absolute()
@@ -162,7 +227,13 @@ fn toast() -> impl IntoElement {
                         .border_1()
                         .border_color(move || theme().border)
                         .shadow_lg()
-                        .child(ui::dot(move || if error() { theme().destructive } else { theme().primary }))
+                        .child(ui::dot(move || {
+                            if error() {
+                                theme().destructive
+                            } else {
+                                theme().primary
+                            }
+                        }))
                         .child(text(message).text_size(px(size::body())).flex_shrink(1.0))
                         .child(
                             ui::icon_btn(Icon::Close, "Dismiss")

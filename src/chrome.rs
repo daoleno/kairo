@@ -11,8 +11,8 @@
 //! goes both ways; the page's toolbar goes to the chrome, and what is done
 //! with it comes back as events.
 
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use kairo_core::tokio::sync::{mpsc, watch};
 
@@ -98,9 +98,21 @@ impl Glyph {
             Glyph::Resume | Glyph::Start => &["media-playback-start-symbolic"],
             Glyph::CloseAll => &["window-close-symbolic", "process-stop-symbolic"],
             Glyph::Clear => &["edit-clear-all-symbolic", "user-trash-symbolic"],
-            Glyph::Bolt => &["power-profile-performance-symbolic", "speedometer-symbolic", "system-run-symbolic"],
-            Glyph::Sort => &["view-sort-ascending-symbolic", "view-sort-descending-symbolic", "view-list-symbolic"],
-            Glyph::Filter => &["view-filter-symbolic", "filter-symbolic", "view-list-symbolic"],
+            Glyph::Bolt => &[
+                "power-profile-performance-symbolic",
+                "speedometer-symbolic",
+                "system-run-symbolic",
+            ],
+            Glyph::Sort => &[
+                "view-sort-ascending-symbolic",
+                "view-sort-descending-symbolic",
+                "view-list-symbolic",
+            ],
+            Glyph::Filter => &[
+                "view-filter-symbolic",
+                "filter-symbolic",
+                "view-list-symbolic",
+            ],
             Glyph::Restart => &["view-refresh-symbolic"],
             Glyph::Stop => &["media-playback-stop-symbolic", "process-stop-symbolic"],
         }
@@ -112,11 +124,26 @@ impl Glyph {
 pub enum Tool {
     /// A search field. `value` is what the page holds (the chrome sets it
     /// only when they differ, so typing is never interrupted).
-    Search { id: &'static str, placeholder: &'static str, value: String },
+    Search {
+        id: &'static str,
+        placeholder: &'static str,
+        value: String,
+    },
     /// A button: a glyph with a label for VoiceOver, Orca and tooltips.
-    Button { id: &'static str, label: String, glyph: Glyph, enabled: bool },
+    Button {
+        id: &'static str,
+        label: String,
+        glyph: Glyph,
+        enabled: bool,
+    },
     /// A pull-down of choices, the selected one checked.
-    Choice { id: &'static str, label: &'static str, glyph: Glyph, options: Vec<&'static str>, selected: usize },
+    Choice {
+        id: &'static str,
+        label: &'static str,
+        glyph: Glyph,
+        options: Vec<&'static str>,
+        selected: usize,
+    },
 }
 
 impl Tool {
@@ -183,7 +210,9 @@ pub fn bridge() -> &'static Bridge {
 
 /// Selects `page` from the chrome (a sidebar click, a menu).
 pub fn select(page: Page) {
-    bridge().page.send_if_modified(|p| std::mem::replace(p, page) != page);
+    bridge()
+        .page
+        .send_if_modified(|p| std::mem::replace(p, page) != page);
 }
 
 /// Reports a tool's event from the chrome.
@@ -193,5 +222,7 @@ pub fn tool_event(event: ToolEvent) {
 
 /// The chrome's new insets (macOS: the content's safe area).
 pub fn set_insets(insets: Insets) {
-    bridge().insets.send_if_modified(|i| std::mem::replace(i, insets) != insets);
+    bridge()
+        .insets
+        .send_if_modified(|i| std::mem::replace(i, insets) != insets);
 }

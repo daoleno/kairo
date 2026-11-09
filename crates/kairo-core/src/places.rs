@@ -9,13 +9,24 @@ use crate::model::{Group, Node};
 /// (`trayGroup`), else the selector the most other groups follow (the
 /// usual "Proxies" every app group lists), else the first selector.
 pub fn main_group<'a>(groups: &'a [Group], preferred: &str) -> Option<&'a Group> {
-    let selectors = || groups.iter().filter(|g| g.selectable() && !g.hidden && g.name != "GLOBAL");
+    let selectors = || {
+        groups
+            .iter()
+            .filter(|g| g.selectable() && !g.hidden && g.name != "GLOBAL")
+    };
     if !preferred.is_empty()
         && let Some(g) = selectors().find(|g| g.name == preferred)
     {
         return Some(g);
     }
-    let followers = |name: &str| groups.iter().filter(|g| g.name != name && g.name != "GLOBAL" && g.members.iter().any(|m| m.name == name)).count();
+    let followers = |name: &str| {
+        groups
+            .iter()
+            .filter(|g| {
+                g.name != name && g.name != "GLOBAL" && g.members.iter().any(|m| m.name == name)
+            })
+            .count()
+    };
     let reachable = |g: &Group| !places(groups, g).is_empty();
     // Most followed (the group every app group lists); the first in config
     // order on a tie (configs list the main choice first).
@@ -34,7 +45,10 @@ pub fn main_group<'a>(groups: &'a [Group], preferred: &str) -> Option<&'a Group>
 
 /// mihomo's own outbounds.
 pub fn is_builtin(name: &str) -> bool {
-    matches!(name, "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "COMPATIBLE")
+    matches!(
+        name,
+        "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "COMPATIBLE"
+    )
 }
 
 /// A node that is the provider's note rather than a place: "Traffic Reset:
@@ -42,8 +56,28 @@ pub fn is_builtin(name: &str) -> bool {
 /// "剩余流量：…", "官网 …".
 pub fn is_note(name: &str) -> bool {
     const WORDS: [&str; 22] = [
-        "剩余", "到期", "流量", "官网", "套餐", "过期", "重置", "网址", "客服", "订阅", "更新", "expire", "traffic", "reset", "days left",
-        "remaining", "website", "official", "renew", "plan:", "使用", "距离",
+        "剩余",
+        "到期",
+        "流量",
+        "官网",
+        "套餐",
+        "过期",
+        "重置",
+        "网址",
+        "客服",
+        "订阅",
+        "更新",
+        "expire",
+        "traffic",
+        "reset",
+        "days left",
+        "remaining",
+        "website",
+        "official",
+        "renew",
+        "plan:",
+        "使用",
+        "距离",
     ];
     let low = name.to_lowercase();
     if WORDS.iter().any(|w| low.contains(w)) {
@@ -128,7 +162,10 @@ pub fn route_to(groups: &[Group], main: &Group, name: &str) -> Vec<(String, Stri
         if let Some(g) = groups.iter().find(|g| g.name == m.name && g.selectable())
             && g.members.iter().any(|n| n.name == name)
         {
-            return vec![(g.name.clone(), name.to_owned()), (main.name.clone(), g.name.clone())];
+            return vec![
+                (g.name.clone(), name.to_owned()),
+                (main.name.clone(), g.name.clone()),
+            ];
         }
     }
     vec![]
@@ -142,7 +179,10 @@ pub fn current(groups: &[Group], main: &Group) -> Option<Place> {
         m => {
             let g = groups.iter().find(|g| g.name == m.name)?;
             let inner = g.now.as_deref()?;
-            g.members.iter().find(|n| n.name == inner && !n.is_group).map(place)
+            g.members
+                .iter()
+                .find(|n| n.name == inner && !n.is_group)
+                .map(place)
         }
     }
 }
@@ -150,24 +190,48 @@ pub fn current(groups: &[Group], main: &Group) -> Option<Place> {
 /// The groups whose members are places: the main one and its member selectors.
 pub fn place_groups(groups: &[Group], main: &Group) -> Vec<String> {
     let mut out = vec![main.name.clone()];
-    out.extend(main.members.iter().filter(|m| m.is_group && groups.iter().any(|g| g.name == m.name && g.selectable())).map(|m| m.name.clone()));
+    out.extend(
+        main.members
+            .iter()
+            .filter(|m| m.is_group && groups.iter().any(|g| g.name == m.name && g.selectable()))
+            .map(|m| m.name.clone()),
+    );
     out
 }
 
 pub fn place(node: &Node) -> Place {
     let (flag, rest) = split_flag(&node.name);
-    let region = flag.as_deref().and_then(region_of_flag).or_else(|| region_of_words(&node.name)).unwrap_or("Other");
-    Place { name: node.name.clone(), title: rest.trim().to_owned(), flag, region, delay: node.delay, is_group: node.is_group }
+    let region = flag
+        .as_deref()
+        .and_then(region_of_flag)
+        .or_else(|| region_of_words(&node.name))
+        .unwrap_or("Other");
+    Place {
+        name: node.name.clone(),
+        title: rest.trim().to_owned(),
+        flag,
+        region,
+        delay: node.delay,
+        is_group: node.is_group,
+    }
 }
 
 /// The provider's notes in the main group ("Expire Date: 2027/01/26").
 pub fn notes(group: &Group) -> Vec<String> {
-    group.members.iter().filter(|m| is_note(&m.name)).map(|m| m.name.clone()).collect()
+    group
+        .members
+        .iter()
+        .filter(|m| is_note(&m.name))
+        .map(|m| m.name.clone())
+        .collect()
 }
 
 /// The fastest place that answered.
 pub fn fastest(groups: &[Group], main: &Group) -> Option<Place> {
-    places(groups, main).into_iter().filter(|p| p.delay.is_some_and(|d| d > 0)).min_by_key(|p| p.delay)
+    places(groups, main)
+        .into_iter()
+        .filter(|p| p.delay.is_some_and(|d| d > 0))
+        .min_by_key(|p| p.delay)
 }
 
 /// A flag at the start of the name (two regional indicators), and the rest.
@@ -186,28 +250,63 @@ pub fn split_flag(name: &str) -> (Option<String>, &str) {
 
 /// The ISO code of a flag.
 pub fn flag_code(flag: &str) -> Option<String> {
-    let code: String = flag.chars().filter_map(|c| char::from_u32(c as u32 - 0x1F1E6 + 'A' as u32)).collect();
+    let code: String = flag
+        .chars()
+        .filter_map(|c| char::from_u32(c as u32 - 0x1F1E6 + 'A' as u32))
+        .collect();
     (code.len() == 2).then_some(code)
 }
 
 /// A flag of an ISO code.
 pub fn flag_of(code: &str) -> String {
-    code.chars().filter_map(|c| char::from_u32(c.to_ascii_uppercase() as u32 - 'A' as u32 + 0x1F1E6)).collect()
+    code.chars()
+        .filter_map(|c| char::from_u32(c.to_ascii_uppercase() as u32 - 'A' as u32 + 0x1F1E6))
+        .collect()
 }
 
 const REGIONS: [(&str, &str, &[&str]); 30] = [
     ("HK", "Hong Kong", &["香港", "hong kong", "hongkong", "hk"]),
     ("TW", "Taiwan", &["台湾", "臺灣", "taiwan", "tw"]),
-    ("JP", "Japan", &["日本", "japan", "tokyo", "osaka", "东京", "大阪", "jp"]),
+    (
+        "JP",
+        "Japan",
+        &["日本", "japan", "tokyo", "osaka", "东京", "大阪", "jp"],
+    ),
     ("SG", "Singapore", &["新加坡", "狮城", "singapore", "sg"]),
-    ("US", "United States", &["美国", "美國", "united states", "usa", "los angeles", "san jose", "seattle", "new york", "us"]),
-    ("KR", "South Korea", &["韩国", "韓國", "korea", "seoul", "首尔", "kr"]),
-    ("GB", "United Kingdom", &["英国", "united kingdom", "london", "uk"]),
+    (
+        "US",
+        "United States",
+        &[
+            "美国",
+            "美國",
+            "united states",
+            "usa",
+            "los angeles",
+            "san jose",
+            "seattle",
+            "new york",
+            "us",
+        ],
+    ),
+    (
+        "KR",
+        "South Korea",
+        &["韩国", "韓國", "korea", "seoul", "首尔", "kr"],
+    ),
+    (
+        "GB",
+        "United Kingdom",
+        &["英国", "united kingdom", "london", "uk"],
+    ),
     ("DE", "Germany", &["德国", "germany", "frankfurt", "de"]),
     ("FR", "France", &["法国", "france", "paris"]),
     ("NL", "Netherlands", &["荷兰", "netherlands", "amsterdam"]),
     ("CA", "Canada", &["加拿大", "canada"]),
-    ("AU", "Australia", &["澳大利亚", "澳洲", "australia", "sydney"]),
+    (
+        "AU",
+        "Australia",
+        &["澳大利亚", "澳洲", "australia", "sydney"],
+    ),
     ("IN", "India", &["印度", "india"]),
     ("RU", "Russia", &["俄罗斯", "russia"]),
     ("TR", "Türkiye", &["土耳其", "turkey", "türkiye"]),
@@ -219,7 +318,11 @@ const REGIONS: [(&str, &str, &[&str]); 30] = [
     ("AR", "Argentina", &["阿根廷", "argentina"]),
     ("BR", "Brazil", &["巴西", "brazil"]),
     ("MO", "Macao", &["澳门", "macao", "macau"]),
-    ("AE", "United Arab Emirates", &["阿联酋", "迪拜", "dubai", "emirates"]),
+    (
+        "AE",
+        "United Arab Emirates",
+        &["阿联酋", "迪拜", "dubai", "emirates"],
+    ),
     ("IT", "Italy", &["意大利", "italy"]),
     ("ES", "Spain", &["西班牙", "spain"]),
     ("CH", "Switzerland", &["瑞士", "switzerland"]),
@@ -230,25 +333,43 @@ const REGIONS: [(&str, &str, &[&str]); 30] = [
 
 fn region_of_flag(flag: &str) -> Option<&'static str> {
     let code = flag_code(flag)?;
-    REGIONS.iter().find(|(c, _, _)| *c == code).map(|(_, n, _)| *n).or(Some(match code.as_str() {
-        "UK" => "United Kingdom",
-        _ => "Other",
-    }))
+    REGIONS
+        .iter()
+        .find(|(c, _, _)| *c == code)
+        .map(|(_, n, _)| *n)
+        .or(Some(match code.as_str() {
+            "UK" => "United Kingdom",
+            _ => "Other",
+        }))
 }
 
 fn region_of_words(name: &str) -> Option<&'static str> {
     let low = name.to_lowercase();
     // Whole words for the short codes; anywhere for the rest.
-    let words: Vec<&str> = low.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let words: Vec<&str> = low
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
     REGIONS
         .iter()
-        .find(|(_, _, keys)| keys.iter().any(|k| if k.len() <= 3 && k.is_ascii() { words.contains(k) } else { low.contains(k) }))
+        .find(|(_, _, keys)| {
+            keys.iter().any(|k| {
+                if k.len() <= 3 && k.is_ascii() {
+                    words.contains(k)
+                } else {
+                    low.contains(k)
+                }
+            })
+        })
         .map(|(_, n, _)| *n)
 }
 
 /// The flag of a region (for places whose names carry none).
 pub fn region_flag(region: &str) -> Option<String> {
-    REGIONS.iter().find(|(_, n, _)| *n == region).map(|(c, _, _)| flag_of(c))
+    REGIONS
+        .iter()
+        .find(|(_, n, _)| *n == region)
+        .map(|(c, _, _)| flag_of(c))
 }
 
 /// Places by region: regions by their fastest place, each region's places by
@@ -294,12 +415,21 @@ pub fn app_choices(groups: &[Group], main: &str) -> Vec<AppChoice> {
         .collect();
     groups
         .iter()
-        .filter(|g| g.selectable() && !g.hidden && g.name != main && g.name != "GLOBAL" && !direct_groups.contains(&g.name.as_str()))
+        .filter(|g| {
+            g.selectable()
+                && !g.hidden
+                && g.name != main
+                && g.name != "GLOBAL"
+                && !direct_groups.contains(&g.name.as_str())
+        })
         .map(|g| AppChoice {
             group: g.name.clone(),
             now: g.now.clone(),
             follows_main: g.now.as_deref() == Some(main),
-            direct: g.now.as_deref().is_some_and(|n| n == "DIRECT" || direct_groups.contains(&n)),
+            direct: g
+                .now
+                .as_deref()
+                .is_some_and(|n| n == "DIRECT" || direct_groups.contains(&n)),
             options: g.members.iter().map(|m| m.name.clone()).collect(),
         })
         .collect()
@@ -310,7 +440,14 @@ mod tests {
     use super::*;
 
     fn node(name: &str, delay: Option<u32>) -> Node {
-        Node { name: name.into(), kind: "Trojan".into(), udp: true, delay, alive: true, is_group: false }
+        Node {
+            name: name.into(),
+            kind: "Trojan".into(),
+            udp: true,
+            delay,
+            alive: true,
+            is_group: false,
+        }
     }
 
     fn group(name: &str, members: &[&str]) -> Group {
@@ -318,7 +455,13 @@ mod tests {
             name: name.into(),
             kind: "Selector".into(),
             now: members.first().map(|m| m.to_string()),
-            members: members.iter().map(|m| Node { is_group: false, ..node(m, None) }).collect(),
+            members: members
+                .iter()
+                .map(|m| Node {
+                    is_group: false,
+                    ..node(m, None)
+                })
+                .collect(),
             hidden: false,
             test_url: None,
         }
@@ -326,10 +469,23 @@ mod tests {
 
     #[test]
     fn notes_are_not_places() {
-        for n in ["282.21 G | 500.00 G", "Traffic Reset：15 Days Left", "Expire Date：2027/01/26", "剩余流量：120.5 GB", "官网 example.com", "12.3GB"] {
+        for n in [
+            "282.21 G | 500.00 G",
+            "Traffic Reset：15 Days Left",
+            "Expire Date：2027/01/26",
+            "剩余流量：120.5 GB",
+            "官网 example.com",
+            "12.3GB",
+        ] {
             assert!(is_note(n), "{n}");
         }
-        for n in ["🇭🇰 Hong Kong 01", "🇯🇵 Tokyo 03", "US Seattle 1x", "香港 IEPL 02", "Singapore G1"] {
+        for n in [
+            "🇭🇰 Hong Kong 01",
+            "🇯🇵 Tokyo 03",
+            "US Seattle 1x",
+            "香港 IEPL 02",
+            "Singapore G1",
+        ] {
             assert!(!is_note(n), "{n}");
         }
     }
@@ -337,7 +493,10 @@ mod tests {
     #[test]
     fn flags_and_regions() {
         let p = place(&node("🇭🇰 Hong Kong 01", Some(40)));
-        assert_eq!((p.flag.as_deref(), p.title.as_str(), p.region), (Some("🇭🇰"), "Hong Kong 01", "Hong Kong"));
+        assert_eq!(
+            (p.flag.as_deref(), p.title.as_str(), p.region),
+            (Some("🇭🇰"), "Hong Kong 01", "Hong Kong")
+        );
         assert_eq!(place(&node("日本 大阪 02", None)).region, "Japan");
         assert_eq!(place(&node("US Seattle", None)).region, "United States");
         assert_eq!(place(&node("Plus 03", None)).region, "Other");
@@ -362,7 +521,10 @@ mod tests {
         assert_eq!(main_group(&gs, "").unwrap().name, "Proxies");
         assert_eq!(main_group(&gs, "AI").unwrap().name, "AI");
         let apps = app_choices(&gs, "Proxies");
-        assert_eq!(apps.iter().map(|a| a.group.as_str()).collect::<Vec<_>>(), ["Netflix", "AI", "Final"]);
+        assert_eq!(
+            apps.iter().map(|a| a.group.as_str()).collect::<Vec<_>>(),
+            ["Netflix", "AI", "Final"]
+        );
         assert!(apps[0].follows_main);
     }
 
@@ -392,7 +554,10 @@ mod tests {
         assert_eq!(current(&gs, &proxy).unwrap().name, "🇭🇰 HK 02");
         assert_eq!(
             route_to(&gs, &proxy, "🇺🇸 Seattle 01"),
-            [("US".to_string(), "🇺🇸 Seattle 01".to_string()), ("Proxy".to_string(), "US".to_string())]
+            [
+                ("US".to_string(), "🇺🇸 Seattle 01".to_string()),
+                ("Proxy".to_string(), "US".to_string())
+            ]
         );
         assert_eq!(route_to(&gs, &proxy, "🇯🇵 Tokyo 01")[0].0, "Asia");
     }
@@ -400,11 +565,19 @@ mod tests {
     #[test]
     fn fastest_skips_notes_and_failures() {
         let mut g = group("Proxies", &[]);
-        g.members = vec![node("282.21 G | 500.00 G", Some(20)), node("🇭🇰 HK 1", Some(0)), node("🇯🇵 JP 1", Some(48)), node("🇸🇬 SG 1", Some(39))];
+        g.members = vec![
+            node("282.21 G | 500.00 G", Some(20)),
+            node("🇭🇰 HK 1", Some(0)),
+            node("🇯🇵 JP 1", Some(48)),
+            node("🇸🇬 SG 1", Some(39)),
+        ];
         let gs = vec![g.clone()];
         assert_eq!(fastest(&gs, &g).unwrap().name, "🇸🇬 SG 1");
         let regions = by_region(&places(&gs, &g));
-        assert_eq!(regions.iter().map(|r| r.0).collect::<Vec<_>>(), ["Singapore", "Japan", "Hong Kong"]);
+        assert_eq!(
+            regions.iter().map(|r| r.0).collect::<Vec<_>>(),
+            ["Singapore", "Japan", "Hong Kong"]
+        );
     }
 }
 
@@ -424,7 +597,10 @@ mod real {
             println!("{r}: {}", ps.len());
         }
         for a in super::app_choices(&groups, &main.name) {
-            println!("app {} now={:?} follows={} direct={}", a.group, a.now, a.follows_main, a.direct);
+            println!(
+                "app {} now={:?} follows={} direct={}",
+                a.group, a.now, a.follows_main, a.direct
+            );
         }
     }
 }

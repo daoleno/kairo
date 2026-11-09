@@ -6,10 +6,12 @@ use std::time::Duration;
 use kairo_core::{Mode, Service};
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
-use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{
+    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
+};
 use objc2_app_kit::{
-    NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSStatusBar,
-    NSStatusItem, NSVariableStatusItemLength,
+    NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem,
+    NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{NSData, NSSize, NSString};
 
@@ -73,7 +75,14 @@ thread_local! {
     static HELD: RefCell<Option<(Retained<NSStatusItem>, Retained<Target>, Retained<NSMenu>)>> = const { RefCell::new(None) };
 }
 
-fn item(target: &Target, mtm: MainThreadMarker, title: &str, tag: isize, enabled: bool, checked: Option<bool>) -> Retained<NSMenuItem> {
+fn item(
+    target: &Target,
+    mtm: MainThreadMarker,
+    title: &str,
+    tag: isize,
+    enabled: bool,
+    checked: Option<bool>,
+) -> Retained<NSMenuItem> {
     let item = unsafe {
         NSMenuItem::initWithTitle_action_keyEquivalent(
             NSMenuItem::alloc(mtm),
@@ -86,14 +95,21 @@ fn item(target: &Target, mtm: MainThreadMarker, title: &str, tag: isize, enabled
     item.setTag(tag);
     item.setEnabled(enabled);
     if let Some(on) = checked {
-        item.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
+        item.setState(if on {
+            NSControlStateValueOn
+        } else {
+            NSControlStateValueOff
+        });
     }
     item
 }
 
 /// The item with an SF Symbol before its title, as macOS 26's menus have.
 fn symbol(item: Retained<NSMenuItem>, name: &str) -> Retained<NSMenuItem> {
-    let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None);
+    let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        &NSString::from_str(name),
+        None,
+    );
     item.setImage(image.as_deref());
     item
 }
@@ -104,15 +120,42 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
     let status = item(target, mtm, &m.status, 0, false, None);
     menu.addItem(&status);
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&symbol(item(target, mtm, "Connected", TAG_CORE, m.has_profile, Some(m.running)), "power"));
+    menu.addItem(&symbol(
+        item(
+            target,
+            mtm,
+            "Connected",
+            TAG_CORE,
+            m.has_profile,
+            Some(m.running),
+        ),
+        "power",
+    ));
     if let Some((group, choices, now)) = &m.group {
-        let holder = symbol(item(target, mtm, &format!("Location: {}", m.place), 0, true, None), "location");
+        let holder = symbol(
+            item(
+                target,
+                mtm,
+                &format!("Location: {}", m.place),
+                0,
+                true,
+                None,
+            ),
+            "location",
+        );
         unsafe { holder.setAction(None) };
         let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(group));
         sub.setAutoenablesItems(false);
         for (i, c) in choices.iter().enumerate() {
             let checked = now.as_deref() == Some(c.name.as_str());
-            sub.addItem(&item(target, mtm, &Model::choice_label(c), TAG_NODE + i as isize, true, Some(checked)));
+            sub.addItem(&item(
+                target,
+                mtm,
+                &Model::choice_label(c),
+                TAG_NODE + i as isize,
+                true,
+                Some(checked),
+            ));
             if i == 0 {
                 sub.addItem(&NSMenuItem::separatorItem(mtm));
             }
@@ -122,11 +165,24 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     for (i, mode) in Mode::ALL.iter().enumerate() {
-        menu.addItem(&item(target, mtm, Model::route_title(*mode), TAG_MODE + i as isize, true, Some(*mode == m.mode)));
+        menu.addItem(&item(
+            target,
+            mtm,
+            Model::route_title(*mode),
+            TAG_MODE + i as isize,
+            true,
+            Some(*mode == m.mode),
+        ));
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&symbol(item(target, mtm, "Open Kairo", TAG_SHOW, true, None), "macwindow"));
-    menu.addItem(&symbol(item(target, mtm, "Quit Kairo", TAG_QUIT, true, None), "xmark.circle"));
+    menu.addItem(&symbol(
+        item(target, mtm, "Open Kairo", TAG_SHOW, true, None),
+        "macwindow",
+    ));
+    menu.addItem(&symbol(
+        item(target, mtm, "Quit Kairo", TAG_QUIT, true, None),
+        "xmark.circle",
+    ));
 }
 
 fn glyph(mtm: MainThreadMarker, dim: bool) -> Option<Retained<NSImage>> {
@@ -134,7 +190,11 @@ fn glyph(mtm: MainThreadMarker, dim: bool) -> Option<Retained<NSImage>> {
     // A PNG at 2x (every macOS reads it; SVG data needs a recent one), used as
     // a template image so the menu bar tints it for light, dark and highlight.
     let svg = include_str!("../../../assets/glyph.svg");
-    let svg = if dim { svg.replacen("<svg ", "<svg opacity=\"0.45\" ", 1) } else { svg.to_owned() };
+    let svg = if dim {
+        svg.replacen("<svg ", "<svg opacity=\"0.45\" ", 1)
+    } else {
+        svg.to_owned()
+    };
     let png = crate::render_png(&svg, 36);
     let data = NSData::with_bytes(&png);
     let image = NSImage::initWithData(NSImage::alloc(), &data)?;
@@ -145,7 +205,11 @@ fn glyph(mtm: MainThreadMarker, dim: bool) -> Option<Retained<NSImage>> {
 
 fn install(svc: Service, hooks: Hooks, mtm: MainThreadMarker) {
     let target: Retained<Target> = {
-        let this = Target::alloc(mtm).set_ivars(Ivars { model: RefCell::new(Model::of(&svc)), svc: svc.clone(), hooks });
+        let this = Target::alloc(mtm).set_ivars(Ivars {
+            model: RefCell::new(Model::of(&svc)),
+            svc: svc.clone(),
+            hooks,
+        });
         unsafe { msg_send![super(this), init] }
     };
     let bar = NSStatusBar::systemStatusBar();
@@ -171,7 +235,9 @@ fn install(svc: Service, hooks: Hooks, mtm: MainThreadMarker) {
             if last != Some(running) {
                 last = Some(running);
                 dispatch2::DispatchQueue::main().exec_async(move || {
-                    let Some(mtm) = MainThreadMarker::new() else { return };
+                    let Some(mtm) = MainThreadMarker::new() else {
+                        return;
+                    };
                     HELD.with(|h| {
                         if let Some((status, _, _)) = h.borrow().as_ref()
                             && let Some(button) = status.button(mtm)

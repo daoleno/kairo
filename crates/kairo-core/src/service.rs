@@ -28,10 +28,14 @@ pub enum CoreStatus {
     #[default]
     Stopped,
     Starting,
-    Running { version: String },
+    Running {
+        version: String,
+    },
     Stopping,
     /// It stopped by itself, or could not start: why, in the core's words.
-    Failed { message: String },
+    Failed {
+        message: String,
+    },
 }
 
 impl CoreStatus {
@@ -106,7 +110,11 @@ impl State {
     /// The connection as a person says it: nothing to connect through yet
     /// is "Not Set Up", whatever the core does meanwhile.
     pub fn plain(&self) -> &'static str {
-        if self.profiles.active.is_none() { "Not Set Up" } else { self.core.plain() }
+        if self.profiles.active.is_none() {
+            "Not Set Up"
+        } else {
+            self.core.plain()
+        }
     }
 }
 
@@ -273,7 +281,10 @@ impl Service {
 
     /// Runs a command's future on the service runtime and reports a failure to
     /// the user (for callers with no place to show it: the tray).
-    pub fn fire<T: Send + 'static>(&self, f: impl Future<Output = Result<T, String>> + Send + 'static) {
+    pub fn fire<T: Send + 'static>(
+        &self,
+        f: impl Future<Output = Result<T, String>> + Send + 'static,
+    ) {
         let svc = self.clone();
         self.0.rt.spawn(async move {
             if let Err(e) = f.await {
@@ -311,7 +322,11 @@ impl Service {
     }
     /// A copy of the kept log lines, oldest first.
     pub fn logs(&self) -> Vec<LogEntry> {
-        self.0.logs.lock().map(|l| l.iter().cloned().collect()).unwrap_or_default()
+        self.0
+            .logs
+            .lock()
+            .map(|l| l.iter().cloned().collect())
+            .unwrap_or_default()
     }
     pub fn clear_logs(&self) {
         if let Ok(mut l) = self.0.logs.lock() {
@@ -375,7 +390,9 @@ impl Service {
         let s = self.settings();
         for (port, what) in [(s.controller_port, "controller"), (s.mixed_port, "proxy")] {
             if crate::settings::port_in_use(port) {
-                return Err(format!("Port {port} (the core's {what} port) is used by another program. Choose another one in Settings."));
+                return Err(format!(
+                    "Port {port} (the core's {what} port) is used by another program. Choose another one in Settings."
+                ));
             }
         }
         Ok(())
@@ -415,7 +432,10 @@ impl Service {
         if self.settings().tun && privilege == Privilege::Needed {
             self.modify(|s| s.settings.tun = false);
             self.save_settings();
-            self.notify("TUN is off: the updated core needs permission again. Turn TUN on to grant it.", true);
+            self.notify(
+                "TUN is off: the updated core needs permission again. Turn TUN on to grant it.",
+                true,
+            );
         }
         match (version, seeded) {
             (Some(_), _) => {
@@ -425,8 +445,12 @@ impl Service {
                     log::warn!("start: {e}");
                 }
             }
-            (None, Err(e)) => self.set_core(CoreStatus::Failed { message: e.to_string() }),
-            (None, Ok(_)) => self.set_core(CoreStatus::Failed { message: format!("The core at {} does not run", core.display()) }),
+            (None, Err(e)) => self.set_core(CoreStatus::Failed {
+                message: e.to_string(),
+            }),
+            (None, Ok(_)) => self.set_core(CoreStatus::Failed {
+                message: format!("The core at {} does not run", core.display()),
+            }),
         }
         crate::update::spawn_checks(self.clone());
     }
@@ -458,7 +482,10 @@ impl Service {
 
     // --- The core -----------------------------------------------------------------
 
-    fn send_core<T: Send + 'static>(&self, make: fn(oneshot::Sender<T>) -> CoreCmd) -> impl Future<Output = Option<T>> + use<T> {
+    fn send_core<T: Send + 'static>(
+        &self,
+        make: fn(oneshot::Sender<T>) -> CoreCmd,
+    ) -> impl Future<Output = Option<T>> + use<T> {
         let (tx, rx) = oneshot::channel();
         let sent = self.0.core_tx.send(make(tx)).is_ok();
         async move { if sent { rx.await.ok() } else { None } }
@@ -540,17 +567,25 @@ impl Service {
         }
     }
 
-    async fn launch(&self, process: &mut Option<CoreProcess>, streams: &mut Vec<JoinHandle<()>>) -> Result<(), String> {
+    async fn launch(
+        &self,
+        process: &mut Option<CoreProcess>,
+        streams: &mut Vec<JoinHandle<()>>,
+    ) -> Result<(), String> {
         let core = self.core_path();
         if !core.exists() {
             let message = format!("The core is missing ({})", core.display());
-            self.set_core(CoreStatus::Failed { message: message.clone() });
+            self.set_core(CoreStatus::Failed {
+                message: message.clone(),
+            });
             return Err(message);
         }
         // A core left behind by a Kairo that crashed would hold the ports.
         crate::supervisor::stop_stale(&self.0.paths).await;
         if let Err(message) = self.ports_free() {
-            self.set_core(CoreStatus::Failed { message: message.clone() });
+            self.set_core(CoreStatus::Failed {
+                message: message.clone(),
+            });
             return Err(message);
         }
         self.set_core(CoreStatus::Starting);
@@ -564,7 +599,9 @@ impl Service {
             Ok(c) => c,
             Err(e) => {
                 let message = format!("Could not start the core: {e}");
-                self.set_core(CoreStatus::Failed { message: message.clone() });
+                self.set_core(CoreStatus::Failed {
+                    message: message.clone(),
+                });
                 return Err(message);
             }
         };
@@ -577,20 +614,33 @@ impl Service {
             Ok(v) => v.version,
             Err(e) => {
                 child.stop(&self.0.paths).await;
-                let message = if e == ApiError::Unreachable.to_string() || e == ApiError::Timeout.to_string() {
+                let message = if e == ApiError::Unreachable.to_string()
+                    || e == ApiError::Timeout.to_string()
+                {
                     let tail = child.tail();
-                    let core_error = tail.iter().rev().find(|l| l.contains("level=error") || l.contains("level=fatal"));
-                    core_error.map(|l| config::explain(l)).unwrap_or_else(|| "The core started but its controller never answered".into())
+                    let core_error = tail
+                        .iter()
+                        .rev()
+                        .find(|l| l.contains("level=error") || l.contains("level=fatal"));
+                    core_error.map(|l| config::explain(l)).unwrap_or_else(|| {
+                        "The core started but its controller never answered".into()
+                    })
                 } else {
                     e
                 };
-                self.set_core(CoreStatus::Failed { message: message.clone() });
+                self.set_core(CoreStatus::Failed {
+                    message: message.clone(),
+                });
                 return Err(message);
             }
         };
         // Problems it survives: say so.
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let in_use = child.tail().into_iter().find(|l| l.contains("address already in use")).map(|l| config::explain(&l));
+        let in_use = child
+            .tail()
+            .into_iter()
+            .find(|l| l.contains("address already in use"))
+            .map(|l| config::explain(&l));
         if let Some(w) = in_use {
             self.modify(|s| s.warning = Some(w));
         }
@@ -623,7 +673,9 @@ impl Service {
             l.down = 0;
             l.connections = 0;
         });
-        self.0.connections.send_replace(Arc::new(Connections::default()));
+        self.0
+            .connections
+            .send_replace(Arc::new(Connections::default()));
     }
 
     fn spawn_streams(&self, ctl: Controller) -> Vec<JoinHandle<()>> {
@@ -702,7 +754,8 @@ impl Service {
 
     fn take_connections(&self, resp: ConnectionsResponse) {
         let previous = self.0.connections.borrow().clone();
-        let by_id: HashMap<&str, &Connection> = previous.list.iter().map(|c| (c.id.as_str(), c)).collect();
+        let by_id: HashMap<&str, &Connection> =
+            previous.list.iter().map(|c| (c.id.as_str(), c)).collect();
         let mut list: Vec<Connection> = resp
             .connections
             .unwrap_or_default()
@@ -735,7 +788,12 @@ impl Service {
             if logs.len() == LOG_CAPACITY {
                 logs.pop_front();
             }
-            logs.push_back(LogEntry { seq, time: clock(), level: line.level, payload: line.payload });
+            logs.push_back(LogEntry {
+                seq,
+                time: clock(),
+                level: line.level,
+                payload: line.payload,
+            });
             seq
         };
         self.0.log_seq.send_replace(seq);
@@ -747,7 +805,8 @@ impl Service {
         let (tx, rx) = std::sync::mpsc::channel();
         self.0.rt.spawn(async move {
             svc.stop_core().await;
-            let _ = sysproxy::disable(&svc.0.paths).map_err(|e| log::error!("restoring the system proxy: {e}"));
+            let _ = sysproxy::disable(&svc.0.paths)
+                .map_err(|e| log::error!("restoring the system proxy: {e}"));
             let _ = tx.send(());
         });
         let _ = rx.recv_timeout(Duration::from_secs(6));
@@ -778,18 +837,21 @@ impl Service {
         // With no profile yet the core still runs, sending everything direct.
         let (text, over) = match &active {
             Some(id) => (
-                profile::read_config(paths, id).map_err(|e| format!("The active profile's file is missing: {e}"))?,
+                profile::read_config(paths, id)
+                    .map_err(|e| format!("The active profile's file is missing: {e}"))?,
                 profile::read_override(paths, id),
             ),
             None => (NO_PROFILE.to_owned(), String::new()),
         };
         let built = config::build(&text, &over, &settings).map_err(|e| e.to_string())?;
-        crate::paths::write_atomic(&paths.candidate_config(), built.as_bytes()).map_err(|e| e.to_string())?;
+        crate::paths::write_atomic(&paths.candidate_config(), built.as_bytes())
+            .map_err(|e| e.to_string())?;
         let core = self.core_path();
         if core.exists() {
             config::validate(&core, &paths.runtime_dir(), &paths.candidate_config()).await?;
         }
-        std::fs::rename(paths.candidate_config(), paths.runtime_config()).map_err(|e| e.to_string())?;
+        std::fs::rename(paths.candidate_config(), paths.runtime_config())
+            .map_err(|e| e.to_string())?;
         if reload && self.running() {
             self.controller()
                 .reload(&paths.runtime_config().to_string_lossy())
@@ -803,10 +865,15 @@ impl Service {
     }
 
     /// Checks profile + override text with the core without applying anything.
-    pub fn check_config(&self, profile_text: String, override_text: String) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn check_config(
+        &self,
+        profile_text: String,
+        override_text: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            let built = config::build(&profile_text, &override_text, &svc.settings()).map_err(|e| e.to_string())?;
+            let built = config::build(&profile_text, &override_text, &svc.settings())
+                .map_err(|e| e.to_string())?;
             let path = svc.0.paths.runtime_dir().join("check.yaml");
             crate::paths::write_atomic(&path, built.as_bytes()).map_err(|e| e.to_string())?;
             let core = svc.core_path();
@@ -840,7 +907,10 @@ impl Service {
     }
 
     /// Replaces the settings; applies what changed (live where mihomo allows it).
-    pub fn update_settings(&self, next: Settings) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn update_settings(
+        &self,
+        next: Settings,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             next.validate()?;
@@ -850,10 +920,15 @@ impl Service {
             }
             svc.modify(|s| s.settings = next.clone());
             svc.save_settings();
-            if prev.launch_at_login != next.launch_at_login || prev.start_minimized != next.start_minimized {
-                crate::autostart::set(next.launch_at_login, next.start_minimized).map_err(|e| format!("Launch at login: {e}"))?;
+            if prev.launch_at_login != next.launch_at_login
+                || prev.start_minimized != next.start_minimized
+            {
+                crate::autostart::set(next.launch_at_login, next.start_minimized)
+                    .map_err(|e| format!("Launch at login: {e}"))?;
             }
-            let restart = prev.controller_port != next.controller_port || prev.secret != next.secret || prev.core_path != next.core_path;
+            let restart = prev.controller_port != next.controller_port
+                || prev.secret != next.secret
+                || prev.core_path != next.core_path;
             let reload = prev.mixed_port != next.mixed_port
                 || prev.allow_lan != next.allow_lan
                 || prev.ipv6 != next.ipv6
@@ -927,7 +1002,9 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             let core = svc.core_path();
-            let result = tokio::task::spawn_blocking(move || tun::grant(&core)).await.map_err(|e| e.to_string())?;
+            let result = tokio::task::spawn_blocking(move || tun::grant(&core))
+                .await
+                .map_err(|e| e.to_string())?;
             let status = tun::status(&svc.core_path());
             svc.modify(|s| s.tun_privilege = Some(status));
             result?;
@@ -946,7 +1023,11 @@ impl Service {
         let result = if on {
             sysproxy::enable(
                 &paths,
-                &ProxySpec { host: "127.0.0.1".into(), port: settings.mixed_port, bypass: settings.bypass.clone() },
+                &ProxySpec {
+                    host: "127.0.0.1".into(),
+                    port: settings.mixed_port,
+                    bypass: settings.bypass.clone(),
+                },
             )
         } else {
             sysproxy::disable(&paths)
@@ -999,7 +1080,10 @@ impl Service {
 
     /// Goes through `name` (a place the main group reaches); `None`: the
     /// fastest, kept so (automatic).
-    pub fn set_location(&self, name: Option<String>) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn set_location(
+        &self,
+        name: Option<String>,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             let mut next = svc.settings();
@@ -1016,10 +1100,14 @@ impl Service {
 
     /// Selects the way to `name`: in its selector, then that selector in the main group.
     async fn go_through(&self, name: &str) -> Result<(), String> {
-        let group = self.main_group().ok_or("This subscription has no locations to choose from")?;
+        let group = self
+            .main_group()
+            .ok_or("This subscription has no locations to choose from")?;
         let steps = crate::places::route_to(&self.0.proxies.borrow().groups, &group, name);
         if steps.is_empty() {
-            return Err(format!("{name} is not one of this subscription's locations"));
+            return Err(format!(
+                "{name} is not one of this subscription's locations"
+            ));
         }
         for (g, member) in steps {
             self.select_inner(g, member).await?;
@@ -1031,7 +1119,9 @@ impl Service {
     pub fn test_places(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            let Some(group) = svc.main_group() else { return Ok(()) };
+            let Some(group) = svc.main_group() else {
+                return Ok(());
+            };
             let names = crate::places::place_groups(&svc.0.proxies.borrow().groups, &group);
             let tests: Vec<_> = names.into_iter().map(|g| svc.test_group(g)).collect();
             let mut last = Ok(());
@@ -1051,17 +1141,27 @@ impl Service {
             return Ok(None);
         }
         self.test_places().await?;
-        let Some(group) = self.main_group() else { return Ok(None) };
+        let Some(group) = self.main_group() else {
+            return Ok(None);
+        };
         let (best, current) = {
             let groups = &self.0.proxies.borrow().groups;
-            (crate::places::fastest(groups, &group), crate::places::current(groups, &group))
+            (
+                crate::places::fastest(groups, &group),
+                crate::places::current(groups, &group),
+            )
         };
         let Some(best) = best else {
-            return Err("No location answered. Check the network, or update the subscription".into());
+            return Err(
+                "No location answered. Check the network, or update the subscription".into(),
+            );
         };
         let keep = !force
             && current.as_ref().is_some_and(|c| {
-                !crate::places::is_note(&c.name) && c.delay.is_some_and(|d| d > 0 && d <= best.delay.unwrap_or(0).saturating_mul(3) / 2 + 40)
+                !crate::places::is_note(&c.name)
+                    && c.delay.is_some_and(|d| {
+                        d > 0 && d <= best.delay.unwrap_or(0).saturating_mul(3) / 2 + 40
+                    })
             });
         if keep || current.as_ref().is_some_and(|c| c.name == best.name) {
             return Ok(current.map(|c| c.name));
@@ -1078,15 +1178,20 @@ impl Service {
     /// minutes while it stays automatic.
     async fn keep_fastest(&self) {
         static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !self.settings().auto_location || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        if !self.settings().auto_location || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
             return;
         }
         // Say so only when there is no real place yet: a new subscription, or
         // a provider's note in use. Otherwise it checks quietly.
         let on_note = self.main_group().is_some_and(|g| {
-            crate::places::current(&self.0.proxies.borrow().groups, &g).is_none_or(|p| crate::places::is_note(&p.name))
+            crate::places::current(&self.0.proxies.borrow().groups, &g)
+                .is_none_or(|p| crate::places::is_note(&p.name))
         });
-        let fresh = self.0.fresh.swap(false, std::sync::atomic::Ordering::SeqCst);
+        let fresh = self
+            .0
+            .fresh
+            .swap(false, std::sync::atomic::Ordering::SeqCst);
         if fresh || on_note {
             self.modify(|s| s.locating = true);
         }
@@ -1112,7 +1217,11 @@ impl Service {
     // --- Profiles -----------------------------------------------------------------
 
     /// Adds a subscription; it becomes active when it is the first profile.
-    pub fn add_remote(&self, url: String, name: Option<String>) -> impl Future<Output = Result<String, String>> + 'static {
+    pub fn add_remote(
+        &self,
+        url: String,
+        name: Option<String>,
+    ) -> impl Future<Output = Result<String, String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             let url = url.trim().to_owned();
@@ -1130,7 +1239,10 @@ impl Service {
                     .filter(|n| !n.trim().is_empty())
                     .or(download.name)
                     .unwrap_or_else(|| profile::name_from_url(&url)),
-                source: Source::Remote { url, interval_hours: download.interval_hours.unwrap_or(24) },
+                source: Source::Remote {
+                    url,
+                    interval_hours: download.interval_hours.unwrap_or(24),
+                },
                 updated_at: Some(profile::now()),
                 usage: download.usage,
                 web_page: download.web_page,
@@ -1144,7 +1256,10 @@ impl Service {
     }
 
     /// Imports a local config file.
-    pub fn add_file(&self, path: std::path::PathBuf) -> impl Future<Output = Result<String, String>> + 'static {
+    pub fn add_file(
+        &self,
+        path: std::path::PathBuf,
+    ) -> impl Future<Output = Result<String, String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             let text = profile::read_import(&path).map_err(|e| e.to_string())?;
@@ -1158,7 +1273,9 @@ impl Service {
             svc.insert_profile(Profile {
                 id: id.clone(),
                 name,
-                source: Source::Local { origin: Some(path.to_string_lossy().into_owned()) },
+                source: Source::Local {
+                    origin: Some(path.to_string_lossy().into_owned()),
+                },
                 updated_at: Some(profile::now()),
                 usage: None,
                 web_page: None,
@@ -1180,10 +1297,15 @@ impl Service {
         if first {
             if self.settings().auto_location {
                 // From the first frame of Home until the first place is chosen.
-                self.0.fresh.store(true, std::sync::atomic::Ordering::SeqCst);
+                self.0
+                    .fresh
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 self.modify(|s| s.locating = true);
             }
-            let _ = self.activate_inner(profile.id).await.map_err(|e| self.notify(e, true));
+            let _ = self
+                .activate_inner(profile.id)
+                .await
+                .map_err(|e| self.notify(e, true));
         }
     }
 
@@ -1194,7 +1316,9 @@ impl Service {
                 // Blocked directly? Try through the core when it runs.
                 if self.running() {
                     let proxy = format!("http://127.0.0.1:{}", self.settings().mixed_port);
-                    profile::download(url, Some(&proxy)).await.map_err(|e| e.to_string())
+                    profile::download(url, Some(&proxy))
+                        .await
+                        .map_err(|e| e.to_string())
                 } else {
                     Err(direct.to_string())
                 }
@@ -1257,14 +1381,27 @@ impl Service {
     pub fn update_all_profiles(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            let ids: Vec<String> = svc.0.state.borrow().profiles.profiles.iter().filter(|p| p.is_remote()).map(|p| p.id.clone()).collect();
+            let ids: Vec<String> = svc
+                .0
+                .state
+                .borrow()
+                .profiles
+                .profiles
+                .iter()
+                .filter(|p| p.is_remote())
+                .map(|p| p.id.clone())
+                .collect();
             let mut errors = Vec::new();
             for id in ids {
                 if let Err(e) = svc.update_profile(id).await {
                     errors.push(e);
                 }
             }
-            if errors.is_empty() { Ok(()) } else { Err(errors.join("\n")) }
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(errors.join("\n"))
+            }
         })
     }
 
@@ -1295,13 +1432,23 @@ impl Service {
         Ok(())
     }
 
-    pub fn rename_profile(&self, id: String, name: String, interval_hours: Option<u32>, url: Option<String>) {
+    pub fn rename_profile(
+        &self,
+        id: String,
+        name: String,
+        interval_hours: Option<u32>,
+        url: Option<String>,
+    ) {
         self.modify(|s| {
             if let Some(p) = s.profiles.get_mut(&id) {
                 if !name.trim().is_empty() {
                     p.name = name.trim().to_owned();
                 }
-                if let Source::Remote { url: u, interval_hours: h } = &mut p.source {
+                if let Source::Remote {
+                    url: u,
+                    interval_hours: h,
+                } = &mut p.source
+                {
                     if let Some(i) = interval_hours {
                         *h = i;
                     }
@@ -1348,7 +1495,11 @@ impl Service {
     }
 
     /// Saves an override after the core accepts it; reloads when active.
-    pub fn save_override(&self, id: String, text: String) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn save_override(
+        &self,
+        id: String,
+        text: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         let check = self.check_config(self.profile_text(&id), text.clone());
         self.run(async move {
@@ -1387,10 +1538,16 @@ impl Service {
 
     /// Picks `name` in `group` by hand: in a group of places (the main one or
     /// its member selectors) that ends the automatic location.
-    pub fn select(&self, group: String, name: String) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn select(
+        &self,
+        group: String,
+        name: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            let place_group = svc.main_group().is_some_and(|m| crate::places::place_groups(&svc.0.proxies.borrow().groups, &m).contains(&group));
+            let place_group = svc.main_group().is_some_and(|m| {
+                crate::places::place_groups(&svc.0.proxies.borrow().groups, &m).contains(&group)
+            });
             if place_group && svc.settings().auto_location {
                 let mut next = svc.settings();
                 next.auto_location = false;
@@ -1400,7 +1557,11 @@ impl Service {
         })
     }
 
-    fn select_inner(&self, group: String, name: String) -> impl Future<Output = Result<(), String>> + 'static {
+    fn select_inner(
+        &self,
+        group: String,
+        name: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             // Show it at once; the refresh confirms.
@@ -1411,7 +1572,11 @@ impl Service {
                 }
                 *p = Arc::new(next);
             });
-            let r = svc.controller().select(&group, &name).await.map_err(|e| e.to_string());
+            let r = svc
+                .controller()
+                .select(&group, &name)
+                .await
+                .map_err(|e| e.to_string());
             // Old connections keep the old node; close those of this group.
             if r.is_ok() {
                 let ctl = svc.controller();
@@ -1463,7 +1628,11 @@ impl Service {
     }
 
     /// Tests one node; its delay in ms (0: failed).
-    pub fn test_node(&self, name: String, url: Option<String>) -> impl Future<Output = Result<u32, String>> + 'static {
+    pub fn test_node(
+        &self,
+        name: String,
+        url: Option<String>,
+    ) -> impl Future<Output = Result<u32, String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             let s = svc.settings();
@@ -1484,13 +1653,25 @@ impl Service {
             let s = svc.settings();
             let (members, url) = {
                 let p = svc.0.proxies.borrow();
-                let g = p.groups.iter().find(|g| g.name == group).ok_or("No such group")?;
+                let g = p
+                    .groups
+                    .iter()
+                    .find(|g| g.name == group)
+                    .ok_or("No such group")?;
                 (
-                    g.members.iter().filter(|m| !m.is_group).map(|m| m.name.clone()).collect::<Vec<_>>(),
+                    g.members
+                        .iter()
+                        .filter(|m| !m.is_group)
+                        .map(|m| m.name.clone())
+                        .collect::<Vec<_>>(),
                     // Groups that test themselves keep their own URL; mihomo reports a
                     // default one for select groups too, which the user's setting overrides.
                     match g.kind.as_str() {
-                        "URLTest" | "Fallback" | "LoadBalance" => g.test_url.clone().filter(|u| !u.is_empty()).unwrap_or(s.test_url.clone()),
+                        "URLTest" | "Fallback" | "LoadBalance" => g
+                            .test_url
+                            .clone()
+                            .filter(|u| !u.is_empty())
+                            .unwrap_or(s.test_url.clone()),
                         _ => s.test_url.clone(),
                     },
                 )
@@ -1498,7 +1679,10 @@ impl Service {
             let mut marks = members.clone();
             marks.push(group.clone());
             svc.set_testing(&marks, true);
-            let r = svc.controller().group_delay(&group, &url, s.test_timeout_ms).await;
+            let r = svc
+                .controller()
+                .group_delay(&group, &url, s.test_timeout_ms)
+                .await;
             svc.set_testing(&marks, false);
             match r {
                 Ok(delays) => {
@@ -1513,20 +1697,33 @@ impl Service {
         })
     }
 
-    pub fn update_provider(&self, name: String) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn update_provider(
+        &self,
+        name: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            svc.controller().update_proxy_provider(&name).await.map_err(|e| e.to_string())?;
+            svc.controller()
+                .update_proxy_provider(&name)
+                .await
+                .map_err(|e| e.to_string())?;
             svc.refresh_proxies_now().await;
             Ok(())
         })
     }
 
-    pub fn healthcheck_provider(&self, name: String) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn healthcheck_provider(
+        &self,
+        name: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             svc.set_testing(std::slice::from_ref(&name), true);
-            let r = svc.controller().healthcheck_provider(&name).await.map_err(|e| e.to_string());
+            let r = svc
+                .controller()
+                .healthcheck_provider(&name)
+                .await
+                .map_err(|e| e.to_string());
             svc.set_testing(std::slice::from_ref(&name), false);
             svc.refresh_proxies_now().await;
             r
@@ -1535,14 +1732,27 @@ impl Service {
 
     // --- Connections, rules, DNS ---------------------------------------------------
 
-    pub fn close_connection(&self, id: String) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn close_connection(
+        &self,
+        id: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
-        self.run(async move { svc.controller().close_connection(&id).await.map_err(|e| e.to_string()) })
+        self.run(async move {
+            svc.controller()
+                .close_connection(&id)
+                .await
+                .map_err(|e| e.to_string())
+        })
     }
 
     pub fn close_all_connections(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
-        self.run(async move { svc.controller().close_all_connections().await.map_err(|e| e.to_string()) })
+        self.run(async move {
+            svc.controller()
+                .close_all_connections()
+                .await
+                .map_err(|e| e.to_string())
+        })
     }
 
     pub fn rules(&self) -> impl Future<Output = Result<Vec<Rule>, String>> + 'static {
@@ -1550,31 +1760,69 @@ impl Service {
         self.run(async move { svc.controller().rules().await.map_err(|e| e.to_string()) })
     }
 
-    pub fn rule_providers(&self) -> impl Future<Output = Result<Vec<RuleProvider>, String>> + 'static {
+    pub fn rule_providers(
+        &self,
+    ) -> impl Future<Output = Result<Vec<RuleProvider>, String>> + 'static {
         let svc = self.clone();
-        self.run(async move { svc.controller().rule_providers().await.map_err(|e| e.to_string()) })
+        self.run(async move {
+            svc.controller()
+                .rule_providers()
+                .await
+                .map_err(|e| e.to_string())
+        })
     }
 
-    pub fn update_rule_provider(&self, name: String) -> impl Future<Output = Result<(), String>> + 'static {
+    pub fn update_rule_provider(
+        &self,
+        name: String,
+    ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
-        self.run(async move { svc.controller().update_rule_provider(&name).await.map_err(|e| e.to_string()) })
+        self.run(async move {
+            svc.controller()
+                .update_rule_provider(&name)
+                .await
+                .map_err(|e| e.to_string())
+        })
     }
 
-    pub fn dns_query(&self, name: String, kind: String) -> impl Future<Output = Result<DnsResponse, String>> + 'static {
+    pub fn dns_query(
+        &self,
+        name: String,
+        kind: String,
+    ) -> impl Future<Output = Result<DnsResponse, String>> + 'static {
         let svc = self.clone();
-        self.run(async move { svc.controller().dns_query(&name, &kind).await.map_err(|e| e.to_string()) })
+        self.run(async move {
+            svc.controller()
+                .dns_query(&name, &kind)
+                .await
+                .map_err(|e| e.to_string())
+        })
     }
 
     pub fn flush_fakeip(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
-        self.run(async move { svc.controller().flush_fakeip().await.map_err(|e| e.to_string()) })
+        self.run(async move {
+            svc.controller()
+                .flush_fakeip()
+                .await
+                .map_err(|e| e.to_string())
+        })
     }
 
     pub fn update_geo(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            svc.modify(|s| s.task = Some(Task { label: "Updating geo databases".into(), progress: None }));
-            let r = svc.controller().update_geo().await.map_err(|e| e.to_string());
+            svc.modify(|s| {
+                s.task = Some(Task {
+                    label: "Updating geo databases".into(),
+                    progress: None,
+                })
+            });
+            let r = svc
+                .controller()
+                .update_geo()
+                .await
+                .map_err(|e| e.to_string());
             svc.modify(|s| s.task = None);
             r
         })
@@ -1594,7 +1842,8 @@ impl Service {
     /// a profile (many networks need it), then directly.
     pub(crate) fn download_routes(&self) -> Vec<Option<String>> {
         let s = self.0.state.borrow();
-        let via_core = (s.core.is_running() && s.profiles.active.is_some()).then(|| format!("http://127.0.0.1:{}", s.settings.mixed_port));
+        let via_core = (s.core.is_running() && s.profiles.active.is_some())
+            .then(|| format!("http://127.0.0.1:{}", s.settings.mixed_port));
         match via_core {
             Some(p) => vec![Some(p), None],
             None => vec![None],
@@ -1607,7 +1856,9 @@ impl Service {
     }
 
     /// Looks for a Kairo update now.
-    pub fn check_for_update(&self) -> impl Future<Output = Result<Option<String>, String>> + 'static {
+    pub fn check_for_update(
+        &self,
+    ) -> impl Future<Output = Result<Option<String>, String>> + 'static {
         let svc = self.clone();
         self.run(async move { crate::update::check(&svc).await })
     }

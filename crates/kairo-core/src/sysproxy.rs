@@ -84,9 +84,8 @@ fn run(program: &str, args: &[&str]) -> Result<String, String> {
 }
 
 fn have(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| dir.join(program).is_file())
-    })
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
 /// Which mechanisms apply on this machine.
@@ -100,19 +99,46 @@ pub struct Backends {
 pub fn backends() -> Backends {
     // Tests and sandboxed runs: never touch the machine's proxy.
     if std::env::var_os("KAIRO_NO_SYSPROXY").is_some() {
-        return Backends { gnome: false, kde: None, mac: false };
+        return Backends {
+            gnome: false,
+            kde: None,
+            mac: false,
+        };
     }
     if cfg!(target_os = "macos") {
-        return Backends { gnome: false, kde: None, mac: true };
+        return Backends {
+            gnome: false,
+            kde: None,
+            mac: true,
+        };
     }
     if cfg!(target_os = "windows") {
-        return Backends { gnome: false, kde: None, mac: false };
+        return Backends {
+            gnome: false,
+            kde: None,
+            mac: false,
+        };
     }
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_ascii_uppercase();
-    let kde = desktop.contains("KDE").then(|| {
-        if have("kwriteconfig6") { Some("6") } else if have("kwriteconfig5") { Some("5") } else { None }
-    }).flatten();
-    Backends { gnome: have("gsettings"), kde, mac: false }
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let kde = desktop
+        .contains("KDE")
+        .then(|| {
+            if have("kwriteconfig6") {
+                Some("6")
+            } else if have("kwriteconfig5") {
+                Some("5")
+            } else {
+                None
+            }
+        })
+        .flatten();
+    Backends {
+        gnome: have("gsettings"),
+        kde,
+        mac: false,
+    }
 }
 
 /// Whether there is any way to set the system proxy here.
@@ -134,20 +160,29 @@ fn gs_set(schema: &str, key: &str, value: &str) -> Result<(), String> {
 fn gnome_read() -> Result<GnomeProxy, String> {
     let pair = |s: &str| -> Result<(String, u16), String> {
         let schema = format!("org.gnome.system.proxy.{s}");
-        Ok((gs_get(&schema, "host")?, gs_get(&schema, "port")?.parse().unwrap_or(0)))
+        Ok((
+            gs_get(&schema, "host")?,
+            gs_get(&schema, "port")?.parse().unwrap_or(0),
+        ))
     };
     Ok(GnomeProxy {
         mode: gs_get("org.gnome.system.proxy", "mode")?,
         http: pair("http")?,
         https: pair("https")?,
         socks: pair("socks")?,
-        ignore_hosts: run("gsettings", &["get", "org.gnome.system.proxy", "ignore-hosts"])?,
+        ignore_hosts: run(
+            "gsettings",
+            &["get", "org.gnome.system.proxy", "ignore-hosts"],
+        )?,
     })
 }
 
 /// A GVariant string list: `['a', 'b']`.
 pub fn gvariant_list(items: &[String]) -> String {
-    let quoted: Vec<String> = items.iter().map(|i| format!("'{}'", i.replace('\'', ""))).collect();
+    let quoted: Vec<String> = items
+        .iter()
+        .map(|i| format!("'{}'", i.replace('\'', "")))
+        .collect();
     format!("[{}]", quoted.join(", "))
 }
 
@@ -157,18 +192,38 @@ fn gnome_apply(spec: &ProxySpec) -> Result<(), String> {
         gs_set(&schema, "host", &spec.host)?;
         gs_set(&schema, "port", &spec.port.to_string())?;
     }
-    gs_set("org.gnome.system.proxy", "ignore-hosts", &gvariant_list(&spec.bypass))?;
+    gs_set(
+        "org.gnome.system.proxy",
+        "ignore-hosts",
+        &gvariant_list(&spec.bypass),
+    )?;
     gs_set("org.gnome.system.proxy", "mode", "manual")
 }
 
 fn gnome_restore(saved: &GnomeProxy) -> Result<(), String> {
-    for (s, (host, port)) in [("http", &saved.http), ("https", &saved.https), ("socks", &saved.socks)] {
+    for (s, (host, port)) in [
+        ("http", &saved.http),
+        ("https", &saved.https),
+        ("socks", &saved.socks),
+    ] {
         let schema = format!("org.gnome.system.proxy.{s}");
         gs_set(&schema, "host", host)?;
         gs_set(&schema, "port", &port.to_string())?;
     }
-    gs_set("org.gnome.system.proxy", "ignore-hosts", &saved.ignore_hosts)?;
-    gs_set("org.gnome.system.proxy", "mode", if saved.mode.is_empty() { "none" } else { &saved.mode })
+    gs_set(
+        "org.gnome.system.proxy",
+        "ignore-hosts",
+        &saved.ignore_hosts,
+    )?;
+    gs_set(
+        "org.gnome.system.proxy",
+        "mode",
+        if saved.mode.is_empty() {
+            "none"
+        } else {
+            &saved.mode
+        },
+    )
 }
 
 fn gnome_points_to(spec: &ProxySpec) -> bool {
@@ -180,14 +235,32 @@ fn gnome_points_to(spec: &ProxySpec) -> bool {
 // --- KDE ---------------------------------------------------------------------------
 
 fn kde_get(v: &str, key: &str) -> String {
-    run(&format!("kreadconfig{v}"), &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", key])
-        .unwrap_or_default()
+    run(
+        &format!("kreadconfig{v}"),
+        &[
+            "--file",
+            "kioslaverc",
+            "--group",
+            "Proxy Settings",
+            "--key",
+            key,
+        ],
+    )
+    .unwrap_or_default()
 }
 
 fn kde_set(v: &str, key: &str, value: &str) -> Result<(), String> {
     run(
         &format!("kwriteconfig{v}"),
-        &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", key, value],
+        &[
+            "--file",
+            "kioslaverc",
+            "--group",
+            "Proxy Settings",
+            "--key",
+            key,
+            value,
+        ],
     )
     .map(|_| ())
 }
@@ -209,7 +282,12 @@ pub fn kde_address(scheme: &str, spec: &ProxySpec) -> String {
 
 fn kde_reload() {
     let _ = Command::new("dbus-send")
-        .args(["--type=signal", "/KIO/Scheduler", "org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:"])
+        .args([
+            "--type=signal",
+            "/KIO/Scheduler",
+            "org.kde.KIO.Scheduler.reparseSlaveConfiguration",
+            "string:",
+        ])
         .status();
 }
 
@@ -228,7 +306,15 @@ fn kde_restore(v: &str, saved: &KdeProxy) -> Result<(), String> {
     kde_set(v, "httpsProxy", &saved.https)?;
     kde_set(v, "socksProxy", &saved.socks)?;
     kde_set(v, "NoProxyFor", &saved.no_proxy_for)?;
-    kde_set(v, "ProxyType", if saved.proxy_type.is_empty() { "0" } else { &saved.proxy_type })?;
+    kde_set(
+        v,
+        "ProxyType",
+        if saved.proxy_type.is_empty() {
+            "0"
+        } else {
+            &saved.proxy_type
+        },
+    )?;
     kde_reload();
     Ok(())
 }
@@ -270,7 +356,11 @@ pub fn mac_bypass_of(text: &str) -> Vec<String> {
     if text.contains("There aren't any") {
         return vec![];
     }
-    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect()
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn ns(args: &[&str]) -> Result<String, String> {
@@ -312,7 +402,11 @@ fn mac_restore(services: &[MacService]) -> Result<(), String> {
         if !p.server.is_empty() {
             ns(&[&format!("-set{kind}"), n, &p.server, &p.port.to_string()])?;
         }
-        ns(&[&format!("-set{kind}state"), n, if p.enabled { "on" } else { "off" }])?;
+        ns(&[
+            &format!("-set{kind}state"),
+            n,
+            if p.enabled { "on" } else { "off" },
+        ])?;
         Ok(())
     };
     for s in services {
@@ -333,14 +427,18 @@ fn mac_restore(services: &[MacService]) -> Result<(), String> {
 
 fn mac_points_to(spec: &ProxySpec) -> bool {
     mac_read().is_ok_and(|services| {
-        services.iter().any(|s| s.web.enabled && s.web.server == spec.host && s.web.port == spec.port)
+        services
+            .iter()
+            .any(|s| s.web.enabled && s.web.server == spec.host && s.web.port == spec.port)
     })
 }
 
 // --- Public ------------------------------------------------------------------------
 
 fn load_saved(paths: &Paths) -> Option<Saved> {
-    std::fs::read(paths.sysproxy_state()).ok().and_then(|b| serde_json::from_slice(&b).ok())
+    std::fs::read(paths.sysproxy_state())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
 }
 
 /// Points the system proxy at `spec`. The settings it replaces are saved first
@@ -356,14 +454,21 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
             kde: b.kde.map(kde_read),
             mac: if b.mac { Some(mac_read()?) } else { None },
         };
-        write_atomic(&paths.sysproxy_state(), &serde_json::to_vec_pretty(&saved).expect("saved"))
-            .map_err(|e| e.to_string())?;
+        write_atomic(
+            &paths.sysproxy_state(),
+            &serde_json::to_vec_pretty(&saved).expect("saved"),
+        )
+        .map_err(|e| e.to_string())?;
     }
     let mut errors = Vec::new();
-    if b.gnome && let Err(e) = gnome_apply(spec) {
+    if b.gnome
+        && let Err(e) = gnome_apply(spec)
+    {
         errors.push(e);
     }
-    if let Some(v) = b.kde && let Err(e) = kde_apply(v, spec) {
+    if let Some(v) = b.kde
+        && let Err(e) = kde_apply(v, spec)
+    {
         errors.push(e);
     }
     if b.mac {
@@ -374,7 +479,11 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
     }
     // One working mechanism is enough (GNOME's tools may exist on Plasma without a dconf).
     let total = usize::from(b.gnome) + usize::from(b.kde.is_some()) + usize::from(b.mac);
-    if errors.len() == total { Err(errors.join("; ")) } else { Ok(()) }
+    if errors.len() == total {
+        Err(errors.join("; "))
+    } else {
+        Ok(())
+    }
 }
 
 /// Puts back the settings saved by [`enable`]. With none saved it does nothing:
@@ -388,13 +497,19 @@ pub fn disable(paths: &Paths) -> Result<(), String> {
     };
     let b = backends();
     let mut errors = Vec::new();
-    if let Some(g) = &saved.gnome && let Err(e) = gnome_restore(g) {
+    if let Some(g) = &saved.gnome
+        && let Err(e) = gnome_restore(g)
+    {
         errors.push(e);
     }
-    if let (Some(v), Some(k)) = (b.kde, &saved.kde) && let Err(e) = kde_restore(v, k) {
+    if let (Some(v), Some(k)) = (b.kde, &saved.kde)
+        && let Err(e) = kde_restore(v, k)
+    {
         errors.push(e);
     }
-    if let Some(m) = &saved.mac && let Err(e) = mac_restore(m) {
+    if let Some(m) = &saved.mac
+        && let Err(e) = mac_restore(m)
+    {
         errors.push(e);
     }
     if errors.is_empty() {
@@ -420,7 +535,9 @@ pub fn recover(paths: &Paths) -> bool {
 /// Whether the system proxy currently points at `spec`.
 pub fn points_to(spec: &ProxySpec) -> bool {
     let b = backends();
-    (b.gnome && gnome_points_to(spec)) || b.kde.is_some_and(|v| kde_points_to(v, spec)) || (b.mac && mac_points_to(spec))
+    (b.gnome && gnome_points_to(spec))
+        || b.kde.is_some_and(|v| kde_points_to(v, spec))
+        || (b.mac && mac_points_to(spec))
 }
 
 #[cfg(test)]
@@ -439,24 +556,43 @@ mod tests {
         assert!(!paths.sysproxy_state().exists());
         std::fs::write(paths.sysproxy_state(), b"not json").unwrap();
         assert!(disable(&paths).is_ok());
-        assert!(!paths.sysproxy_state().exists(), "an unreadable state file is dropped, nothing restored");
+        assert!(
+            !paths.sysproxy_state().exists(),
+            "an unreadable state file is dropped, nothing restored"
+        );
     }
 
     #[test]
     fn parses_networksetup() {
         let list = "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n*Thunderbolt Bridge\nUSB 10/100/1000 LAN\n";
         assert_eq!(mac_services_of(list), vec!["Wi-Fi", "USB 10/100/1000 LAN"]);
-        let p = mac_proxy_of("Enabled: Yes\nServer: 127.0.0.1\nPort: 7897\nAuthenticated Proxy Enabled: 0\n");
-        assert_eq!(p, MacProxy { enabled: true, server: "127.0.0.1".into(), port: 7897 });
+        let p = mac_proxy_of(
+            "Enabled: Yes\nServer: 127.0.0.1\nPort: 7897\nAuthenticated Proxy Enabled: 0\n",
+        );
+        assert_eq!(
+            p,
+            MacProxy {
+                enabled: true,
+                server: "127.0.0.1".into(),
+                port: 7897
+            }
+        );
         let p = mac_proxy_of("Enabled: No\nServer: \nPort: 0\n");
         assert!(!p.enabled);
         assert!(mac_bypass_of("There aren't any bypass domains set on Wi-Fi.").is_empty());
-        assert_eq!(mac_bypass_of("*.local\n169.254/16\n"), vec!["*.local", "169.254/16"]);
+        assert_eq!(
+            mac_bypass_of("*.local\n169.254/16\n"),
+            vec!["*.local", "169.254/16"]
+        );
     }
 
     #[test]
     fn formats_for_desktops() {
-        let spec = ProxySpec { host: "127.0.0.1".into(), port: 7897, bypass: vec!["localhost".into(), "*.local".into()] };
+        let spec = ProxySpec {
+            host: "127.0.0.1".into(),
+            port: 7897,
+            bypass: vec!["localhost".into(), "*.local".into()],
+        };
         assert_eq!(kde_address("http", &spec), "http://127.0.0.1 7897");
         assert_eq!(gvariant_list(&spec.bypass), "['localhost', '*.local']");
     }

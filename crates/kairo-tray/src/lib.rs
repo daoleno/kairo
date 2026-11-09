@@ -64,16 +64,34 @@ impl Model {
         let s = &state.settings;
         let main = kairo_core::places::main_group(&proxies.groups, &s.tray_group);
         let now_place = main.and_then(|g| kairo_core::places::current(&proxies.groups, g));
-        let label_of = |p: &kairo_core::places::Place| format!("{}{}", p.flag.clone().map(|f| f + "  ").unwrap_or_default(), p.title);
+        let label_of = |p: &kairo_core::places::Place| {
+            format!(
+                "{}{}",
+                p.flag.clone().map(|f| f + "  ").unwrap_or_default(),
+                p.title
+            )
+        };
         let group = main.map(|g| {
             let mut places = kairo_core::places::places(&proxies.groups, g);
             places.sort_by_key(|p| match p.delay {
                 Some(d) if d > 0 => d,
                 _ => u32::MAX,
             });
-            let mut choices = vec![Choice { name: String::new(), label: "Fastest".into(), delay: None }];
-            choices.extend(places.into_iter().take(PLACES).map(|p| Choice { label: label_of(&p), name: p.name, delay: p.delay }));
-            let now = if s.auto_location { Some(String::new()) } else { now_place.as_ref().map(|p| p.name.clone()) };
+            let mut choices = vec![Choice {
+                name: String::new(),
+                label: "Fastest".into(),
+                delay: None,
+            }];
+            choices.extend(places.into_iter().take(PLACES).map(|p| Choice {
+                label: label_of(&p),
+                name: p.name,
+                delay: p.delay,
+            }));
+            let now = if s.auto_location {
+                Some(String::new())
+            } else {
+                now_place.as_ref().map(|p| p.name.clone())
+            };
             (g.name.clone(), choices, now)
         });
         let place = match (&now_place, s.auto_location) {
@@ -86,7 +104,10 @@ impl Model {
                 Some(p) => format!(
                     "Connected · {}{}",
                     label_of(p),
-                    p.delay.filter(|d| *d > 0).map(|d| format!(" · {d} ms")).unwrap_or_default()
+                    p.delay
+                        .filter(|d| *d > 0)
+                        .map(|d| format!(" · {d} ms"))
+                        .unwrap_or_default()
                 ),
                 None => "Connected".into(),
             },
@@ -169,22 +190,32 @@ pub fn glyph_rgba(size: u32) -> Vec<u8> {
 /// Renders an SVG to a PNG of `size` × `size` pixels.
 pub fn render_png(svg: &str, size: u32) -> Vec<u8> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).expect("the bundled svg parses");
+    let tree =
+        usvg::Tree::from_str(svg, &usvg::Options::default()).expect("the bundled svg parses");
     let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("pixmap");
     let s = tree.size();
     let scale = size as f32 / s.width().max(s.height());
-    resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
     pixmap.encode_png().expect("png")
 }
 
 /// Renders an SVG to straight (not premultiplied) RGBA.
 pub fn render(svg: &str, size: u32) -> Vec<u8> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).expect("the bundled svg parses");
+    let tree =
+        usvg::Tree::from_str(svg, &usvg::Options::default()).expect("the bundled svg parses");
     let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("pixmap");
     let s = tree.size();
     let scale = size as f32 / s.width().max(s.height());
-    resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
     let mut data = pixmap.take();
     for px in data.chunks_exact_mut(4) {
         let a = px[3] as u32;
@@ -221,7 +252,14 @@ mod tests {
     fn renders_a_png() {
         let png = super::render_png(include_str!("../../../assets/glyph.svg"), 36);
         assert_eq!(&png[1..4], b"PNG");
-        let dim = super::render_png(&include_str!("../../../assets/glyph.svg").replacen("<svg ", "<svg opacity=\"0.45\" ", 1), 36);
+        let dim = super::render_png(
+            &include_str!("../../../assets/glyph.svg").replacen(
+                "<svg ",
+                "<svg opacity=\"0.45\" ",
+                1,
+            ),
+            36,
+        );
         assert_ne!(png, dim);
     }
 
@@ -239,7 +277,21 @@ mod tests {
     #[test]
     fn labels() {
         use super::{Choice, Model};
-        assert_eq!(Model::choice_label(&Choice { name: "x".into(), label: "a".into(), delay: Some(120) }), "a    120 ms");
-        assert_eq!(Model::choice_label(&Choice { name: "x".into(), label: "a".into(), delay: Some(0) }), "a    no answer");
+        assert_eq!(
+            Model::choice_label(&Choice {
+                name: "x".into(),
+                label: "a".into(),
+                delay: Some(120)
+            }),
+            "a    120 ms"
+        );
+        assert_eq!(
+            Model::choice_label(&Choice {
+                name: "x".into(),
+                label: "a".into(),
+                delay: Some(0)
+            }),
+            "a    no answer"
+        );
     }
 }

@@ -36,7 +36,13 @@ impl Draft {
     }
 
     fn apply(&self, base: &Settings) -> Result<Settings, String> {
-        let port = |s: &str, what: &str| s.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("{what} must be a port (1–65535)"));
+        let port = |s: &str, what: &str| {
+            s.trim()
+                .parse::<u16>()
+                .ok()
+                .filter(|p| *p > 0)
+                .ok_or_else(|| format!("{what} must be a port (1–65535)"))
+        };
         let mut next = base.clone();
         next.mixed_port = port(&self.mixed_port, "The proxy port")?;
         next.controller_port = port(&self.controller_port, "The controller port")?;
@@ -44,9 +50,17 @@ impl Draft {
             return Err("The controller secret can't be empty".into());
         }
         next.secret = self.secret.trim().to_owned();
-        next.bypass = self.bypass.split([',', '\n']).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect();
+        next.bypass = self
+            .bypass
+            .split([',', '\n'])
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .collect();
         next.test_url = self.test_url.trim().to_owned();
-        next.test_timeout_ms = self.test_timeout_ms.trim().parse().map_err(|_| "The delay test timeout must be a number of milliseconds".to_string())?;
+        next.test_timeout_ms =
+            self.test_timeout_ms.trim().parse().map_err(|_| {
+                "The delay test timeout must be a number of milliseconds".to_string()
+            })?;
         let core = self.core_path.trim();
         next.core_path = (!core.is_empty()).then(|| core.to_owned());
         next.validate()?;
@@ -102,7 +116,10 @@ pub fn page() -> impl IntoElement {
         Err(e) => store.error(e),
     };
 
-    let text_field = move |get: fn(&Draft) -> String, put: fn(&mut Draft, String), placeholder: &'static str, w: f32| {
+    let text_field = move |get: fn(&Draft) -> String,
+                           put: fn(&mut Draft, String),
+                           placeholder: &'static str,
+                           w: f32| {
         nsh_base::input()
             .value(move || draft.with(get))
             .on_change(move |t: &str| draft.update(|d| put(d, t.to_owned())))
@@ -154,6 +171,24 @@ pub fn page() -> impl IntoElement {
                                 ),
                             )
                             .into_element(),
+                            ui::setting_row_dyn(
+                                "Accent",
+                                move || -> SharedString {
+                                    let now = crate::accent::current().name;
+                                    let chosen = settings.with(|s| crate::accent::named(&s.accent).map(|a| a.name).unwrap_or(crate::accent::DEFAULT));
+                                    if chosen == now { "The switch, the place in use, and focus.".into() } else { "Takes effect when Kairo next opens.".into() }
+                                },
+                                ui::popup_button(
+                                    || crate::accent::ACCENTS.iter().map(|a| (a.name.to_owned(), a.title.to_owned())).collect::<Vec<_>>(),
+                                    move || settings.with(|s| crate::accent::named(&s.accent).map(|a| a.name).unwrap_or(crate::accent::DEFAULT).to_owned()),
+                                    move |name: String| {
+                                        let mut next = store.svc().settings();
+                                        next.accent = name;
+                                        store.run(store.svc().update_settings(next));
+                                    },
+                                ),
+                            )
+                            .into_element(),
                             ui::setting_row(
                                 "Launch at login",
                                 Some("Start Kairo when you log in."),
@@ -179,11 +214,25 @@ pub fn page() -> impl IntoElement {
                             )
                             .into_element(),
                             ui::setting_row(
-                                "Tray quick switch",
-                                Some("The group whose nodes the tray menu offers."),
+                                "Choose the location automatically",
+                                Some("Kairo keeps you on the fastest place, and checks again every ten minutes. Picking one by hand turns this off."),
+                                ui::toggle(s(|s| s.auto_location), "Choose the location automatically", move |on| {
+                                    if on {
+                                        store.run(store.svc().set_location(None));
+                                    } else {
+                                        let mut next = store.svc().settings();
+                                        next.auto_location = false;
+                                        store.run(store.svc().update_settings(next));
+                                    }
+                                }),
+                            )
+                            .into_element(),
+                            ui::setting_row(
+                                "Locations from",
+                                Some("The group Kairo picks your location in. Automatic takes the one the other groups follow."),
                                 ui::popup_button(
                                     move || {
-                                        let mut v = vec![(String::new(), "First selector".to_owned())];
+                                        let mut v = vec![(String::new(), "Automatic".to_owned())];
                                         v.extend(store.proxies.with_untracked(|p| {
                                             p.0.groups.iter().filter(|g| g.selectable() && !g.hidden && g.name != "GLOBAL").map(|g| (g.name.clone(), g.name.clone())).collect::<Vec<_>>()
                                         }));
@@ -339,25 +388,38 @@ fn tun_group() -> impl IntoElement {
                 .px_4()
                 .py_2p5()
                 .min_h(px(44.0))
-                .child(view().flex_1().min_w(px(0.0)).gap_0p5().child(ui::body("TUN mode")).child(ui::muted(detail)))
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap_0p5()
+                        .child(ui::body("TUN mode"))
+                        .child(ui::muted(detail)),
+                )
                 .child(
                     when(
                         move || privilege.get() == Some(Privilege::Granted),
-                        move || ui::toggle(tun_on, "TUN mode", move |on| store.run(store.svc().set_tun(on))),
+                        move || {
+                            ui::toggle(tun_on, "TUN mode", move |on| {
+                                store.run(store.svc().set_tun(on))
+                            })
+                        },
                     )
                     .otherwise(move || {
                         when(
                             move || privilege.get() == Some(Privilege::Needed),
                             move || {
-                                ui::btn_icon(Icon::Shield, "Grant Permission…", Variant::Secondary).disabled(move || granting.get()).on_press(move || {
-                                    granting.set(true);
-                                    store.run_then(store.svc().grant_tun(), move |r| {
-                                        granting.set(false);
-                                        if r.is_ok() {
-                                            store.info("TUN permission granted");
-                                        }
-                                    });
-                                })
+                                ui::btn_icon(Icon::Shield, "Grant Permission…", Variant::Secondary)
+                                    .disabled(move || granting.get())
+                                    .on_press(move || {
+                                        granting.set(true);
+                                        store.run_then(store.svc().grant_tun(), move |r| {
+                                            granting.set(false);
+                                            if r.is_ok() {
+                                                store.info("TUN permission granted");
+                                            }
+                                        });
+                                    })
                             },
                         )
                     }),
@@ -366,13 +428,21 @@ fn tun_group() -> impl IntoElement {
             ui::setting_row(
                 "Stack",
                 Some("Mixed suits most; gVisor is the most compatible, System the fastest."),
-                ui::segmented(vec![("mixed", "Mixed"), ("gvisor", "gVisor"), ("system", "System")], move || -> &'static str {
-                    match stack().as_str() {
-                        "gvisor" => "gvisor",
-                        "system" => "system",
-                        _ => "mixed",
-                    }
-                }, move |v: &'static str| set_stack(v.to_owned())),
+                ui::segmented(
+                    vec![
+                        ("mixed", "Mixed"),
+                        ("gvisor", "gVisor"),
+                        ("system", "System"),
+                    ],
+                    move || -> &'static str {
+                        match stack().as_str() {
+                            "gvisor" => "gvisor",
+                            "system" => "system",
+                            _ => "mixed",
+                        }
+                    },
+                    move |v: &'static str| set_stack(v.to_owned()),
+                ),
             )
             .into_element(),
         ],
@@ -429,10 +499,15 @@ fn update_text(u: &UpdateStatus) -> String {
         UpdateStatus::Idle => "Updates download by themselves".into(),
         UpdateStatus::Checking => "Checking for updates…".into(),
         UpdateStatus::UpToDate { checked } => format!("Kairo is up to date · checked at {checked}"),
-        UpdateStatus::Downloading { version, progress: Some(p) } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
+        UpdateStatus::Downloading {
+            version,
+            progress: Some(p),
+        } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
         UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
         UpdateStatus::Ready { version } => format!("Kairo {version} is ready"),
-        UpdateStatus::Manual { version, .. } => format!("Kairo {version} is out (this copy cannot update itself)"),
+        UpdateStatus::Manual { version, .. } => {
+            format!("Kairo {version} is out (this copy cannot update itself)")
+        }
         UpdateStatus::Installing { version } => format!("Installing Kairo {version}…"),
         UpdateStatus::Failed { message } => format!("Update failed: {message}"),
     }
@@ -444,20 +519,26 @@ pub fn update_button() -> impl IntoElement {
     dynamic(move || {
         let u = store.state.with(|s| s.update.clone());
         untracked(move || match u {
-            UpdateStatus::Ready { .. } => ui::btn_icon(Icon::Restart, "Restart to Update", Variant::Primary)
-                .on_press(move || store.run(store.svc().restart_to_update()))
-                .into_element(),
-            UpdateStatus::Manual { url, .. } => ui::btn_icon(Icon::External, "Release Page", Variant::Secondary)
-                .on_press(move || {
-                    let url = url.clone();
-                    spawn(async move {
-                        open_url(url).await;
-                    });
-                })
-                .into_element(),
-            UpdateStatus::Checking | UpdateStatus::Downloading { .. } | UpdateStatus::Installing { .. } => {
-                ui::btn("Check for Updates", Variant::Secondary).disabled(true).into_element()
+            UpdateStatus::Ready { .. } => {
+                ui::btn_icon(Icon::Restart, "Restart to Update", Variant::Primary)
+                    .on_press(move || store.run(store.svc().restart_to_update()))
+                    .into_element()
             }
+            UpdateStatus::Manual { url, .. } => {
+                ui::btn_icon(Icon::External, "Release Page", Variant::Secondary)
+                    .on_press(move || {
+                        let url = url.clone();
+                        spawn(async move {
+                            open_url(url).await;
+                        });
+                    })
+                    .into_element()
+            }
+            UpdateStatus::Checking
+            | UpdateStatus::Downloading { .. }
+            | UpdateStatus::Installing { .. } => ui::btn("Check for Updates", Variant::Secondary)
+                .disabled(true)
+                .into_element(),
             _ => ui::btn("Check for Updates", Variant::Secondary)
                 .on_press(move || {
                     store.run_then(store.svc().check_for_update(), move |r| {

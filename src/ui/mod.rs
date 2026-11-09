@@ -4,7 +4,7 @@
 pub mod icons;
 pub mod toolbar;
 
-use nsh_base::{button, input, switch, theme, ButtonElement as Button, Input};
+use nsh_base::{ButtonElement as Button, Input, button, input, switch, theme};
 
 use nsh_core::JsonValue;
 use nsh_core::prelude::*;
@@ -100,7 +100,9 @@ pub fn body(content: impl IntoReactive<SharedString>) -> Text {
 
 /// Secondary text in the muted color.
 pub fn muted(content: impl IntoReactive<SharedString>) -> Text {
-    text(content).text_size(px(size::small())).text_color(move || theme().muted_foreground)
+    text(content)
+        .text_size(px(size::small()))
+        .text_color(move || theme().muted_foreground)
 }
 
 /// A small section label above a group.
@@ -114,7 +116,10 @@ pub fn section_label(content: impl IntoReactive<SharedString>) -> Text {
 
 /// A page title.
 pub fn title(content: impl IntoReactive<SharedString>) -> Text {
-    text(content).text_size(px(size::title())).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header)
+    text(content)
+        .text_size(px(size::title()))
+        .font_weight(FontWeight::SEMIBOLD)
+        .role(AccessibilityRole::Header)
 }
 
 /// Numbers that line up.
@@ -173,21 +178,39 @@ fn base_button(variant: Variant) -> Button {
 
 /// A text button.
 pub fn btn(label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
-    base_button(variant).child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
+    base_button(variant).child(
+        text(label)
+            .text_size(px(size::body()))
+            .font_weight(FontWeight::MEDIUM),
+    )
 }
 
 /// A button with an icon before its label.
 pub fn btn_icon(glyph: Icon, label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
-    base_button(variant)
-        .child(icon(glyph, 14.0))
-        .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
+    base_button(variant).child(icon(glyph, 14.0)).child(
+        text(label)
+            .text_size(px(size::body()))
+            .font_weight(FontWeight::MEDIUM),
+    )
 }
 
 /// A button whose icon and label follow state.
-pub fn btn_icon_dyn(glyph: impl Fn() -> Icon + 'static, label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
+pub fn btn_icon_dyn(
+    glyph: impl Fn() -> Icon + 'static,
+    label: impl IntoReactive<SharedString>,
+    variant: Variant,
+) -> Button {
     base_button(variant)
-        .child(svg(move || icons::uri(glyph())).size(px(14.0)).flex_shrink_0())
-        .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
+        .child(
+            svg(move || icons::uri(glyph()))
+                .size(px(14.0))
+                .flex_shrink_0(),
+        )
+        .child(
+            text(label)
+                .text_size(px(size::body()))
+                .font_weight(FontWeight::MEDIUM),
+        )
 }
 
 /// An icon-only button; `label` names it for screen readers and tests.
@@ -200,7 +223,10 @@ pub fn icon_btn(glyph: Icon, label: &'static str) -> Button {
         .rounded(radius_control())
         .cursor_pointer()
         .text_color(move || theme().muted_foreground)
-        .hover(|s| s.bg(move || theme().accent).text_color(move || theme().foreground))
+        .hover(|s| {
+            s.bg(move || theme().accent)
+                .text_color(move || theme().foreground)
+        })
         .active(|s| s.opacity(0.7))
         .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
         .disabled_style(|s| s.opacity(0.4))
@@ -210,7 +236,11 @@ pub fn icon_btn(glyph: Icon, label: &'static str) -> Button {
 // --- Controls ----------------------------------------------------------------------
 
 /// An on/off switch in the platform's proportions.
-pub fn toggle(checked: impl Fn() -> bool + 'static, label: &'static str, on_change: impl Fn(bool) + 'static) -> AnyElement {
+pub fn toggle(
+    checked: impl Fn() -> bool + 'static,
+    label: &'static str,
+    on_change: impl Fn(bool) + 'static,
+) -> AnyElement {
     if crate::chrome::native_controls() {
         // NSSwitch has no title: its label is the row's text beside it.
         let _ = label;
@@ -260,10 +290,21 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
     if crate::chrome::native_controls() {
         let values: Vec<T> = options.iter().map(|o| o.0).collect();
         let labels: Vec<JsonValue> = options.iter().map(|o| JsonValue::from(o.1)).collect();
-        let width = options.iter().map(|o| o.1.len() as f32 * 7.5 + 26.0).sum::<f32>() + 4.0;
+        let width = options
+            .iter()
+            .map(|o| o.1.len() as f32 * 7.5 + 26.0)
+            .sum::<f32>()
+            + 4.0;
         let index = {
             let values = values.clone();
-            move || JsonValue::from(values.iter().position(|v| *v == selected()).map_or(-1, |i| i as i64))
+            move || {
+                JsonValue::from(
+                    values
+                        .iter()
+                        .position(|v| *v == selected())
+                        .map_or(-1, |i| i as i64),
+                )
+            }
         };
         return view().flex_shrink_0().child(
             native("kairo/segmented")
@@ -272,7 +313,10 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .w(px(width))
                 .h(px(24.0))
                 .on_native_event(move |e: &NativeEvent| {
-                    if let Some(v) = e.data["index"].as_u64().and_then(|i| values.get(i as usize)) {
+                    if let Some(v) = e.data["index"]
+                        .as_u64()
+                        .and_then(|i| values.get(i as usize))
+                    {
                         on_select(*v);
                     }
                 }),
@@ -302,8 +346,17 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .cursor_pointer()
                 .text_color(move || theme().muted_foreground)
                 .hover(|s| s.text_color(move || theme().foreground))
-                .style_when(is, |s| s.bg(move || theme().background).shadow_sm().text_color(move || theme().foreground))
-                .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM).number_of_lines(1))
+                .style_when(is, |s| {
+                    s.bg(move || theme().background)
+                        .shadow_sm()
+                        .text_color(move || theme().foreground)
+                })
+                .child(
+                    text(label)
+                        .text_size(px(size::body()))
+                        .font_weight(FontWeight::MEDIUM)
+                        .number_of_lines(1),
+                )
         }))
 }
 
@@ -405,7 +458,11 @@ pub fn setting_row(
 }
 
 /// A row whose description follows state.
-pub fn setting_row_dyn(label: &'static str, detail: impl Fn() -> SharedString + 'static, control: impl IntoElement) -> View {
+pub fn setting_row_dyn(
+    label: &'static str,
+    detail: impl Fn() -> SharedString + 'static,
+    control: impl IntoElement,
+) -> View {
     view()
         .flex_row()
         .items_center()
@@ -413,7 +470,14 @@ pub fn setting_row_dyn(label: &'static str, detail: impl Fn() -> SharedString + 
         .px_4()
         .py_2p5()
         .min_h(px(ROW_MIN))
-        .child(view().flex_1().min_w(px(0.0)).gap_0p5().child(body(label)).child(muted(detail)))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap_0p5()
+                .child(body(label))
+                .child(muted(detail)),
+        )
         .child(control)
 }
 
@@ -427,18 +491,29 @@ pub fn group(label: Option<&'static str>, rows: Vec<AnyElement>) -> View {
             inner = inner.child(view().h(px(1.0)).ml_4().bg(move || theme().border));
         }
     }
-    view().gap_2().child(label.map(|l| section_label(l).px_1())).child(inner)
+    view()
+        .gap_2()
+        .child(label.map(|l| section_label(l).px_1()))
+        .child(inner)
 }
 
 /// Rows in one rounded group: no outline, a soft fill, hairlines inset
 /// between rows (the grouped lists of the platforms' settings).
 pub fn rows(rows: Vec<AnyElement>) -> View {
     let count = rows.len();
-    let mut inner = view().rounded(px(20.0)).bg(move || theme().muted).overflow_hidden();
+    let mut inner = view()
+        .rounded(px(20.0))
+        .bg(move || theme().muted)
+        .overflow_hidden();
     for (i, row) in rows.into_iter().enumerate() {
         inner = inner.child(row);
         if i + 1 < count {
-            inner = inner.child(view().h(px(1.0)).ml_5().bg(move || theme().border.opacity(0.7)));
+            inner = inner.child(
+                view()
+                    .h(px(1.0))
+                    .ml_5()
+                    .bg(move || theme().border.opacity(0.7)),
+            );
         }
     }
     inner
@@ -446,7 +521,13 @@ pub fn rows(rows: Vec<AnyElement>) -> View {
 
 /// A row of [`rows`].
 pub fn row_view() -> View {
-    view().flex_row().items_center().gap_3().px_5().py_3().min_h(px(58.0))
+    view()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .px_5()
+        .py_3()
+        .min_h(px(58.0))
 }
 
 /// A capsule button: the prominent one filled with the accent, the others
@@ -460,12 +541,29 @@ pub fn capsule(label: impl IntoReactive<SharedString>, prominent: bool) -> Butto
         .px_5()
         .rounded_full()
         .cursor_pointer()
-        .bg(move || if prominent { theme().primary } else { theme().secondary })
-        .text_color(move || if prominent { theme().primary_foreground } else { theme().foreground })
+        .bg(move || {
+            if prominent {
+                theme().primary
+            } else {
+                theme().secondary
+            }
+        })
+        .text_color(move || {
+            if prominent {
+                theme().primary_foreground
+            } else {
+                theme().foreground
+            }
+        })
         .hover(|s| s.opacity(0.9))
         .focus(|s| s.outline(px(3.0)).outline_color(move || theme().ring))
         .disabled_style(|s| s.opacity(0.5))
-        .child(text(label).text_size(px(size::body() + 1.0)).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
+        .child(
+            text(label)
+                .text_size(px(size::body() + 1.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .number_of_lines(1),
+        )
 }
 
 /// A quiet text button (a link's look).
@@ -478,7 +576,11 @@ pub fn link_btn(label: impl IntoReactive<SharedString>) -> Button {
         .hover(|s| s.opacity(0.7))
         .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
         .disabled_style(|s| s.opacity(0.4))
-        .child(text(label).text_size(px(size::small())).font_weight(FontWeight::MEDIUM))
+        .child(
+            text(label)
+                .text_size(px(size::small()))
+                .font_weight(FontWeight::MEDIUM),
+        )
 }
 
 /// A short, neutral state or count.
@@ -490,7 +592,12 @@ pub fn badge(content: impl IntoReactive<SharedString>) -> View {
         .bg(move || theme().muted)
         .border_1()
         .border_color(move || theme().border)
-        .child(text(content).text_size(px(size::caption())).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground))
+        .child(
+            text(content)
+                .text_size(px(size::caption()))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || theme().muted_foreground),
+        )
 }
 
 /// A small status dot.
@@ -524,19 +631,38 @@ pub fn meter(fraction: impl Fn() -> f32 + 'static) -> View {
         .rounded_full()
         .bg(move || track())
         .overflow_hidden()
-        .child(view().h_full().rounded_full().bg(move || theme().primary).w(move || percentage(fraction().clamp(0.0, 1.0))))
+        .child(
+            view()
+                .h_full()
+                .rounded_full()
+                .bg(move || theme().primary)
+                .w(move || percentage(fraction().clamp(0.0, 1.0))),
+        )
 }
 
 /// What a page shows when it has nothing: a glyph, a title, a line and an action.
-pub fn empty_state(glyph: Icon, heading: &'static str, detail: impl IntoReactive<SharedString>, action: Option<AnyElement>) -> View {
+pub fn empty_state(
+    glyph: Icon,
+    heading: &'static str,
+    detail: impl IntoReactive<SharedString>,
+    action: Option<AnyElement>,
+) -> View {
     view()
         .flex_1()
         .items_center()
         .justify_center()
         .gap_2()
         .p_8()
-        .child(icon(glyph, 32.0).text_color(move || theme().muted_foreground).mb_1())
-        .child(text(heading).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD))
+        .child(
+            icon(glyph, 32.0)
+                .text_color(move || theme().muted_foreground)
+                .mb_1(),
+        )
+        .child(
+            text(heading)
+                .text_size(px(size::large()))
+                .font_weight(FontWeight::SEMIBOLD),
+        )
         .child(muted(detail).text_center().max_w(px(360.0)))
         .child(action.map(|a| view().mt_2().child(a)))
 }
@@ -553,7 +679,12 @@ pub fn popup_button<T: Clone + PartialEq + 'static>(
         let options = options.clone();
         move || -> SharedString {
             let current = selected();
-            options().into_iter().find(|(v, _)| *v == current).map(|(_, t)| t).unwrap_or_default().into()
+            options()
+                .into_iter()
+                .find(|(v, _)| *v == current)
+                .map(|(_, t)| t)
+                .unwrap_or_default()
+                .into()
         }
     };
     base_button(Variant::Secondary)
@@ -567,7 +698,9 @@ pub fn popup_button<T: Clone + PartialEq + 'static>(
                 .into_iter()
                 .map(|(value, title)| {
                     let checked = value == current;
-                    nsh_core::element::desktop::MenuItem::new(title).checked(checked).on_select(move || on_select(value.clone()))
+                    nsh_core::element::desktop::MenuItem::new(title)
+                        .checked(checked)
+                        .on_select(move || on_select(value.clone()))
                 })
                 .collect();
             spawn(async move {

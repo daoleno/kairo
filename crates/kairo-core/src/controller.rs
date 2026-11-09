@@ -46,7 +46,9 @@ pub fn segment(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for b in name.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -85,16 +87,29 @@ impl Controller {
         let message = serde_json::from_str::<serde_json::Value>(&text)
             .ok()
             .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
-            .unwrap_or_else(|| if text.is_empty() { status.to_string() } else { text });
+            .unwrap_or_else(|| {
+                if text.is_empty() {
+                    status.to_string()
+                } else {
+                    text
+                }
+            });
         Err(ApiError::Message(message))
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
         let resp = Self::check(self.req(reqwest::Method::GET, path).send().await?).await?;
-        resp.json::<T>().await.map_err(|e| ApiError::Message(e.to_string()))
+        resp.json::<T>()
+            .await
+            .map_err(|e| ApiError::Message(e.to_string()))
     }
 
-    async fn send(&self, method: reqwest::Method, path: &str, body: Option<serde_json::Value>) -> ApiResult<()> {
+    async fn send(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> ApiResult<()> {
         let mut r = self.req(method, path);
         if let Some(body) = body {
             r = r.json(&body);
@@ -112,7 +127,8 @@ impl Controller {
 
     /// Changes parts of the running config (`mode`, `log-level`, `allow-lan`, ...).
     pub async fn patch_configs(&self, body: serde_json::Value) -> ApiResult<()> {
-        self.send(reqwest::Method::PATCH, "/configs", Some(body)).await
+        self.send(reqwest::Method::PATCH, "/configs", Some(body))
+            .await
     }
 
     /// Loads the config file at `path` into the running core.
@@ -152,7 +168,10 @@ impl Controller {
             .req(reqwest::Method::GET, &path)
             .timeout(Duration::from_millis(u64::from(timeout_ms) + 3000));
         let resp = Self::check(r.send().await?).await?;
-        let d: D = resp.json().await.map_err(|e| ApiError::Message(e.to_string()))?;
+        let d: D = resp
+            .json()
+            .await
+            .map_err(|e| ApiError::Message(e.to_string()))?;
         Ok(d.delay)
     }
 
@@ -172,7 +191,9 @@ impl Controller {
             .req(reqwest::Method::GET, &path)
             .timeout(Duration::from_millis(u64::from(timeout_ms) + 5000));
         let resp = Self::check(r.send().await?).await?;
-        resp.json().await.map_err(|e| ApiError::Message(e.to_string()))
+        resp.json()
+            .await
+            .map_err(|e| ApiError::Message(e.to_string()))
     }
 
     pub async fn proxy_providers(&self) -> ApiResult<Vec<ProxyProvider>> {
@@ -180,12 +201,20 @@ impl Controller {
     }
 
     pub async fn update_proxy_provider(&self, name: &str) -> ApiResult<()> {
-        self.send(reqwest::Method::PUT, &format!("/providers/proxies/{}", segment(name)), None).await
+        self.send(
+            reqwest::Method::PUT,
+            &format!("/providers/proxies/{}", segment(name)),
+            None,
+        )
+        .await
     }
 
     pub async fn healthcheck_provider(&self, name: &str) -> ApiResult<()> {
         let r = self
-            .req(reqwest::Method::GET, &format!("/providers/proxies/{}/healthcheck", segment(name)))
+            .req(
+                reqwest::Method::GET,
+                &format!("/providers/proxies/{}/healthcheck", segment(name)),
+            )
             .timeout(Duration::from_secs(60));
         Self::check(r.send().await?).await.map(|_| ())
     }
@@ -198,7 +227,12 @@ impl Controller {
     }
 
     pub async fn update_rule_provider(&self, name: &str) -> ApiResult<()> {
-        self.send(reqwest::Method::PUT, &format!("/providers/rules/{}", segment(name)), None).await
+        self.send(
+            reqwest::Method::PUT,
+            &format!("/providers/rules/{}", segment(name)),
+            None,
+        )
+        .await
     }
 
     pub async fn rules(&self) -> ApiResult<Vec<Rule>> {
@@ -210,19 +244,31 @@ impl Controller {
     }
 
     pub async fn close_connection(&self, id: &str) -> ApiResult<()> {
-        self.send(reqwest::Method::DELETE, &format!("/connections/{}", segment(id)), None).await
+        self.send(
+            reqwest::Method::DELETE,
+            &format!("/connections/{}", segment(id)),
+            None,
+        )
+        .await
     }
 
     pub async fn close_all_connections(&self) -> ApiResult<()> {
-        self.send(reqwest::Method::DELETE, "/connections", None).await
+        self.send(reqwest::Method::DELETE, "/connections", None)
+            .await
     }
 
     pub async fn dns_query(&self, name: &str, kind: &str) -> ApiResult<DnsResponse> {
-        self.get(&format!("/dns/query?name={}&type={}", segment(name), segment(kind))).await
+        self.get(&format!(
+            "/dns/query?name={}&type={}",
+            segment(name),
+            segment(kind)
+        ))
+        .await
     }
 
     pub async fn flush_fakeip(&self) -> ApiResult<()> {
-        self.send(reqwest::Method::POST, "/cache/fakeip/flush", None).await
+        self.send(reqwest::Method::POST, "/cache/fakeip/flush", None)
+            .await
     }
 
     /// Downloads the GeoIP / GeoSite databases again.
@@ -241,7 +287,9 @@ impl Controller {
             match self.version().await {
                 Ok(v) => return Ok(v),
                 Err(ApiError::Message(m)) if m.contains("Unauthorized") => {
-                    return Err(ApiError::Message("The controller rejected Kairo's secret".into()));
+                    return Err(ApiError::Message(
+                        "The controller rejected Kairo's secret".into(),
+                    ));
                 }
                 Err(e) if start.elapsed() > limit => return Err(e),
                 Err(_) => tokio::time::sleep(Duration::from_millis(150)).await,
@@ -253,17 +301,28 @@ impl Controller {
     pub async fn connect(
         &self,
         path_and_query: &str,
-    ) -> ApiResult<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>> {
+    ) -> ApiResult<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    > {
         let mut request = format!("{}{}", self.ws_base, path_and_query)
             .into_client_request()
             .map_err(|e| ApiError::Message(e.to_string()))?;
         if !self.secret.is_empty() {
             request.headers_mut().insert(
                 "Authorization",
-                format!("Bearer {}", self.secret).parse().expect("header value"),
+                format!("Bearer {}", self.secret)
+                    .parse()
+                    .expect("header value"),
             );
         }
-        match tokio::time::timeout(Duration::from_secs(5), tokio_tungstenite::connect_async(request)).await {
+        match tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio_tungstenite::connect_async(request),
+        )
+        .await
+        {
             Ok(Ok((ws, _))) => Ok(ws),
             Ok(Err(tungstenite::Error::Io(_))) => Err(ApiError::Unreachable),
             Ok(Err(e)) => Err(ApiError::Message(e.to_string())),
@@ -310,7 +369,10 @@ mod tests {
     #[test]
     fn encodes_names() {
         assert_eq!(segment("Proxy"), "Proxy");
-        assert_eq!(segment("🇯🇵 Tokyo 01"), "%F0%9F%87%AF%F0%9F%87%B5%20Tokyo%2001");
+        assert_eq!(
+            segment("🇯🇵 Tokyo 01"),
+            "%F0%9F%87%AF%F0%9F%87%B5%20Tokyo%2001"
+        );
         assert_eq!(segment("a/b?c"), "a%2Fb%3Fc");
     }
 }

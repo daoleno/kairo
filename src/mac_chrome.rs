@@ -18,18 +18,22 @@ use kairo_core::{CoreStatus, Service};
 use nsh_app_kairo::chrome::{self, Tool, ToolEvent};
 use nsh_app_kairo::store::Page;
 use objc2::rc::Retained;
-use objc2::runtime::{NSObject, ProtocolObject};
 use objc2::runtime::AnyObject;
+use objc2::runtime::{NSObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSColor, NSControlStateValueOff, NSControlStateValueOn, NSControlTextEditingDelegate, NSFont, NSMenu,
-    NSMenuItem, NSMenuToolbarItem, NSSearchField, NSStackView, NSUserInterfaceItemIdentification, NSImage, NSImageView, NSLayoutConstraint,
-    NSScrollView, NSSearchToolbarItem, NSSplitViewController, NSSplitViewItem, NSTableCellView, NSTableColumn,
-    NSTableView, NSTableViewDataSource, NSTableViewDelegate, NSTableViewStyle,
-    NSTextField, NSToolbar, NSToolbarDelegate, NSToolbarItem, NSToolbarItemIdentifier, NSView, NSViewController,
-    NSWindow, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
+    NSApplication, NSColor, NSControlStateValueOff, NSControlStateValueOn,
+    NSControlTextEditingDelegate, NSFont, NSImage, NSImageView, NSLayoutConstraint, NSMenu,
+    NSMenuItem, NSMenuToolbarItem, NSScrollView, NSSearchField, NSSearchToolbarItem,
+    NSSplitViewController, NSSplitViewItem, NSStackView, NSTableCellView, NSTableColumn,
+    NSTableView, NSTableViewDataSource, NSTableViewDelegate, NSTableViewStyle, NSTextField,
+    NSToolbar, NSToolbarDelegate, NSToolbarItem, NSToolbarItemIdentifier,
+    NSUserInterfaceItemIdentification, NSView, NSViewController, NSWindow, NSWindowStyleMask,
+    NSWindowTitleVisibility, NSWindowToolbarStyle,
 };
-use objc2_foundation::{NSArray, NSIndexSet, NSInteger, NSNotification, NSObjectProtocol, NSString, ns_string};
+use objc2_foundation::{
+    NSArray, NSIndexSet, NSInteger, NSNotification, NSObjectProtocol, NSString, ns_string,
+};
 
 /// The sidebar's rows: a section heading or a page.
 #[derive(Clone, Copy)]
@@ -67,7 +71,9 @@ fn symbol(page: Page) -> &'static str {
 }
 
 fn row_of(page: Page) -> usize {
-    ROWS.iter().position(|r| matches!(r, Row::Item(p) if *p == page)).unwrap_or(0)
+    ROWS.iter()
+        .position(|r| matches!(r, Row::Item(p) if *p == page))
+        .unwrap_or(0)
 }
 
 pub struct SidebarIvars {
@@ -95,12 +101,19 @@ define_class!(
 
     unsafe impl NSTableViewDelegate for Sidebar {
         #[unsafe(method_id(tableView:viewForTableColumn:row:))]
-        fn view_for(&self, _table: &NSTableView, _column: Option<&NSTableColumn>, row: NSInteger) -> Option<Retained<NSView>> {
+        fn view_for(
+            &self,
+            _table: &NSTableView,
+            _column: Option<&NSTableColumn>,
+            row: NSInteger,
+        ) -> Option<Retained<NSView>> {
             let mtm = self.mtm();
             Some(match ROWS[row as usize] {
                 Row::Heading(title) => {
                     let label = NSTextField::labelWithString(&NSString::from_str(title), mtm);
-                    label.setFont(Some(&NSFont::boldSystemFontOfSize(NSFont::smallSystemFontSize())));
+                    label.setFont(Some(&NSFont::boldSystemFontOfSize(
+                        NSFont::smallSystemFontSize(),
+                    )));
                     label.setTextColor(Some(&NSColor::secondaryLabelColor()));
                     let cell = NSTableCellView::new(mtm);
                     pin_label(&cell, &label, 2.0);
@@ -136,7 +149,9 @@ define_class!(
             if self.ivars().quiet.get() {
                 return;
             }
-            let Some(table) = self.ivars().table.borrow().clone() else { return };
+            let Some(table) = self.ivars().table.borrow().clone() else {
+                return;
+            };
             let row = table.selectedRow();
             if let Some(Row::Item(page)) = usize::try_from(row).ok().and_then(|r| ROWS.get(r)) {
                 chrome::select(*page);
@@ -147,9 +162,14 @@ define_class!(
 
 impl Sidebar {
     fn select(&self, page: Page) {
-        let Some(table) = self.ivars().table.borrow().clone() else { return };
+        let Some(table) = self.ivars().table.borrow().clone() else {
+            return;
+        };
         self.ivars().quiet.set(true);
-        table.selectRowIndexes_byExtendingSelection(&NSIndexSet::indexSetWithIndex(row_of(page)), false);
+        table.selectRowIndexes_byExtendingSelection(
+            &NSIndexSet::indexSetWithIndex(row_of(page)),
+            false,
+        );
         self.ivars().quiet.set(false);
     }
 }
@@ -158,15 +178,24 @@ fn pin_label(cell: &NSView, label: &NSTextField, leading: f64) {
     label.setTranslatesAutoresizingMaskIntoConstraints(false);
     cell.addSubview(label);
     NSLayoutConstraint::activateConstraints(&NSArray::from_retained_slice(&[
-        label.leadingAnchor().constraintEqualToAnchor_constant(&cell.leadingAnchor(), leading),
-        label.trailingAnchor().constraintLessThanOrEqualToAnchor_constant(&cell.trailingAnchor(), -4.0),
-        label.centerYAnchor().constraintEqualToAnchor(&cell.centerYAnchor()),
+        label
+            .leadingAnchor()
+            .constraintEqualToAnchor_constant(&cell.leadingAnchor(), leading),
+        label
+            .trailingAnchor()
+            .constraintLessThanOrEqualToAnchor_constant(&cell.trailingAnchor(), -4.0),
+        label
+            .centerYAnchor()
+            .constraintEqualToAnchor(&cell.centerYAnchor()),
     ]));
 }
 
 fn item_cell(mtm: MainThreadMarker, page: Page) -> Retained<NSView> {
     let cell = NSTableCellView::new(mtm);
-    let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(symbol(page)), None);
+    let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        &NSString::from_str(symbol(page)),
+        None,
+    );
     let icon = NSImageView::new(mtm);
     icon.setImage(image.as_deref());
     icon.setTranslatesAutoresizingMaskIntoConstraints(false);
@@ -175,12 +204,20 @@ fn item_cell(mtm: MainThreadMarker, page: Page) -> Retained<NSView> {
     label.setTranslatesAutoresizingMaskIntoConstraints(false);
     cell.addSubview(&label);
     NSLayoutConstraint::activateConstraints(&NSArray::from_retained_slice(&[
-        icon.leadingAnchor().constraintEqualToAnchor_constant(&cell.leadingAnchor(), 4.0),
-        icon.centerYAnchor().constraintEqualToAnchor(&cell.centerYAnchor()),
+        icon.leadingAnchor()
+            .constraintEqualToAnchor_constant(&cell.leadingAnchor(), 4.0),
+        icon.centerYAnchor()
+            .constraintEqualToAnchor(&cell.centerYAnchor()),
         icon.widthAnchor().constraintEqualToConstant(18.0),
-        label.leadingAnchor().constraintEqualToAnchor_constant(&icon.trailingAnchor(), 7.0),
-        label.trailingAnchor().constraintLessThanOrEqualToAnchor_constant(&cell.trailingAnchor(), -4.0),
-        label.centerYAnchor().constraintEqualToAnchor(&cell.centerYAnchor()),
+        label
+            .leadingAnchor()
+            .constraintEqualToAnchor_constant(&icon.trailingAnchor(), 7.0),
+        label
+            .trailingAnchor()
+            .constraintLessThanOrEqualToAnchor_constant(&cell.trailingAnchor(), -4.0),
+        label
+            .centerYAnchor()
+            .constraintEqualToAnchor(&cell.centerYAnchor()),
     ]));
     // SAFETY: both are the cell's subviews.
     unsafe {
@@ -208,7 +245,10 @@ fn tool_id(id: &NSString) -> Option<&'static str> {
 }
 
 fn symbol_image(name: &str, label: &str) -> Option<Retained<NSImage>> {
-    NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), Some(&NSString::from_str(label)))
+    NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        &NSString::from_str(name),
+        Some(&NSString::from_str(label)),
+    )
 }
 
 define_class!(
@@ -283,7 +323,8 @@ fn make_item(delegate: &Toolbar, id: &NSString, tool: &Tool) -> Retained<NSToolb
     let mtm = delegate.mtm();
     let item: Retained<NSToolbarItem> = match tool {
         Tool::Search { placeholder, .. } => {
-            let item = NSSearchToolbarItem::initWithItemIdentifier(NSSearchToolbarItem::alloc(mtm), id);
+            let item =
+                NSSearchToolbarItem::initWithItemIdentifier(NSSearchToolbarItem::alloc(mtm), id);
             let field = item.searchField();
             field.setPlaceholderString(Some(&NSString::from_str(placeholder)));
             field.setIdentifier(Some(id));
@@ -328,13 +369,24 @@ fn update_item(delegate: &Toolbar, item: &NSToolbarItem, tool: &Tool) {
                 }
             }
         }
-        Tool::Button { label, glyph, enabled, .. } => {
+        Tool::Button {
+            label,
+            glyph,
+            enabled,
+            ..
+        } => {
             item.setLabel(&NSString::from_str(label));
             item.setToolTip(Some(&NSString::from_str(label)));
             item.setImage(symbol_image(glyph.sf(), label).as_deref());
             item.setEnabled(*enabled);
         }
-        Tool::Choice { id, label, glyph, options, selected } => {
+        Tool::Choice {
+            id,
+            label,
+            glyph,
+            options,
+            selected,
+        } => {
             item.setLabel(&NSString::from_str(label));
             item.setToolTip(Some(&NSString::from_str(label)));
             item.setImage(symbol_image(glyph.sf(), label).as_deref());
@@ -354,7 +406,11 @@ fn update_item(delegate: &Toolbar, item: &NSToolbarItem, tool: &Tool) {
                     unsafe { m.setTarget(Some(target(delegate))) };
                     m.setTag(i as isize);
                     m.setIdentifier(Some(&NSString::from_str(&format!("tool.{id}"))));
-                    m.setState(if i == *selected { NSControlStateValueOn } else { NSControlStateValueOff });
+                    m.setState(if i == *selected {
+                        NSControlStateValueOn
+                    } else {
+                        NSControlStateValueOff
+                    });
                     menu.addItem(&m);
                 }
                 item.setMenu(&menu);
@@ -369,7 +425,11 @@ fn show_tools(toolbar: &NSToolbar, delegate: &Toolbar, tools: Vec<Tool>) {
     let wanted: Vec<String> = tools.iter().map(|t| format!("tool.{}", t.id())).collect();
     let before = TOOLS.with(|t| std::mem::replace(&mut *t.borrow_mut(), tools.clone()));
     let items = toolbar.items();
-    let have: Vec<String> = items.iter().skip(FIXED).map(|i| i.itemIdentifier().to_string()).collect();
+    let have: Vec<String> = items
+        .iter()
+        .skip(FIXED)
+        .map(|i| i.itemIdentifier().to_string())
+        .collect();
     if have == wanted && before == tools {
         return;
     }
@@ -378,7 +438,10 @@ fn show_tools(toolbar: &NSToolbar, delegate: &Toolbar, tools: Vec<Tool>) {
             toolbar.removeItemAtIndex(i as isize);
         }
         for (n, id) in wanted.iter().enumerate() {
-            toolbar.insertItemWithItemIdentifier_atIndex(&NSString::from_str(id), (FIXED + n) as isize);
+            toolbar.insertItemWithItemIdentifier_atIndex(
+                &NSString::from_str(id),
+                (FIXED + n) as isize,
+            );
         }
     } else {
         // Only what changed: a rebuilt menu would close under the pointer.
@@ -427,22 +490,38 @@ thread_local! {
 }
 
 fn log_class(name: &std::ffi::CStr) {
-    log::warn!("spike: class {:?} {}", name, if objc2::runtime::AnyClass::get(name).is_some() { "present" } else { "MISSING" });
+    log::warn!(
+        "spike: class {:?} {}",
+        name,
+        if objc2::runtime::AnyClass::get(name).is_some() {
+            "present"
+        } else {
+            "MISSING"
+        }
+    );
 }
 
 /// Rebuilds the main window's content once `run_app` shows it.
 pub fn install(svc: Service) {
     dispatch2::DispatchQueue::main().exec_async(move || {
-        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
         log_class(c"NSGlassEffectView");
         log_class(c"NSGlassEffectContainerView");
         log_class(c"NSBackgroundExtensionView");
         let app = NSApplication::sharedApplication(mtm);
-        let Some(window) = app.windows().iter().find(|w| w.styleMask().contains(NSWindowStyleMask::Resizable)) else {
+        let Some(window) = app
+            .windows()
+            .iter()
+            .find(|w| w.styleMask().contains(NSWindowStyleMask::Resizable))
+        else {
             log::warn!("spike: no main window");
             return;
         };
-        let Some(nsh) = window.contentView() else { return };
+        let Some(nsh) = window.contentView() else {
+            return;
+        };
         let frame = window.frame();
         let under_toolbar = std::env::var("KAIRO_SPIKE").as_deref() == Ok("under");
 
@@ -451,9 +530,13 @@ pub fn install(svc: Service) {
         table.setStyle(NSTableViewStyle::SourceList);
         table.setHeaderView(None);
         table.setFloatsGroupRows(false);
-        let column = NSTableColumn::initWithIdentifier(NSTableColumn::alloc(mtm), ns_string!("page"));
+        let column =
+            NSTableColumn::initWithIdentifier(NSTableColumn::alloc(mtm), ns_string!("page"));
         table.addTableColumn(&column);
-        let sidebar = Sidebar::alloc(mtm).set_ivars(SidebarIvars { quiet: Cell::new(false), table: RefCell::new(Some(table.clone())) });
+        let sidebar = Sidebar::alloc(mtm).set_ivars(SidebarIvars {
+            quiet: Cell::new(false),
+            table: RefCell::new(Some(table.clone())),
+        });
         // SAFETY: NSObject's initializer.
         let sidebar: Retained<Sidebar> = unsafe { msg_send![super(sidebar), init] };
         // SAFETY: the sidebar is kept alive in INSTALLED for the window's life.
@@ -470,17 +553,36 @@ pub fn install(svc: Service) {
         let footer = Footer::new(mtm);
         let side = NSView::new(mtm);
         scroll.setTranslatesAutoresizingMaskIntoConstraints(false);
-        footer.root.setTranslatesAutoresizingMaskIntoConstraints(false);
+        footer
+            .root
+            .setTranslatesAutoresizingMaskIntoConstraints(false);
         side.addSubview(&scroll);
         side.addSubview(&footer.root);
         NSLayoutConstraint::activateConstraints(&NSArray::from_retained_slice(&[
-            scroll.topAnchor().constraintEqualToAnchor(&side.topAnchor()),
-            scroll.leadingAnchor().constraintEqualToAnchor(&side.leadingAnchor()),
-            scroll.trailingAnchor().constraintEqualToAnchor(&side.trailingAnchor()),
-            scroll.bottomAnchor().constraintEqualToAnchor_constant(&footer.root.topAnchor(), -6.0),
-            footer.root.leadingAnchor().constraintEqualToAnchor_constant(&side.leadingAnchor(), 18.0),
-            footer.root.trailingAnchor().constraintEqualToAnchor_constant(&side.trailingAnchor(), -14.0),
-            footer.root.bottomAnchor().constraintEqualToAnchor_constant(&side.bottomAnchor(), -14.0),
+            scroll
+                .topAnchor()
+                .constraintEqualToAnchor(&side.topAnchor()),
+            scroll
+                .leadingAnchor()
+                .constraintEqualToAnchor(&side.leadingAnchor()),
+            scroll
+                .trailingAnchor()
+                .constraintEqualToAnchor(&side.trailingAnchor()),
+            scroll
+                .bottomAnchor()
+                .constraintEqualToAnchor_constant(&footer.root.topAnchor(), -6.0),
+            footer
+                .root
+                .leadingAnchor()
+                .constraintEqualToAnchor_constant(&side.leadingAnchor(), 18.0),
+            footer
+                .root
+                .trailingAnchor()
+                .constraintEqualToAnchor_constant(&side.trailingAnchor(), -14.0),
+            footer
+                .root
+                .bottomAnchor()
+                .constraintEqualToAnchor_constant(&side.bottomAnchor(), -14.0),
         ]));
         let sidebar_vc = NSViewController::new(mtm);
         sidebar_vc.setView(&side);
@@ -490,20 +592,26 @@ pub fn install(svc: Service) {
         let flush = std::env::var("KAIRO_SPIKE").as_deref() == Ok("flush");
         let under_toolbar = under_toolbar || !flush;
         // SAFETY: NSView's designated initializer.
-        let container: Retained<ContentView> = unsafe { msg_send![ContentView::alloc(mtm), initWithFrame: frame] };
+        let container: Retained<ContentView> =
+            unsafe { msg_send![ContentView::alloc(mtm), initWithFrame: frame] };
         nsh.removeFromSuperview();
         nsh.setTranslatesAutoresizingMaskIntoConstraints(false);
         container.addSubview(&nsh);
         let top = if under_toolbar {
-            nsh.topAnchor().constraintEqualToAnchor(&container.topAnchor())
+            nsh.topAnchor()
+                .constraintEqualToAnchor(&container.topAnchor())
         } else {
-            nsh.topAnchor().constraintEqualToAnchor(&container.safeAreaLayoutGuide().topAnchor())
+            nsh.topAnchor()
+                .constraintEqualToAnchor(&container.safeAreaLayoutGuide().topAnchor())
         };
         NSLayoutConstraint::activateConstraints(&NSArray::from_retained_slice(&[
             top,
-            nsh.leadingAnchor().constraintEqualToAnchor(&container.leadingAnchor()),
-            nsh.trailingAnchor().constraintEqualToAnchor(&container.trailingAnchor()),
-            nsh.bottomAnchor().constraintEqualToAnchor(&container.bottomAnchor()),
+            nsh.leadingAnchor()
+                .constraintEqualToAnchor(&container.leadingAnchor()),
+            nsh.trailingAnchor()
+                .constraintEqualToAnchor(&container.trailingAnchor()),
+            nsh.bottomAnchor()
+                .constraintEqualToAnchor(&container.bottomAnchor()),
         ]));
         let content_vc = NSViewController::new(mtm);
         content_vc.setView(&container);
@@ -532,7 +640,8 @@ pub fn install(svc: Service) {
         window.setFrame_display(frame, true);
 
         let toolbar_delegate: Retained<Toolbar> = unsafe { msg_send![Toolbar::alloc(mtm), init] };
-        let toolbar = NSToolbar::initWithIdentifier(NSToolbar::alloc(mtm), ns_string!("kairo.main"));
+        let toolbar =
+            NSToolbar::initWithIdentifier(NSToolbar::alloc(mtm), ns_string!("kairo.main"));
         toolbar.setDelegate(Some(ProtocolObject::from_ref(&*toolbar_delegate)));
         toolbar.setDisplayMode(objc2_app_kit::NSToolbarDisplayMode::IconOnly);
         window.setToolbar(Some(&toolbar));
@@ -545,7 +654,14 @@ pub fn install(svc: Service) {
         table.sizeLastColumnToFit();
 
         INSTALLED.with(|i| {
-            *i.borrow_mut() = Some(Installed { window: window.clone(), sidebar, toolbar: toolbar_delegate, footer, side_item: side_item.clone(), _split: split })
+            *i.borrow_mut() = Some(Installed {
+                window: window.clone(),
+                sidebar,
+                toolbar: toolbar_delegate,
+                footer,
+                side_item: side_item.clone(),
+                _split: split,
+            })
         });
         log::warn!("spike: chrome installed (under_toolbar={under_toolbar})");
         follow(svc);
@@ -562,7 +678,10 @@ fn follow(svc: Service) {
     std::thread::Builder::new()
         .name("kairo-chrome".into())
         .spawn(move || {
-            let rt = kairo_core::tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
+            let rt = kairo_core::tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
             rt.block_on(async move {
                 loop {
                     let page = *pages.borrow_and_update();
@@ -649,7 +768,10 @@ impl Footer {
     fn new(mtm: MainThreadMarker) -> Footer {
         let label = |size: f64, secondary: bool| {
             let l = NSTextField::labelWithString(ns_string!(""), mtm);
-            l.setFont(Some(&NSFont::monospacedDigitSystemFontOfSize_weight(size, unsafe { objc2_app_kit::NSFontWeightRegular })));
+            l.setFont(Some(&NSFont::monospacedDigitSystemFontOfSize_weight(
+                size,
+                unsafe { objc2_app_kit::NSFontWeightRegular },
+            )));
             if secondary {
                 l.setTextColor(Some(&NSColor::secondaryLabelColor()));
             }
@@ -657,47 +779,75 @@ impl Footer {
         };
         let dot = NSImageView::new(mtm);
         dot.setImage(symbol_image("circle.fill", "").as_deref());
-        dot.setSymbolConfiguration(Some(&objc2_app_kit::NSImageSymbolConfiguration::configurationWithPointSize_weight(7.0, unsafe {
-            objc2_app_kit::NSFontWeightRegular
-        })));
+        dot.setSymbolConfiguration(Some(
+            &objc2_app_kit::NSImageSymbolConfiguration::configurationWithPointSize_weight(
+                7.0,
+                unsafe { objc2_app_kit::NSFontWeightRegular },
+            ),
+        ));
         let status = label(12.0, false);
-        status.setFont(Some(&NSFont::systemFontOfSize_weight(12.0, unsafe { objc2_app_kit::NSFontWeightMedium })));
+        status.setFont(Some(&NSFont::systemFontOfSize_weight(12.0, unsafe {
+            objc2_app_kit::NSFontWeightMedium
+        })));
         let mode = label(12.0, true);
-        let top = NSStackView::stackViewWithViews(&NSArray::from_retained_slice(&[
-            Retained::into_super(Retained::into_super(dot.clone())),
-            Retained::into_super(Retained::into_super(status.clone())),
-            Retained::into_super(Retained::into_super(mode.clone())),
-        ]), mtm);
+        let top = NSStackView::stackViewWithViews(
+            &NSArray::from_retained_slice(&[
+                Retained::into_super(Retained::into_super(dot.clone())),
+                Retained::into_super(Retained::into_super(status.clone())),
+                Retained::into_super(Retained::into_super(mode.clone())),
+            ]),
+            mtm,
+        );
         top.setSpacing(6.0);
         let speeds = label(11.0, true);
         // A downloaded update, one click from installing.
         let update = unsafe {
-            objc2_app_kit::NSButton::buttonWithTitle_target_action(ns_string!("Restart to Update"), Some(&*UpdateTarget::shared(mtm)), Some(sel!(restartToUpdate:)), mtm)
+            objc2_app_kit::NSButton::buttonWithTitle_target_action(
+                ns_string!("Restart to Update"),
+                Some(&*UpdateTarget::shared(mtm)),
+                Some(sel!(restartToUpdate:)),
+                mtm,
+            )
         };
         update.setBezelStyle(objc2_app_kit::NSBezelStyle::Push);
         update.setKeyEquivalent(ns_string!(""));
         update.setHidden(true);
-        let root = NSStackView::stackViewWithViews(&NSArray::from_retained_slice(&[
-            Retained::into_super(Retained::into_super(update.clone())),
-            Retained::into_super(top),
-            Retained::into_super(Retained::into_super(speeds.clone())),
-        ]), mtm);
+        let root = NSStackView::stackViewWithViews(
+            &NSArray::from_retained_slice(&[
+                Retained::into_super(Retained::into_super(update.clone())),
+                Retained::into_super(top),
+                Retained::into_super(Retained::into_super(speeds.clone())),
+            ]),
+            mtm,
+        );
         root.setOrientation(objc2_app_kit::NSUserInterfaceLayoutOrientation::Vertical);
         root.setAlignment(objc2_app_kit::NSLayoutAttribute::Leading);
         root.setSpacing(3.0);
-        Footer { root, update, dot, status, mode, speeds }
+        Footer {
+            root,
+            update,
+            dot,
+            status,
+            mode,
+            speeds,
+        }
     }
 
     fn update(&self, s: &kairo_core::State, l: &kairo_core::Live) {
         match &s.update {
             kairo_core::UpdateStatus::Ready { version } => {
-                self.update.setTitle(&NSString::from_str(&format!("Restart to Update to {version}")));
+                self.update.setTitle(&NSString::from_str(&format!(
+                    "Restart to Update to {version}"
+                )));
                 self.update.setHidden(false);
             }
             _ => self.update.setHidden(true),
         }
         self.status.setStringValue(&NSString::from_str(s.plain()));
-        self.mode.setStringValue(&NSString::from_str(&format!("· {}", s.settings.mode.route())));
+        self.mode.setStringValue(&NSString::from_str(&format!(
+            "· {}",
+            s.settings.mode.route()
+        )));
         let tint = match &s.core {
             CoreStatus::Running { .. } => NSColor::systemGreenColor(),
             CoreStatus::Starting | CoreStatus::Stopping => NSColor::systemOrangeColor(),
@@ -707,14 +857,20 @@ impl Footer {
         self.dot.setContentTintColor(Some(&tint));
         let running = s.core.is_running();
         self.speeds.setHidden(!running);
-        self.speeds.setStringValue(&NSString::from_str(&format!("↓ {}   ↑ {}", kairo_core::speed(l.down), kairo_core::speed(l.up))));
+        self.speeds.setStringValue(&NSString::from_str(&format!(
+            "↓ {}   ↑ {}",
+            kairo_core::speed(l.down),
+            kairo_core::speed(l.up)
+        )));
     }
 }
 
 /// The window's appearance (and so the sidebar's, the toolbar's and the
 /// controls') follows Kairo's own setting; System follows the Mac.
 fn set_appearance(window: &NSWindow, theme: kairo_core::Theme) {
-    use objc2_app_kit::{NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua};
+    use objc2_app_kit::{
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+    };
     // SAFETY: AppKit's constant appearance names.
     let name = match theme {
         kairo_core::Theme::System => None,
@@ -734,7 +890,10 @@ pub mod controls {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
-    use objc2_app_kit::{NSControlStateValueOff, NSControlStateValueOn, NSSegmentedControl, NSSegmentStyle, NSSwitch, NSView};
+    use objc2_app_kit::{
+        NSControlStateValueOff, NSControlStateValueOn, NSSegmentStyle, NSSegmentedControl,
+        NSSwitch, NSView,
+    };
     use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
     use serde_json::Value;
 
@@ -776,14 +935,25 @@ pub mod controls {
         }
         fn set_prop(&mut self, name: &str, value: Option<&Value>) {
             match name {
-                "on" => self.0.setState(if value.and_then(Value::as_bool).unwrap_or(false) { NSControlStateValueOn } else { NSControlStateValueOff }),
-                "enabled" => self.0.setEnabled(value.and_then(Value::as_bool).unwrap_or(true)),
+                "on" => self
+                    .0
+                    .setState(if value.and_then(Value::as_bool).unwrap_or(false) {
+                        NSControlStateValueOn
+                    } else {
+                        NSControlStateValueOff
+                    }),
+                "enabled" => self
+                    .0
+                    .setEnabled(value.and_then(Value::as_bool).unwrap_or(true)),
                 _ => {}
             }
         }
     }
 
-    struct Segmented(Retained<NSSegmentedControl>, #[allow(dead_code)] Retained<Target>);
+    struct Segmented(
+        Retained<NSSegmentedControl>,
+        #[allow(dead_code)] Retained<Target>,
+    );
 
     impl NativeComponent for Segmented {
         fn view(&self) -> Retained<NSView> {
@@ -792,14 +962,19 @@ pub mod controls {
         fn set_prop(&mut self, name: &str, value: Option<&Value>) {
             match name {
                 "labels" => {
-                    let labels: Vec<&str> = value.and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+                    let labels: Vec<&str> = value
+                        .and_then(Value::as_array)
+                        .map(|a| a.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
                     self.0.setSegmentCount(labels.len() as isize);
                     for (i, l) in labels.iter().enumerate() {
-                        self.0.setLabel_forSegment(&NSString::from_str(l), i as isize);
+                        self.0
+                            .setLabel_forSegment(&NSString::from_str(l), i as isize);
                     }
                 }
                 "selected" => {
-                    self.0.setSelectedSegment(value.and_then(Value::as_i64).unwrap_or(-1) as isize);
+                    self.0
+                        .setSelectedSegment(value.and_then(Value::as_i64).unwrap_or(-1) as isize);
                 }
                 _ => {}
             }

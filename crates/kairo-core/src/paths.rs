@@ -29,7 +29,10 @@ pub struct Paths {
 
 impl Paths {
     pub fn new(home: impl Into<PathBuf>) -> Self {
-        Self { home: home.into(), bundled_core: bundled_core() }
+        Self {
+            home: home.into(),
+            bundled_core: bundled_core(),
+        }
     }
 
     /// The default location (see the module docs).
@@ -76,7 +79,11 @@ impl Paths {
         self.home.join("core")
     }
     pub fn core_bin(&self) -> PathBuf {
-        self.core_dir().join(if cfg!(windows) { "mihomo.exe" } else { "mihomo" })
+        self.core_dir().join(if cfg!(windows) {
+            "mihomo.exe"
+        } else {
+            "mihomo"
+        })
     }
     pub fn update_dir(&self) -> PathBuf {
         self.home.join("update")
@@ -134,10 +141,18 @@ pub fn bundled_core() -> Option<PathBuf> {
 
 pub fn bundled_core_for(exe: &Path) -> Option<PathBuf> {
     let dir = exe.parent()?;
-    let name = if cfg!(windows) { "mihomo.exe" } else { "mihomo" };
-    [dir.join(name), dir.join("../lib/kairo").join(name), dir.join("../mihomo").join(name)]
-        .into_iter()
-        .find(|p| p.is_file())
+    let name = if cfg!(windows) {
+        "mihomo.exe"
+    } else {
+        "mihomo"
+    };
+    [
+        dir.join(name),
+        dir.join("../lib/kairo").join(name),
+        dir.join("../mihomo").join(name),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 /// Writes `bytes` to `path` through a temporary file in the same directory, so a

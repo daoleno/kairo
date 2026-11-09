@@ -33,7 +33,11 @@ pub fn status(core: &Path) -> Privilege {
     }
     #[cfg(target_os = "linux")]
     {
-        if has_net_admin(core) { Privilege::Granted } else { Privilege::Needed }
+        if has_net_admin(core) {
+            Privilege::Granted
+        } else {
+            Privilege::Needed
+        }
     }
     #[cfg(target_os = "macos")]
     {
@@ -58,7 +62,14 @@ pub fn has_net_admin(core: &Path) -> bool {
     let mut buf = [0u8; 64];
     let path = std::ffi::CString::new(core.as_os_str().as_encoded_bytes()).expect("path");
     let name = c"security.capability";
-    let n = unsafe { libc::getxattr(path.as_ptr(), name.as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+    let n = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        )
+    };
     if n < 8 {
         return false;
     }
@@ -81,7 +92,10 @@ pub fn grant(core: &Path) -> Result<(), String> {
             .map_err(|e| format!("pkexec: {e}"))?;
         return match out.status.code() {
             Some(0) if has_net_admin(core) => Ok(()),
-            Some(0) => Err("The permission did not stick (is the core on a filesystem without capabilities?)".into()),
+            Some(0) => Err(
+                "The permission did not stick (is the core on a filesystem without capabilities?)"
+                    .into(),
+            ),
             Some(126) => Err("Cancelled".into()),
             Some(127) => Err("No polkit agent could ask for the password".into()),
             _ => Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()),
@@ -101,7 +115,11 @@ pub fn grant(core: &Path) -> Result<(), String> {
             Ok(())
         } else {
             let err = String::from_utf8_lossy(&out.stderr);
-            Err(if err.contains("-128") { "Cancelled".into() } else { err.trim().to_owned() })
+            Err(if err.contains("-128") {
+                "Cancelled".into()
+            } else {
+                err.trim().to_owned()
+            })
         };
     }
     #[allow(unreachable_code)]
