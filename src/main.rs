@@ -23,7 +23,7 @@ mod gtk_chrome;
 fn root() -> nsh_engine_root::Root {
     #[cfg(target_os = "macos")]
     if nsh_app_kairo::chrome::native() {
-        let theme = mac_theme::theme_json(nsh_app_kairo::THEME);
+        let theme = nsh_app_kairo::accent::apply(&mac_theme::theme_json(nsh_app_kairo::THEME));
         if let Ok(tokens) = nsh_base::tokens_of(Some(&theme)) {
             return nsh_engine_root::Root::of::<nsh_app_kairo::App>().tokens(tokens);
         }

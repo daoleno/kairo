@@ -1,6 +1,7 @@
 //! Kairo: a native mihomo client. This crate is the UI, written with Native
 //! Shell (NSH) in Rust; `kairo-core` is the engine and `kairo-tray` the tray.
 
+pub mod accent;
 pub mod chrome;
 mod pages;
 mod shell;
@@ -20,7 +21,7 @@ pub const THEME: &str = include_str!("../theme.json");
 
 /// The design tokens of [`THEME`], for runners that mount the root themselves.
 pub fn tokens() -> nsh_core::element::Tokens {
-    nsh_base::tokens_of(Some(THEME)).expect("theme.json is a valid theme")
+    nsh_base::tokens_of(Some(&accent::apply(THEME))).expect("theme.json is a valid theme")
 }
 
 /// Kairo's UI set (`nsh.json` `"rust"`).

@@ -109,13 +109,41 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     content_bar.pack_start(&toggle);
     window.set_content(Some(&split));
 
+    // The chrome's own widgets (the sidebar toggle, focus rings, selection)
+    // in Kairo's accent rather than the desktop's blue.
+    {
+        let a = nsh_app_kairo::accent::current();
+        let css = format!(
+            "@define-color accent_bg_color {};\n@define-color accent_fg_color {};\n@define-color accent_color {};\n",
+            if adw::StyleManager::default().is_dark() { a.dark[0] } else { a.light[0] },
+            if adw::StyleManager::default().is_dark() { a.dark[1] } else { a.light[1] },
+            if adw::StyleManager::default().is_dark() { a.dark[2] } else { a.light[2] },
+        );
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string(&css);
+        if let Some(display) = gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        }
+        let style = adw::StyleManager::default();
+        style.connect_dark_notify(move |m| {
+            let dark = m.is_dark();
+            let pick = |i: usize| if dark { a.dark[i] } else { a.light[i] };
+            provider.load_from_string(&format!(
+                "@define-color accent_bg_color {};\n@define-color accent_fg_color {};\n@define-color accent_color {};\n",
+                pick(0),
+                pick(1),
+                pick(2)
+            ));
+        });
+    }
+
     // The NSH content in the GTK theme's colors, again when they change.
     let style = adw::StyleManager::default();
     let apply = {
         let view = view.clone();
         let probe = list.clone();
         move || {
-            if let Err(e) = view.set_theme_overrides(Some(&theme_json(&probe))) {
+            if let Err(e) = view.set_theme_overrides(Some(&nsh_app_kairo::accent::apply(&theme_json(&probe)))) {
                 log::warn!("theme overrides: {e}");
             }
         }
