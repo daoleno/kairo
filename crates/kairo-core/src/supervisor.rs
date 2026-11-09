@@ -65,15 +65,10 @@ impl CoreProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        #[cfg(target_os = "linux")]
-        unsafe {
-            // The core goes when Kairo goes, even when Kairo is killed: a core
-            // nobody controls would keep the system proxy pointing at it.
-            command.pre_exec(|| {
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-                Ok(())
-            });
-        }
+        // No PR_SET_PDEATHSIG: when Kairo dies, its guardian puts the system
+        // proxy back and then stops the core. If the guardian is gone too (both
+        // killed at once), the core going on keeps the proxy the system points
+        // at alive, so the computer stays online; the next Kairo stops it.
         let mut child = command.spawn()?;
         let pid = child.id().unwrap_or(0);
         let _ = std::fs::write(paths.core_pid(), pid.to_string());
@@ -184,6 +179,12 @@ pub async fn stop_stale(paths: &Paths) {
         return;
     }
     log::warn!("stopping a core left running by a previous session (pid {pid})");
+    stop_pid(pid).await;
+}
+
+/// SIGTERM, three seconds, SIGKILL; returns once the process is gone (or
+/// after another second), so its ports are free for the next core.
+pub async fn stop_pid(pid: i32) {
     #[cfg(unix)]
     unsafe {
         libc::kill(pid, libc::SIGTERM);
@@ -194,6 +195,12 @@ pub async fn stop_stale(paths: &Paths) {
             }
         }
         libc::kill(pid, libc::SIGKILL);
+        for _ in 0..10 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if libc::kill(pid, 0) != 0 {
+                return;
+            }
+        }
     }
 }
 

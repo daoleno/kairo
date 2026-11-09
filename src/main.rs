@@ -114,8 +114,13 @@ mod guardian {
 
     pub fn run() -> ! {
         // Its own session: Ctrl+C in a terminal stops Kairo, not the guardian.
+        // At logout everything gets SIGTERM (and SIGHUP): the guardian stays
+        // until Kairo itself is gone, then does what Kairo could not.
         unsafe {
             libc::setsid();
+            libc::signal(libc::SIGTERM, libc::SIG_IGN);
+            libc::signal(libc::SIGHUP, libc::SIG_IGN);
+            libc::signal(libc::SIGINT, libc::SIG_IGN);
         }
         let mut buf = [0u8; 64];
         let mut stdin = std::io::stdin();
@@ -142,6 +147,13 @@ fn main() {
     #[cfg(unix)]
     if guardian::is_guardian() {
         guardian::run();
+    }
+    // At login (see kairo_core::autostart::install_restore): put the system
+    // proxy back if a Kairo that is gone left it pointing at a dead port.
+    if std::env::args().nth(1).as_deref() == Some("--restore-network") {
+        let paths = Paths::new(Paths::default_home());
+        kairo_core::sysproxy::restore_if_dead(&paths);
+        std::process::exit(0);
     }
     // Started by "Restart to Update": the Kairo it replaces must be gone first
     // (single instance, the core's ports).

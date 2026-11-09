@@ -194,6 +194,7 @@ rules:
     let mut paths = Paths::new(home.path());
     paths.bundled_core = Some(core.clone());
     paths.ensure().unwrap();
+    let _core = CoreGuard(paths.core_pid());
     let mut settings = Settings::default();
     settings.mixed_port = free_port();
     settings.controller_port = free_port();
@@ -451,10 +452,55 @@ rules:
     })
     .await;
 
-    // 11. Stop.
+    // 11. Off and on again at once (the tray's toggle, clicked twice): the
+    // second asks before the first has stopped the core, and still connects.
+    let off = svc.connect(false);
+    let on = svc.connect(true);
+    off.await.unwrap();
+    on.await.unwrap();
+    wait_for(
+        "connected after off-and-on",
+        Duration::from_secs(20),
+        || state.borrow().core.is_running().then_some(()),
+    )
+    .await;
+    assert!(svc.settings().auto_start_core);
+    let mixed = svc.settings().mixed_port;
+
+    // 12. Another program takes the proxy port while Kairo is off (another
+    // client whose core outlived its window): Kairo moves past it.
+    svc.connect(false).await.unwrap();
+    let squatter = std::net::TcpListener::bind(("127.0.0.1", mixed)).unwrap();
+    svc.connect(true).await.unwrap();
+    assert!(state.borrow().core.is_running());
+    let moved = svc.settings().mixed_port;
+    assert_ne!(moved, mixed);
+    let note = state.borrow().note.clone().unwrap_or_default();
+    assert!(
+        note.contains(&mixed.to_string()) && note.contains(&moved.to_string()),
+        "{note}"
+    );
+    drop(squatter);
+
+    // 13. Stop.
     svc.stop_core().await;
     assert_eq!(state.borrow().core, CoreStatus::Stopped);
     assert!(!paths.core_pid().exists());
+}
+
+/// Stops the test's core when the test ends early (a failed assertion): the
+/// core outlives the process that started it, as it does a crashed Kairo.
+struct CoreGuard(std::path::PathBuf);
+
+impl Drop for CoreGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = std::fs::read_to_string(&self.0)
+            .ok()
+            .and_then(|t| t.trim().parse::<i32>().ok())
+        {
+            unsafe { libc_kill(pid) };
+        }
+    }
 }
 
 unsafe fn libc_kill(pid: i32) {
@@ -519,6 +565,7 @@ async fn tun_in_a_network_namespace() {
     let mut paths = Paths::new(home.path());
     paths.bundled_core = Some(core.clone());
     paths.ensure().unwrap();
+    let _core = CoreGuard(paths.core_pid());
     let mut settings = Settings::default();
     settings.mixed_port = free_port();
     settings.controller_port = free_port();

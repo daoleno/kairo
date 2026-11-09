@@ -28,6 +28,79 @@ pub struct Saved {
     pub gnome: Option<GnomeProxy>,
     pub kde: Option<KdeProxy>,
     pub mac: Option<Vec<MacService>>,
+    /// The port Kairo pointed the system at (absent in 0.1 state files).
+    #[serde(default)]
+    pub applied: Option<u16>,
+}
+
+/// Whether something accepts connections on 127.0.0.1:`port`.
+pub fn answers(port: u16) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok()
+}
+
+/// A proxy on this machine that nothing answers: another client's, left
+/// behind when it quit or crashed. Putting it back would leave the computer
+/// offline, so it is put back as "no proxy".
+fn dead_local(host: &str, port: u16, ours: Option<u16>) -> bool {
+    let host = host
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("socks://");
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
+        && port != 0
+        // Kairo's own port (saved after a crash left it set) goes with Kairo.
+        && (Some(port) == ours || !answers(port))
+}
+
+/// KIO's `http://127.0.0.1 7897` as host and port.
+fn kde_parts(address: &str) -> (String, u16) {
+    let mut it = address.split_whitespace();
+    let host = it.next().unwrap_or("").to_owned();
+    let port = it.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (host, port)
+}
+
+impl Saved {
+    /// These settings with any dead local proxy among them turned off.
+    pub fn without_dead_proxies(mut self) -> Saved {
+        let ours = self.applied;
+        if let Some(g) = &mut self.gnome
+            && g.mode == "manual"
+            && dead_local(&g.http.0, g.http.1, ours)
+        {
+            log::warn!(
+                "the proxy saved before Kairo ({}:{}) is gone: restoring none",
+                g.http.0,
+                g.http.1
+            );
+            g.mode = "none".into();
+        }
+        if let Some(k) = &mut self.kde
+            && k.proxy_type == "1"
+        {
+            let (host, port) = kde_parts(&k.http);
+            if dead_local(&host, port, ours) {
+                log::warn!("the proxy saved before Kairo ({host}:{port}) is gone: restoring none");
+                k.proxy_type = "0".into();
+            }
+        }
+        if let Some(services) = &mut self.mac {
+            for svc in services.iter_mut() {
+                for p in [&mut svc.web, &mut svc.secure, &mut svc.socks] {
+                    if p.enabled && dead_local(&p.server, p.port, ours) {
+                        log::warn!(
+                            "the proxy saved before Kairo ({}:{}) is gone: restoring none",
+                            p.server,
+                            p.port
+                        );
+                        p.enabled = false;
+                    }
+                }
+            }
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -448,18 +521,22 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
     if !(b.gnome || b.kde.is_some() || b.mac) {
         return Err("This desktop has no system proxy Kairo can set".into());
     }
-    if load_saved(paths).is_none() {
-        let saved = Saved {
+    let mut saved = match load_saved(paths) {
+        Some(s) => s,
+        None => Saved {
             gnome: if b.gnome { gnome_read().ok() } else { None },
             kde: b.kde.map(kde_read),
             mac: if b.mac { Some(mac_read()?) } else { None },
-        };
-        write_atomic(
-            &paths.sysproxy_state(),
-            &serde_json::to_vec_pretty(&saved).expect("saved"),
-        )
-        .map_err(|e| e.to_string())?;
-    }
+            applied: None,
+        },
+    };
+    // Written before the change: whatever happens next, the way back is known.
+    saved.applied = Some(spec.port);
+    write_atomic(
+        &paths.sysproxy_state(),
+        &serde_json::to_vec_pretty(&saved).expect("saved"),
+    )
+    .map_err(|e| e.to_string())?;
     let mut errors = Vec::new();
     if b.gnome
         && let Err(e) = gnome_apply(spec)
@@ -495,6 +572,7 @@ pub fn disable(paths: &Paths) -> Result<(), String> {
         let _ = std::fs::remove_file(paths.sysproxy_state());
         return Ok(());
     };
+    let saved = saved.without_dead_proxies();
     let b = backends();
     let mut errors = Vec::new();
     if let Some(g) = &saved.gnome
@@ -532,6 +610,23 @@ pub fn recover(paths: &Paths) -> bool {
     false
 }
 
+/// For the login check and the guardian: puts the system proxy back when
+/// Kairo left it pointing at a port nothing answers any more (Kairo and its
+/// core gone, the computer restarted). A live core is left alone.
+pub fn restore_if_dead(paths: &Paths) -> bool {
+    let Some(saved) = load_saved(paths) else {
+        return false;
+    };
+    if saved.applied.is_some_and(answers) {
+        return false;
+    }
+    log::warn!("the system proxy points at a Kairo that is gone: restoring it");
+    if let Err(e) = disable(paths) {
+        log::error!("could not restore the system proxy: {e}");
+    }
+    true
+}
+
 /// Whether the system proxy currently points at `spec`.
 pub fn points_to(spec: &ProxySpec) -> bool {
     let b = backends();
@@ -547,6 +642,63 @@ mod tests {
     /// With nothing saved, Kairo never changed the proxy, so quitting must not
     /// touch it (0.1.0 switched another app's proxy off here). Returning before
     /// any backend is consulted is what keeps this test from touching the machine.
+    #[test]
+    fn a_dead_local_proxy_is_not_put_back() {
+        let dead = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let live = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let live_port = live.local_addr().unwrap().port();
+        let saved = Saved {
+            gnome: Some(GnomeProxy {
+                mode: "manual".into(),
+                http: ("127.0.0.1".into(), dead),
+                ..Default::default()
+            }),
+            kde: Some(KdeProxy {
+                proxy_type: "1".into(),
+                http: format!("http://127.0.0.1 {live_port}"),
+                ..Default::default()
+            }),
+            mac: Some(vec![MacService {
+                name: "Wi-Fi".into(),
+                web: MacProxy {
+                    enabled: true,
+                    server: "127.0.0.1".into(),
+                    port: dead,
+                },
+                secure: MacProxy {
+                    enabled: true,
+                    server: "proxy.example.com".into(),
+                    port: dead,
+                },
+                ..Default::default()
+            }]),
+            applied: Some(7897),
+        }
+        .without_dead_proxies();
+        assert_eq!(saved.gnome.unwrap().mode, "none");
+        // Alive: kept.
+        assert_eq!(saved.kde.unwrap().proxy_type, "1");
+        let mac = &saved.mac.unwrap()[0];
+        assert!(!mac.web.enabled);
+        // Not on this machine: not Kairo's to judge.
+        assert!(mac.secure.enabled);
+        // Kairo's own port, saved after a crash: never put back, even while it answers.
+        let saved = Saved {
+            gnome: Some(GnomeProxy {
+                mode: "manual".into(),
+                http: ("127.0.0.1".into(), live_port),
+                ..Default::default()
+            }),
+            applied: Some(live_port),
+            ..Default::default()
+        }
+        .without_dead_proxies();
+        assert_eq!(saved.gnome.unwrap().mode, "none");
+    }
+
     #[test]
     fn disable_without_saved_state_changes_nothing() {
         let home = tempfile::tempdir().unwrap();

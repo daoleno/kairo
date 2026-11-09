@@ -100,11 +100,32 @@ pub fn build(
     settings: &Settings,
 ) -> Result<String, ConfigError> {
     let mut config = parse_mapping(profile).map_err(ConfigError::Profile)?;
+    strip_local_inbounds(&mut config);
     let patch = parse_mapping(override_text).map_err(ConfigError::Override)?;
     merge(&mut config, patch);
     apply_settings(&mut config, settings);
     Ok(serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"))
 }
+
+/// A provider's config may open local ports of its own: a DNS listener
+/// (`dns.listen`, often 127.0.0.1:7874 or :1053), extra `listeners`, port
+/// `tunnels`. Kairo needs none of them (its DNS tool asks the controller), and
+/// another client running the same subscription holds the same ports, so the
+/// core would start with "address already in use". An override that asks for
+/// them still gets them: this runs on the profile only.
+pub fn strip_local_inbounds(config: &mut Mapping) {
+    for key in ["listeners", "tunnels"] {
+        config.remove(key);
+    }
+    if let Some(Value::Mapping(dns)) = config.get_mut("dns") {
+        dns.remove("listen");
+    }
+}
+
+/// Where the core fetches the GeoIP and GeoSite data it lacks: jsDelivr's
+/// mirrors of MetaCubeX's releases, which answer where GitHub is slow (as
+/// Clash Verge Rev does). A profile or override that names its own wins.
+pub const GEOX_MIRROR: &str = "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release";
 
 /// Writes Kairo's settings over a config.
 pub fn apply_settings(config: &mut Mapping, s: &Settings) {
@@ -135,6 +156,17 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
         format!("127.0.0.1:{}", s.controller_port),
     );
     set(config, "secret", s.secret.clone());
+    if !config.contains_key("geox-url") {
+        let geox = sub(config, "geox-url");
+        for (key, file) in [
+            ("geoip", "geoip.dat"),
+            ("geosite", "geosite.dat"),
+            ("mmdb", "geoip.metadb"),
+            ("asn", "GeoLite2-ASN.mmdb"),
+        ] {
+            set(geox, key, format!("{GEOX_MIRROR}/{file}"));
+        }
+    }
     // Remember the nodes picked in select groups across restarts.
     let profile = sub(config, "profile");
     set(profile, "store-selected", true);
@@ -271,6 +303,44 @@ rules:
 
     fn get<'a>(m: &'a Mapping, key: &str) -> &'a Value {
         m.get(key).unwrap_or_else(|| panic!("missing {key}"))
+    }
+
+    #[test]
+    fn a_profile_opens_no_local_ports_of_its_own() {
+        let profile = "dns:\n  enable: true\n  listen: 127.0.0.1:7874\n  nameserver: [1.1.1.1]\nlisteners:\n  - {name: in, type: mixed, port: 7777}\ntunnels:\n  - tcp,127.0.0.1:6553,1.1.1.1:53,DIRECT\nrules:\n  - MATCH,DIRECT\n";
+        let out = build(profile, "", &Settings::default()).unwrap();
+        let m = parse_mapping(&out).unwrap();
+        let dns = get(&m, "dns").as_mapping().unwrap();
+        assert!(dns.get("listen").is_none());
+        assert_eq!(get(dns, "enable").as_bool(), Some(true));
+        assert!(m.get("listeners").is_none() && m.get("tunnels").is_none());
+        // Asked for in the override: kept.
+        let out = build(
+            profile,
+            "dns:\n  listen: 127.0.0.1:5353\n",
+            &Settings::default(),
+        )
+        .unwrap();
+        let m = parse_mapping(&out).unwrap();
+        assert_eq!(
+            get(get(&m, "dns").as_mapping().unwrap(), "listen").as_str(),
+            Some("127.0.0.1:5353")
+        );
+        // Geo data from the mirror, unless the profile names a source.
+        let geox = get(&m, "geox-url").as_mapping().unwrap();
+        assert!(get(geox, "mmdb").as_str().unwrap().starts_with(GEOX_MIRROR));
+        let out = build(
+            "geox-url:\n  mmdb: https://example.com/x.metadb\n",
+            "",
+            &Settings::default(),
+        )
+        .unwrap();
+        let m = parse_mapping(&out).unwrap();
+        let geox = get(&m, "geox-url").as_mapping().unwrap();
+        assert_eq!(
+            get(geox, "mmdb").as_str(),
+            Some("https://example.com/x.metadb")
+        );
     }
 
     #[test]

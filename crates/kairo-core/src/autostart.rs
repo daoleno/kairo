@@ -82,8 +82,75 @@ pub fn set(on: bool, minimized: bool) -> Result<(), String> {
     }
 }
 
+// --- The network check at login ------------------------------------------------
+
+/// Its own entry, apart from launch at login (turning that off never removes it).
+const RESTORE_ID: &str = "dev.kairo.restore-network";
+
+fn restore_entry_path() -> PathBuf {
+    let launch = entry_path();
+    match launch.parent() {
+        Some(dir) if !launch.as_os_str().is_empty() => dir.join(format!(
+            "{RESTORE_ID}.{}",
+            if cfg!(target_os = "macos") {
+                "plist"
+            } else {
+                "desktop"
+            }
+        )),
+        _ => PathBuf::new(),
+    }
+}
+
+/// At login, `kairo --restore-network`: when Kairo and its core were both
+/// killed (a forced logout, a power cut) and the computer restarts, the system
+/// proxy would still point at a port nothing answers; this puts it back, even
+/// if Kairo itself never opens again. With nothing to restore it does nothing.
+pub fn restore_entry(exe: &str, kairo_home: Option<&str>) -> String {
+    if cfg!(target_os = "macos") {
+        let env = kairo_home
+            .map(|h| format!("\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>KAIRO_HOME</key>\n    <string>{h}</string>\n  </dict>"))
+            .unwrap_or_default();
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>{RESTORE_ID}</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>{exe}</string>\n    <string>--restore-network</string>\n  </array>{env}\n  <key>RunAtLoad</key>\n  <true/>\n  <key>ProcessType</key>\n  <string>Background</string>\n</dict>\n</plist>\n"
+        )
+    } else {
+        let env = kairo_home
+            .map(|h| format!("env KAIRO_HOME=\"{h}\" "))
+            .unwrap_or_default();
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Kairo network check\nComment=Puts the system proxy back if Kairo could not\nExec={env}\"{exe}\" --restore-network\nNoDisplay=true\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+        )
+    }
+}
+
+/// Puts the login check in place (once; rewritten when Kairo moved).
+pub fn install_restore() -> Result<(), String> {
+    if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
+        return Ok(());
+    }
+    let path = restore_entry_path();
+    let home = std::env::var("KAIRO_HOME").ok();
+    let text = restore_entry(&executable()?, home.as_deref());
+    if std::fs::read_to_string(&path).is_ok_and(|t| t == text) {
+        return Ok(());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    crate::paths::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn restore_entry_runs_the_check() {
+        let e = super::restore_entry("/opt/kairo/kairo", Some("/tmp/k"));
+        assert!(e.contains("/opt/kairo/kairo"));
+        assert!(e.contains("--restore-network"));
+        assert!(e.contains("/tmp/k"));
+    }
+
     #[test]
     fn entry_has_the_command() {
         let e = super::entry("/opt/kairo/kairo", true);

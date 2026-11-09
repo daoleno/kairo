@@ -101,6 +101,9 @@ pub struct State {
     pub notice: Option<Notice>,
     /// A problem the core reported at start that it survives (a port in use).
     pub warning: Option<String>,
+    /// Something done for the user that they may want to know (Kairo moved
+    /// to a free port); shown quietly while connected.
+    pub note: Option<String>,
     /// Kairo is finding the first place of a new subscription (or replacing
     /// a provider's note in use); later checks happen without saying so.
     pub locating: bool,
@@ -166,6 +169,8 @@ struct Inner {
     notice_seq: Mutex<u64>,
     /// Serializes config applies.
     apply_lock: tokio::sync::Mutex<()>,
+    /// One geo data download at a time (the boot prefetch, a connect).
+    geo_lock: tokio::sync::Mutex<()>,
     /// One update check or install at a time.
     update_lock: tokio::sync::Mutex<()>,
     /// A subscription was just added: its first place is still to be found.
@@ -223,8 +228,7 @@ impl Service {
                     .expect("tokio runtime");
                 let handle = rt.handle().clone();
                 tx.send(handle).expect("service start");
-                // Keep the runtime (and its workers, whose death would end the core
-                // through PDEATHSIG) alive for the process' life.
+                // Keep the runtime alive for the process' life.
                 rt.block_on(std::future::pending::<()>());
             })
             .expect("service thread");
@@ -255,6 +259,7 @@ impl Service {
             core_tx,
             notice_seq: Mutex::new(0),
             apply_lock: tokio::sync::Mutex::new(()),
+            geo_lock: tokio::sync::Mutex::new(()),
             update_lock: tokio::sync::Mutex::new(()),
             quit: Mutex::new(None),
             fresh: std::sync::atomic::AtomicBool::new(false),
@@ -384,18 +389,77 @@ impl Service {
         }
     }
 
-    /// Fails when another program holds the core's ports. A controller port in
-    /// use is the dangerous one: Kairo would be talking to someone else's core.
-    fn ports_free(&self) -> Result<(), String> {
-        let s = self.settings();
-        for (port, what) in [(s.controller_port, "controller"), (s.mixed_port, "proxy")] {
-            if crate::settings::port_in_use(port) {
+    /// Makes the core's ports free for it. A core of Kairo's own that is
+    /// still letting go gets a moment; one a crashed Kairo left behind (its
+    /// command line names this home) is stopped. Another program (Clash Verge
+    /// Rev uses 7897 and 9097 too, and its core can outlive its window) is left
+    /// alone: Kairo moves to the next free port, which it keeps, and the system
+    /// proxy follows. A sentence for the user when the proxy port moved.
+    async fn claim_ports(&self) -> Result<Option<String>, String> {
+        let mut next = self.settings();
+        let mut note = None;
+        for controller in [true, false] {
+            let port = if controller {
+                next.controller_port
+            } else {
+                next.mixed_port
+            };
+            if crate::ports::wait_free(port, Duration::from_millis(2500)).await {
+                continue;
+            }
+            let holder = tokio::task::spawn_blocking(move || crate::ports::holder(port))
+                .await
+                .ok()
+                .flatten();
+            let runtime = self.0.paths.runtime_dir().to_string_lossy().into_owned();
+            if let Some(h) = &holder
+                && let (Some(pid), Some(cmd)) = (h.pid, &h.command)
+                && cmd.contains(&runtime)
+            {
+                log::warn!(
+                    "port {port}: a core of this Kairo's (pid {pid}) is still there; stopping it"
+                );
+                crate::supervisor::stop_pid(pid as i32).await;
+                if crate::ports::wait_free(port, Duration::from_secs(3)).await {
+                    continue;
+                }
+            }
+            let other = if controller {
+                next.mixed_port
+            } else {
+                next.controller_port
+            };
+            let free = tokio::task::spawn_blocking(move || {
+                crate::settings::free_port(port.saturating_add(1), &[other])
+            })
+            .await
+            .unwrap_or(port);
+            let who = holder
+                .map(|h| h.describe())
+                .unwrap_or_else(|| "another program".into());
+            let taken = tokio::task::spawn_blocking(move || crate::settings::port_in_use(free))
+                .await
+                .unwrap_or(true);
+            if taken || free == other {
                 return Err(format!(
-                    "Port {port} (the core's {what} port) is used by another program. Choose another one in Settings."
+                    "Port {port} is used by {who}, and Kairo found no free port near it. Quit {who} or choose another port in Settings."
+                ));
+            }
+            log::warn!("port {port} is used by {who}: Kairo moves to {free}");
+            if controller {
+                next.controller_port = free;
+            } else {
+                next.mixed_port = free;
+                note = Some(format!(
+                    "Port {port} is used by {who}, so Kairo is on {free}."
                 ));
             }
         }
-        Ok(())
+        if next != self.settings() {
+            self.modify(|s| s.settings = next.clone());
+            self.save_settings();
+        }
+        Ok(note)
     }
 
     fn save_settings(&self) {
@@ -415,6 +479,8 @@ impl Service {
     // --- Boot ---------------------------------------------------------------------
 
     async fn boot(self) {
+        let geo = self.clone();
+        tokio::spawn(async move { geo.prefetch_geo().await });
         // The bundled core, copied in place (first run, or after an app update).
         let seeded = core_bin::seed(&self.0.paths).await;
         if let Err(e) = &seeded {
@@ -582,14 +648,20 @@ impl Service {
         }
         // A core left behind by a Kairo that crashed would hold the ports.
         crate::supervisor::stop_stale(&self.0.paths).await;
-        if let Err(message) = self.ports_free() {
-            self.set_core(CoreStatus::Failed {
-                message: message.clone(),
-            });
-            return Err(message);
-        }
         self.set_core(CoreStatus::Starting);
-        self.modify(|s| s.warning = None);
+        let note = match self.claim_ports().await {
+            Ok(note) => note,
+            Err(message) => {
+                self.set_core(CoreStatus::Failed {
+                    message: message.clone(),
+                });
+                return Err(message);
+            }
+        };
+        self.modify(|s| {
+            s.warning = None;
+            s.note = note;
+        });
         // A fresh config from the active profile and the current settings.
         if let Err(e) = self.write_config(false).await {
             self.set_core(CoreStatus::Failed { message: e.clone() });
@@ -816,6 +888,34 @@ impl Service {
         }
     }
 
+    /// The geo data `config` needs, in place (fetched now if missing). A failed
+    /// download is left to the core, which tries the same mirrors.
+    async fn ensure_geo(&self, config: &str) {
+        let _lock = self.0.geo_lock.lock().await;
+        for file in crate::geo::needed(config) {
+            if crate::geo::present(&self.0.paths, file) {
+                continue;
+            }
+            let start = Instant::now();
+            match crate::geo::fetch(&self.0.paths, file).await {
+                Ok(_) => log::info!("{} in {:.1} s", file.name, start.elapsed().as_secs_f32()),
+                Err(e) => log::warn!("geo data: {e}"),
+            }
+        }
+    }
+
+    /// From the first launch, the geo data the active subscription needs (or,
+    /// before there is one, the GeoIP data nearly every subscription needs),
+    /// while the user is still pasting the link.
+    async fn prefetch_geo(&self) {
+        let active = self.0.state.borrow().profiles.active.clone();
+        let text = match active.and_then(|id| profile::read_config(&self.0.paths, &id).ok()) {
+            Some(t) => t,
+            None => "rules:\n  - GEOIP,CN,DIRECT\n".to_owned(),
+        };
+        self.ensure_geo(&text).await;
+    }
+
     /// The emergency path (signal handlers, panics): restore the proxy, synchronously.
     pub fn restore_system_proxy_now(paths: &Paths) {
         if paths.sysproxy_state().exists() {
@@ -844,6 +944,8 @@ impl Service {
             None => (NO_PROFILE.to_owned(), String::new()),
         };
         let built = config::build(&text, &over, &settings).map_err(|e| e.to_string())?;
+        // The core would stop to download missing geo data while it loads.
+        self.ensure_geo(&built).await;
         crate::paths::write_atomic(&paths.candidate_config(), built.as_bytes())
             .map_err(|e| e.to_string())?;
         let core = self.core_path();
@@ -874,6 +976,7 @@ impl Service {
         self.run(async move {
             let built = config::build(&profile_text, &override_text, &svc.settings())
                 .map_err(|e| e.to_string())?;
+            svc.ensure_geo(&built).await;
             let path = svc.0.paths.runtime_dir().join("check.yaml");
             crate::paths::write_atomic(&path, built.as_bytes()).map_err(|e| e.to_string())?;
             let core = svc.core_path();
@@ -1032,6 +1135,12 @@ impl Service {
         } else {
             sysproxy::disable(&paths)
         };
+        if on
+            && result.is_ok()
+            && let Err(e) = crate::autostart::install_restore()
+        {
+            log::warn!("network check at login: {e}");
+        }
         match result {
             Ok(()) => self.modify(|s| s.sysproxy_active = on),
             Err(e) => {
@@ -1054,22 +1163,23 @@ impl Service {
     /// Connected: the core runs (and the system proxy points at it, when that
     /// is on); it stays so across launches. Off: the core stops.
     pub fn connect(&self, on: bool) -> impl Future<Output = Result<(), String>> + 'static {
-        let svc = self.clone();
-        self.run(async move {
-            let mut next = svc.settings();
-            if next.auto_start_core != on {
-                next.auto_start_core = on;
-                svc.update_settings(next).await?;
-            }
-            if on {
-                if !svc.running() {
-                    svc.start_core().await?;
-                }
-            } else {
-                svc.stop_core().await;
-            }
-            Ok(())
-        })
+        // Both done now, in the caller's order: an off and an on in quick
+        // succession (the tray's toggle, clicked twice) each run as a task of
+        // their own, and the last click must win.
+        if self.settings().auto_start_core != on {
+            self.modify(|s| s.settings.auto_start_core = on);
+            self.save_settings();
+        }
+        let core = if on {
+            futures_util::future::Either::Left(self.start_core())
+        } else {
+            let stop = self.stop_core();
+            futures_util::future::Either::Right(async move {
+                stop.await;
+                Ok(())
+            })
+        };
+        self.run(core)
     }
 
     /// The group whose members are the locations.
@@ -1186,10 +1296,7 @@ impl Service {
         // a provider's note in use. Otherwise it checks quietly. A note is
         // never somewhere to be, so Kairo moves off one even when the place
         // is not automatic (a 0.1 install whose node was never picked).
-        let on_note = self.main_group().is_some_and(|g| {
-            crate::places::current(&self.0.proxies.borrow().groups, &g)
-                .is_none_or(|p| crate::places::is_note(&p.name))
-        });
+        let on_note = self.on_note();
         if !self.settings().auto_location && !on_note
             || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst)
         {
@@ -1199,14 +1306,65 @@ impl Service {
             .0
             .fresh
             .swap(false, std::sync::atomic::Ordering::SeqCst);
+        let mut force = false;
         if fresh || on_note {
             self.modify(|s| s.locating = true);
+            // The first place that answers is one of the quickest and enough to
+            // browse with: connected now, the full comparison follows quietly.
+            match self.first_answer().await {
+                // A place picked by hand meanwhile wins.
+                Some(_) if !self.settings().auto_location && !self.on_note() => {}
+                Some(name) => {
+                    if let Err(e) = self.go_through(&name).await {
+                        log::warn!("first place: {e}");
+                        force = true;
+                    }
+                }
+                None => force = true,
+            }
+            if !force {
+                self.modify(|s| s.locating = false);
+            }
         }
-        if let Err(e) = self.pick_fastest(fresh || on_note).await {
+        if let Err(e) = self.pick_fastest(force).await {
             log::warn!("automatic location: {e}");
         }
         self.modify(|s| s.locating = false);
         RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether the main group goes through a provider's note (or nowhere).
+    fn on_note(&self) -> bool {
+        self.main_group().is_some_and(|g| {
+            crate::places::current(&self.0.proxies.borrow().groups, &g)
+                .is_none_or(|p| crate::places::is_note(&p.name))
+        })
+    }
+
+    /// Tests every place at once and returns the first that answers.
+    async fn first_answer(&self) -> Option<String> {
+        use futures_util::StreamExt;
+        let group = self.main_group()?;
+        let names: Vec<String> = crate::places::places(&self.0.proxies.borrow().groups, &group)
+            .into_iter()
+            .filter(|p| !p.is_group && !crate::places::is_note(&p.name))
+            .map(|p| p.name)
+            .collect();
+        let s = self.settings();
+        let ctl = self.controller();
+        let mut tests: futures_util::stream::FuturesUnordered<_> = names
+            .into_iter()
+            .map(|name| {
+                let (ctl, url) = (ctl.clone(), s.test_url.clone());
+                async move { (ctl.delay(&name, &url, s.test_timeout_ms).await, name) }
+            })
+            .collect();
+        while let Some((result, name)) = tests.next().await {
+            if result.is_ok_and(|d| d > 0) {
+                return Some(name);
+            }
+        }
+        None
     }
 
     /// The periodic part of [`Service::keep_fastest`].

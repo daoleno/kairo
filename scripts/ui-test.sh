@@ -13,6 +13,7 @@ cat > "$home/settings.json" <<JSON
 JSON
 python3 -I scripts/fixture.py --port 28080 > "$home/fixture.log" 2>&1 &
 fixture=$!
-trap 'kill $fixture 2>/dev/null; [ -n "$KEEP" ] || rm -rf "$home"' EXIT INT TERM
+# The core outlives the app that started it (as after a crash): stop it too.
+trap 'kill $fixture 2>/dev/null; [ -f "$home/state/core.pid" ] && kill "$(cat "$home/state/core.pid")" 2>/dev/null; [ -n "$KEEP" ] || rm -rf "$home"' EXIT INT TERM
 sleep 1
 KAIRO_HOME="$home" KAIRO_NO_SYSPROXY=1 KAIRO_NO_UPDATE=1 nsh test "$@"

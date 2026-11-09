@@ -347,10 +347,13 @@ fn hero() -> impl IntoElement {
                         move || !hint().is_empty(),
                         move || ui::muted(hint).text_center().max_w(px(440.0)),
                     ))
-                    .child(fix_button(move || match state.get() {
-                        Conn::Failed(m) => m,
-                        _ => String::new(),
-                    }))
+                    .child(fix_button(
+                        move || match state.get() {
+                            Conn::Failed(m) => m,
+                            _ => String::new(),
+                        },
+                        true,
+                    ))
             },
         ))
         // A problem it keeps running through (a port in use): said quietly,
@@ -374,20 +377,55 @@ fn hero() -> impl IntoElement {
                                     .text_center(),
                             ),
                     )
-                    .child(fix_button(warning))
+                    .child(fix_button(warning, false))
+            },
+        ))
+        // Something Kairo did for the user (moved past a port another
+        // program holds): one quiet line.
+        .child(when(
+            move || matches!(state.get(), Conn::On) && store.state.with(|s| s.note.is_some()),
+            move || {
+                ui::muted(move || -> SharedString {
+                    store
+                        .state
+                        .with(|s| s.note.clone().unwrap_or_default())
+                        .into()
+                })
+                .text_center()
+                .max_w(px(460.0))
             },
         ))
 }
 
+/// The ports a message names (`Port 7897 …`, `127.0.0.1:7874: bind …`).
+fn ports_in(message: &str) -> Vec<u16> {
+    message
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|d| (2..=5).contains(&d.len()))
+        .filter_map(|d| d.parse().ok())
+        .collect()
+}
+
 /// The way out of a failure, as one button.
-fn fix_button(message: impl Fn() -> String + Copy + 'static) -> impl IntoElement {
+/// `failed`: the core is down (a way out is always offered); otherwise it
+/// runs with a warning, and a button shows only when Kairo can fix it.
+fn fix_button(message: impl Fn() -> String + Copy + 'static, failed: bool) -> impl IntoElement {
     let store = store();
     dynamic(move || {
         let m = message().to_lowercase();
+        let (mixed, controller_port) = store
+            .state
+            .with(|s| (s.settings.mixed_port, s.settings.controller_port));
+        // Only Kairo's own ports are Kairo's to move: a clash on a port a
+        // profile's override opened is not fixed by changing the proxy port.
+        let ours = ports_in(&m)
+            .iter()
+            .any(|p| *p == mixed || *p == controller_port);
         untracked(move || {
-            if m.contains("address already in use")
-                || m.contains("used by another program")
-                || m.contains("port") && m.contains("in use")
+            if ours
+                && (m.contains("address already in use")
+                    || m.contains("used by")
+                    || m.contains("port") && m.contains("in use"))
             {
                 let controller = m.contains("controller port");
                 ui::capsule("Use a Free Port", true)
@@ -415,10 +453,12 @@ fn fix_button(message: impl Fn() -> String + Copy + 'static) -> impl IntoElement
                 ui::capsule("Allow TUN…", true)
                     .on_press(move || store.run(store.svc().grant_tun()))
                     .into_element()
-            } else {
+            } else if failed {
                 ui::capsule("Try Again", true)
                     .on_press(move || store.run(store.svc().connect(true)))
                     .into_element()
+            } else {
+                view().into_element()
             }
         })
     })
