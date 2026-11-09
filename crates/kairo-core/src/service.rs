@@ -949,10 +949,8 @@ impl Service {
                         svc.restart_streams_hint();
                     }
                 }
-                if prev.mixed_port != next.mixed_port || prev.bypass != next.bypass {
-                    if next.system_proxy {
-                        svc.apply_sysproxy(true);
-                    }
+                if (prev.mixed_port != next.mixed_port || prev.bypass != next.bypass) && next.system_proxy {
+                    svc.apply_sysproxy(true);
                 }
             }
             if prev.system_proxy != next.system_proxy {
