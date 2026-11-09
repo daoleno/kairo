@@ -23,13 +23,13 @@ sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum 
 mkdir -p "$dir"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL --retry 3 -o "$tmp/$name" "$url"
+curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors --connect-timeout 30 -o "$tmp/$name" "$url"
 got=$(sha256 "$tmp/$name")
 [ "$got" = "$sum" ] || { echo "$name: SHA-256 $got, expected $sum" >&2; exit 1; }
 gunzip -c "$tmp/$name" > "$tmp/mihomo"
 chmod 755 "$tmp/mihomo"
 mv "$tmp/mihomo" "$dir/mihomo"
-curl -fsSL --retry 3 -o "$tmp/LICENSE" "https://raw.githubusercontent.com/MetaCubeX/mihomo/$MIHOMO_VERSION/LICENSE"
+curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors --connect-timeout 30 -o "$tmp/LICENSE" "https://raw.githubusercontent.com/MetaCubeX/mihomo/$MIHOMO_VERSION/LICENSE"
 got=$(sha256 "$tmp/LICENSE")
 [ "$got" = "$MIHOMO_LICENSE_SHA256" ] || { echo "mihomo LICENSE: SHA-256 $got, expected $MIHOMO_LICENSE_SHA256" >&2; exit 1; }
 mv "$tmp/LICENSE" "$dir/LICENSE.mihomo"

@@ -490,8 +490,8 @@ thread_local! {
 }
 
 fn log_class(name: &std::ffi::CStr) {
-    log::warn!(
-        "spike: class {:?} {}",
+    log::debug!(
+        "chrome: class {:?} {}",
         name,
         if objc2::runtime::AnyClass::get(name).is_some() {
             "present"
@@ -516,7 +516,7 @@ pub fn install(svc: Service) {
             .iter()
             .find(|w| w.styleMask().contains(NSWindowStyleMask::Resizable))
         else {
-            log::warn!("spike: no main window");
+            log::debug!("chrome: no main window");
             return;
         };
         let Some(nsh) = window.contentView() else {
@@ -663,7 +663,7 @@ pub fn install(svc: Service) {
                 _split: split,
             })
         });
-        log::warn!("spike: chrome installed (under_toolbar={under_toolbar})");
+        log::debug!("chrome installed (under_toolbar={under_toolbar})");
         follow(svc);
     });
 }
