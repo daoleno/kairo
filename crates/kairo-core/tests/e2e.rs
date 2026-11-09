@@ -152,6 +152,23 @@ fn core_binary(target: &std::path::Path) -> std::path::PathBuf {
     p
 }
 
+/// Waits for the core to run. The limit is generous (a loaded runner starts
+/// several cores at once) and a timeout says what the core was doing.
+async fn core_up(what: &str, status: impl Fn() -> CoreStatus) {
+    let start = std::time::Instant::now();
+    loop {
+        let now = status();
+        if now.is_running() {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "timed out waiting for {what}: the core is {now:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn wait_for<T>(what: &str, limit: Duration, mut f: impl FnMut() -> Option<T>) -> T {
     let start = std::time::Instant::now();
     loop {
@@ -233,11 +250,9 @@ rules:
 
     // 0. A first run: the bundled core is copied in and runs at once, with no
     // profile yet (everything direct). No install step.
-    wait_for(
-        "the core running with no profile",
-        Duration::from_secs(20),
-        || state.borrow().core.is_running().then_some(()),
-    )
+    core_up("the core running with no profile", || {
+        state.borrow().core.clone()
+    })
     .await;
     assert_eq!(svc.core_path(), paths.core_bin(), "it runs Kairo's copy");
     assert_eq!(
@@ -273,10 +288,7 @@ rules:
             ..
         }
     ));
-    wait_for("the core running", Duration::from_secs(20), || {
-        state.borrow().core.is_running().then_some(())
-    })
-    .await;
+    core_up("the core running", || state.borrow().core.clone()).await;
     let config = std::fs::read_to_string(paths.runtime_config()).unwrap();
     assert!(
         config.contains(&format!("mixed-port: {mixed}")),
@@ -482,10 +494,7 @@ rules:
         (!state.borrow().core.is_running()).then_some(())
     })
     .await;
-    wait_for("running again", Duration::from_secs(20), || {
-        state.borrow().core.is_running().then_some(())
-    })
-    .await;
+    core_up("running again", || state.borrow().core.clone()).await;
     let new_pid: i32 = std::fs::read_to_string(paths.core_pid())
         .unwrap()
         .trim()
@@ -512,12 +521,7 @@ rules:
     let on = svc.connect(true);
     off.await.unwrap();
     on.await.unwrap();
-    wait_for(
-        "connected after off-and-on",
-        Duration::from_secs(20),
-        || state.borrow().core.is_running().then_some(()),
-    )
-    .await;
+    core_up("connected after off-and-on", || state.borrow().core.clone()).await;
     assert!(svc.settings().auto_start_core);
     let mixed = svc.settings().mixed_port;
 
@@ -642,10 +646,7 @@ async fn tun_in_a_network_namespace() {
     svc.add_remote(format!("http://127.0.0.1:{origin_port}/sub"), None)
         .await
         .expect("add the profile");
-    wait_for("the core running", Duration::from_secs(20), || {
-        state.borrow().core.is_running().then_some(())
-    })
-    .await;
+    core_up("the core running", || state.borrow().core.clone()).await;
 
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -789,10 +790,7 @@ rules:
 
     let svc = Service::start(paths.clone());
     let state = svc.state();
-    wait_for("the core", Duration::from_secs(20), || {
-        state.borrow().core.is_running().then_some(())
-    })
-    .await;
+    core_up("the core", || state.borrow().core.clone()).await;
     assert!(
         state.borrow().settings.ai.enabled,
         "the layer is on by default"
@@ -896,10 +894,7 @@ rules:
 
     let svc = Service::start(paths.clone());
     let state = svc.state();
-    wait_for("the core", Duration::from_secs(20), || {
-        state.borrow().core.is_running().then_some(())
-    })
-    .await;
+    core_up("the core", || state.borrow().core.clone()).await;
     svc.add_remote(format!("http://{origin_addr}/sub"), None)
         .await
         .expect("add the subscription");
