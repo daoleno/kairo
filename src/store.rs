@@ -80,7 +80,7 @@ impl Store {
             connections: signal(Snap(conn_rx.borrow().clone())),
             proxies: signal(Snap(prox_rx.borrow().clone())),
             log_seq: signal(*log_rx.borrow()),
-            page: signal(if crate::chrome::native() { *crate::chrome::bridge().page.borrow() } else { Page::Overview }),
+            page: signal(*crate::chrome::bridge().page.borrow()),
             toast: signal(None),
             svc: stored(svc),
         };
