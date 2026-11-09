@@ -1,12 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3D8DFF"/>
-      <stop offset="1" stop-color="#0062E0"/>
+      <stop offset="0" stop-color="#3A3A3F"/>
+      <stop offset="1" stop-color="#18181B"/>
     </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.16"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="ember" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#FF8A5C"/>
+      <stop offset="1" stop-color="#E0552F"/>
+    </radialGradient>
   </defs>
   <rect x="4" y="4" width="56" height="56" rx="13" fill="url(#bg)"/>
-  <path d="M21.5 21 H26.5 Q37 21 37 32 Q37 43 46 43" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="18" cy="21" r="5.5" fill="#fff"/>
-  <circle cx="46" cy="43" r="5.5" fill="#fff"/>
+  <rect x="4" y="4" width="56" height="56" rx="13" fill="url(#sheen)"/>
+  <rect x="4.5" y="4.5" width="55" height="55" rx="12.5" fill="none" stroke="#fff" stroke-opacity="0.12"/>
+  <path d="M21.5 21 H26.5 Q37 21 37 32 Q37 43 46 43" fill="none" stroke="#F4F4F6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18" cy="21" r="5.5" fill="#F4F4F6"/>
+  <circle cx="46" cy="43" r="6" fill="url(#ember)"/>
 </svg>

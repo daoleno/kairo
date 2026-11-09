@@ -60,6 +60,27 @@ done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/Kairo.icns"
 rm -rf "$iconset"
 
+# Kairo's accent for AppKit's own controls (switches, the sidebar's selection,
+# focus rings) where the Mac's accent is Multicolor: an asset catalog's
+# AccentColor, Ember light and dark (src/accent.rs).
+assets=$(mktemp -d)/Assets.xcassets
+mkdir -p "$assets/AccentColor.colorset"
+echo '{"info":{"version":1,"author":"xcode"}}' > "$assets/Contents.json"
+cat > "$assets/AccentColor.colorset/Contents.json" <<'JSON'
+{"info":{"version":1,"author":"xcode"},"colors":[
+ {"idiom":"universal","color":{"color-space":"srgb","components":{"red":"0.878","green":"0.333","blue":"0.184","alpha":"1.000"}}},
+ {"idiom":"universal","appearances":[{"appearance":"luminosity","value":"dark"}],"color":{"color-space":"srgb","components":{"red":"1.000","green":"0.416","blue":"0.239","alpha":"1.000"}}}
+]}
+JSON
+accent_key=""
+if xcrun actool --compile "$app/Contents/Resources" --platform macosx --minimum-deployment-target 11.0 \
+    --output-partial-info-plist "$(dirname "$assets")/partial.plist" "$assets" >/dev/null; then
+  accent_key="<key>NSAccentColorName</key><string>AccentColor</string>"
+else
+  echo "actool failed: AppKit controls keep the system accent" >&2
+fi
+rm -rf "$(dirname "$assets")"
+
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -79,6 +100,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
   <key>NSHumanReadableCopyright</key><string>Kairo is free software under the GPL-3.0-or-later.</string>
+  $accent_key
 </dict>
 </plist>
 PLIST

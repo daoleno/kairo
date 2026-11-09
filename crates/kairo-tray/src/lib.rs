@@ -229,7 +229,7 @@ mod tests {
     fn renders_the_icon() {
         let px = super::icon_argb(32, false);
         assert_eq!(px.len(), 32 * 32 * 4);
-        // The centre is the white route or the blue tile: opaque.
+        // The centre is the white route or the graphite tile: opaque.
         let i = (16 * 32 + 16) * 4;
         assert_eq!(px[i], 255);
         let g = super::glyph_rgba(22);
