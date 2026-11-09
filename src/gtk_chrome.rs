@@ -250,8 +250,10 @@ fn theme_json(probe: &impl IsA<gtk::Widget>) -> String {
     let sidebar = get("sidebar_bg_color", &hex(headerbar));
     let shade = get("shade_color", if dark { "rgba(0,0,6,0.36)" } else { "rgba(0,0,6,0.07)" });
     let mix = |a: f32| over(gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), a), window);
-    let muted_fg = mix(0.55);
-    let border = mix(if dark { 0.15 } else { 0.15 });
+    // High contrast (GNOME's setting): stronger secondary text and borders.
+    let contrast = adw::StyleManager::default().is_high_contrast();
+    let muted_fg = mix(if contrast { 0.8 } else { 0.55 });
+    let border = mix(if contrast { 0.5 } else { 0.15 });
     let muted = mix(0.06);
     let hover = mix(0.08);
     let tokens = format!(
