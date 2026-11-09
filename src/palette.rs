@@ -197,16 +197,34 @@ fn panel(open: Signal<bool>, store: Store) -> impl IntoElement {
         }
     };
     let run = std::rc::Rc::new(run);
-    on_key("escape", move |_| open.set(false));
+    // The search field has the focus, and a field keeps Escape and the
+    // arrows for itself unless asked: these are the palette's.
+    let always = || KeyOptions {
+        when: nsh_core::keymap::When::Always,
+        ..Default::default()
+    };
+    on_key_with("escape", always(), move |_| open.set(false));
     {
         let shown = shown.clone();
-        on_key("down", move |_| {
-            selected.set((selected.get_untracked() + 1).min(shown().len().saturating_sub(1)))
-        });
+        on_key_with(
+            "down",
+            KeyOptions {
+                repeat: true,
+                ..always()
+            },
+            move |_| {
+                selected.set((selected.get_untracked() + 1).min(shown().len().saturating_sub(1)))
+            },
+        );
     }
-    on_key("up", move |_| {
-        selected.set(selected.get_untracked().saturating_sub(1))
-    });
+    on_key_with(
+        "up",
+        KeyOptions {
+            repeat: true,
+            ..always()
+        },
+        move |_| selected.set(selected.get_untracked().saturating_sub(1)),
+    );
     let submit = run.clone();
     view()
         .absolute()
