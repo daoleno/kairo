@@ -3,21 +3,24 @@
 ## Information architecture
 
 ```
-Sidebar ─ Overview      state of the core; routing (mode, system proxy, TUN); traffic graph; profile and proxy
-        ─ Proxies       groups (left) │ the selected group's nodes (right); sort Default / Delay / Name; filter
-        ─ Profiles      list (usage, expiry, schedule, errors) → detail (details form, overrides editor)
-        ─ Connections   live table, sortable, searchable; inspector on the right
-        ─ Rules         rules in order, searchable; rule providers
-        ─ Logs          live, level, search, pause, clear
-        ─ DNS           lookup through the core's resolver; fake-IP flush
-        ─ Settings      General, Proxy, TUN, Controller, Delay Test, Core, About
-Sidebar foot ─ core state, mode, ↑ ↓ speeds, Restart to Update when one is ready
-Toolbar ─ the page's title, a subtitle (counts, the group shown) and its tools
-Tray    ─ status + speeds, mode, system proxy, TUN, quick switch, start/stop, show, quit
+Home           the switch and what it means now ("Connected · Tokyo 01 · 22 ms"); Location, Route,
+               Apps & Sites; a traffic line; the subscription's usage. Without a subscription: Welcome,
+               one link field and Connect.
+Apps & Sites   the subscription's other selectors (Netflix, AI …), one choice each
+── Advanced ── (the sidebar folds away on Home and Apps & Sites)
+Groups         groups (left) │ the selected group's members (right); sort, filter, delay tests
+Subscriptions  list (usage, expiry, schedule, errors) → detail (details form, overrides editor)
+Connections    live table, sortable, searchable; inspector; totals and core memory
+Rules · Logs · DNS
+Settings       General, Proxy, TUN, Controller, Delay Test, Core, About
+⌘K / Ctrl+K    every page, action and location
+Menu bar       Connection (Connect, Location, Route, Core) and Go (macOS); the main menu (Linux)
+Tray           status, Connected, Location (Fastest and the 15 quickest), Route, Open Kairo, Quit
 ```
 
-The first three pages are what you use every day. The next four are for looking into what is happening, and
-Settings is last. The counts in the sidebar show profiles and live connections.
+Everyday use needs Home only. A location is a member of the main group (the selector most other groups
+follow), flattened through member selector groups and grouped by region. The provider's info entries
+(usage, expiry) are notes, never places.
 
 ## The window is the platform's
 
@@ -30,10 +33,10 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
   over the content; the content runs under them and leaves their room (`chrome::Insets`). The page's title
   and subtitle are the window's. Switches and segmented controls are AppKit's (`NSSwitch`,
   `NSSegmentedControl`, native components). The content's colors are AppKit's, resolved for light and dark
-  (increased contrast too), with the user's accent.
-- **Linux**: libadwaita's `AdwNavigationSplitView`, header bars whose title and subtitle are the page's, a
+  (increased contrast too), with Kairo's accent, which an `AccentColor` asset also gives AppKit's controls.
+- **Linux**: libadwaita's `AdwOverlaySplitView` (the sidebar shows for Advanced pages and folds away on Home), header bars whose title and subtitle are the page's, a
   `.navigation-sidebar` list with the icon theme's symbolic icons (Adwaita on GNOME, Breeze on KDE) and the
-  core's state at its foot. The content takes its colors from the GTK theme's named colors (libadwaita's;
+  core's state at its foot, and a main menu (Search Kairo…, Restart Core, Settings, Quit) with the shortcuts as accelerators, since keys land outside NSH's view there. The content takes its colors from the GTK theme's named colors (libadwaita's;
   KDE's color schemes write them too), and its type size from the desktop's UI font.
 - **A page declares its toolbar once** (`ui::toolbar`): search fields, buttons with a glyph for each
   platform (SF Symbols, freedesktop names) and pull-down choices. The chrome shows them as its own (an
@@ -42,8 +45,8 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
 
 ## Visual rules
 
-- **One accent, the user's**: it marks the selection, primary actions, switches and the download line of the
-  graph. Everything else is the platform's neutral colors. Green, amber and red mean status only: running,
+- **One accent, Ember** (`src/accent.rs`; never the platform's blue): it marks the switch when connected,
+  the place in use, primary actions, focus and the traffic line. Everything else is the platform's neutral colors. Green, amber and red mean status only: running,
   slow, failed or REJECT. They are never used for decoration.
 - **Forms like the system's own**: settings and state are grouped rows (System Settings on macOS, boxed
   lists on GNOME), a label above each group, at least 48 px per row, content centred at a readable width.
@@ -54,6 +57,8 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
 - **Accessibility**: AppKit and libadwaita handle Reduce Transparency and Increase Contrast for the chrome;
   the content uses the increased-contrast colors (macOS, read at launch) and stronger borders and secondary
   text under GNOME's high contrast.
+- **Round**: capsules for buttons, segmented controls and pop-up buttons; grouped rows at 16 px radius, popovers
+  at 22, concentric inside them.
 - **Quiet motion**: no animation besides what the toolkit does. Live data updates in place.
 
 ## Behaviour rules
@@ -66,3 +71,11 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
   signals, a panic, and a crash or SIGKILL, through the guardian process and recovery on the next start.
 - **Settings use explicit Apply** for typed fields (ports, secret, URLs): one Apply validates and restarts the
   core once. Switches and segmented controls apply at once.
+- **Plain words first**: the state is Not Connected, Connecting, Connected or Couldn't Connect. An error says
+  what happened and has one button that fixes it (Use a Free Port, Allow TUN…, Try Again). A provider's
+  notice is shown as "Your provider says: …".
+- **Automatic, until you choose**: a new subscription starts on the fastest place, and Kairo checks again
+  every ten minutes. It moves only when the current place fails or is much slower (> 1.5× + 40 ms). Picking a
+  place by hand, here or in Groups, ends Automatic. Settings from 0.1 keep the node picked there.
+- **The last good config stays**: an update is validated before it replaces anything. A failed one is
+  retried hourly, and Home says it is using the saved copy.
