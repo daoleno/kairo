@@ -155,6 +155,20 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let tools = Rc::new(std::cell::RefCell::new(HeaderTools::default()));
     let actions = gio::SimpleActionGroup::new();
     window.insert_action_group("tool", Some(&actions));
+    // Ctrl+F: the page's search field, as in every GNOME app.
+    {
+        let tools = tools.clone();
+        let find = gio::SimpleAction::new("find", None);
+        find.connect_activate(move |_, _| {
+            if let Some(entry) = tools.borrow().widgets.iter().find_map(|w| w.downcast_ref::<gtk::SearchEntry>().cloned()) {
+                entry.grab_focus();
+            }
+        });
+        window.add_action(&find);
+        if let Some(app) = window.application() {
+            app.set_accels_for_action("win.find", &["<Control>f"]);
+        }
+    }
     let mut toolbar = chrome::bridge().toolbar.subscribe();
     let title_tools = title.clone();
     glib::spawn_future_local(async move {
