@@ -334,6 +334,8 @@ impl Footer {
 struct HeaderTools {
     shape: Vec<(&'static str, u8)>,
     widgets: Vec<gtk::Widget>,
+    /// What each widget shows now: only changed tools are touched.
+    shown: Vec<Option<Tool>>,
 }
 
 impl HeaderTools {
@@ -363,9 +365,13 @@ impl HeaderTools {
             }
             self.widgets.reverse();
             self.shape = shape;
+            self.shown = vec![None; tools.len()];
         }
-        for (tool, w) in tools.iter().zip(&self.widgets) {
-            update_tool(actions, tool, w);
+        for ((tool, w), shown) in tools.iter().zip(&self.widgets).zip(self.shown.iter_mut()) {
+            if shown.as_ref() != Some(tool) {
+                update_tool(actions, tool, w);
+                *shown = Some(tool.clone());
+            }
         }
     }
 }
@@ -415,7 +421,10 @@ fn make_tool(actions: &gio::SimpleActionGroup, tool: &Tool) -> gtk::Widget {
 fn update_tool(actions: &gio::SimpleActionGroup, tool: &Tool, w: &gtk::Widget) {
     match tool {
         Tool::Search { value, .. } => {
+            // Never while it is being typed in: the page's value lags the field.
+            let typing = w.root().and_then(|r| r.focus()).is_some_and(|f| f.is_ancestor(w) || &f == w);
             if let Some(e) = w.downcast_ref::<gtk::SearchEntry>()
+                && !typing
                 && e.text() != value.as_str()
             {
                 e.set_text(value);

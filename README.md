@@ -54,7 +54,7 @@ Download the latest release from [Releases](https://github.com/daoleno/kairo/rel
   Privacy & Security and click **Open Anyway** next to Kairo. Or run
   `xattr -dr com.apple.quarantine /Applications/Kairo.app` before opening it.
 - **Debian / Ubuntu 24.04+**: `sudo apt install ./kairo_<version>_amd64.deb` (or `_arm64`).
-- **Other Linux** (GTK 4.14+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
+- **Other Linux** (GTK 4.14+, libadwaita 1.5+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
   to `~/.local`; `./install.sh /usr/local` installs system-wide with sudo.
 
 Check downloads against `SHA256SUMS` in the release. After that, Kairo updates itself.

@@ -320,7 +320,8 @@ fn update_item(delegate: &Toolbar, item: &NSToolbarItem, tool: &Tool) {
         Tool::Search { value, .. } => {
             if let Some(item) = item.downcast_ref::<NSSearchToolbarItem>() {
                 let field = item.searchField();
-                if field.stringValue().to_string() != *value {
+                // Never while it is being typed in: the page's value lags the field.
+                if field.currentEditor().is_none() && field.stringValue().to_string() != *value {
                     field.setStringValue(&NSString::from_str(value));
                 }
             }
@@ -364,9 +365,12 @@ fn update_item(delegate: &Toolbar, item: &NSToolbarItem, tool: &Tool) {
 /// changes (another page), and updated in place otherwise.
 fn show_tools(toolbar: &NSToolbar, delegate: &Toolbar, tools: Vec<Tool>) {
     let wanted: Vec<String> = tools.iter().map(|t| format!("tool.{}", t.id())).collect();
-    TOOLS.with(|t| *t.borrow_mut() = tools.clone());
+    let before = TOOLS.with(|t| std::mem::replace(&mut *t.borrow_mut(), tools.clone()));
     let items = toolbar.items();
     let have: Vec<String> = items.iter().skip(FIXED).map(|i| i.itemIdentifier().to_string()).collect();
+    if have == wanted && before == tools {
+        return;
+    }
     if have != wanted {
         for i in (FIXED..items.len()).rev() {
             toolbar.removeItemAtIndex(i as isize);
@@ -375,8 +379,11 @@ fn show_tools(toolbar: &NSToolbar, delegate: &Toolbar, tools: Vec<Tool>) {
             toolbar.insertItemWithItemIdentifier_atIndex(&NSString::from_str(id), (FIXED + n) as isize);
         }
     } else {
-        for (item, tool) in items.iter().skip(FIXED).zip(&tools) {
-            update_item(delegate, &item, tool);
+        // Only what changed: a rebuilt menu would close under the pointer.
+        for (i, (item, tool)) in items.iter().skip(FIXED).zip(&tools).enumerate() {
+            if before.get(i) != Some(tool) {
+                update_item(delegate, &item, tool);
+            }
         }
     }
 }

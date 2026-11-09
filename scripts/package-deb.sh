@@ -50,7 +50,7 @@ Version: $version
 Architecture: $arch
 Maintainer: daoleno <7393152+daoleno@users.noreply.github.com>
 Installed-Size: $size
-Depends: libgtk-4-1 (>= 4.14), libwebkitgtk-6.0-4, libc6 (>= 2.39)
+Depends: libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5), libwebkitgtk-6.0-4, libc6 (>= 2.39)
 Recommends: pkexec | policykit-1
 Section: net
 Priority: optional

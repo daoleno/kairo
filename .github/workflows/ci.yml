@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, redesign] # redesign: until it is merged
   pull_request:
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
       - name: System libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets
