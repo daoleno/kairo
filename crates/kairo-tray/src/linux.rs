@@ -104,6 +104,7 @@ impl ksni::Tray for KairoTray {
             StandardItem {
                 label: if m.running { "Stop Core".into() } else { "Start Core".into() },
                 enabled: true,
+                icon_name: if m.running { "media-playback-stop-symbolic".into() } else { "media-playback-start-symbolic".into() },
                 activate: Box::new(|t: &mut Self| act::toggle_core(&t.svc, t.model.running)),
                 ..Default::default()
             }
@@ -112,6 +113,7 @@ impl ksni::Tray for KairoTray {
         items.push(
             StandardItem {
                 label: "Show Kairo".into(),
+                icon_name: "window-new-symbolic".into(),
                 activate: Box::new(|t: &mut Self| (t.hooks.show)()),
                 ..Default::default()
             }
@@ -121,6 +123,7 @@ impl ksni::Tray for KairoTray {
         items.push(
             StandardItem {
                 label: "Quit Kairo".into(),
+                icon_name: "application-exit-symbolic".into(),
                 activate: Box::new(|t: &mut Self| (t.hooks.quit)()),
                 ..Default::default()
             }

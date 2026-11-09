@@ -54,9 +54,13 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
         .child(
             scroll().flex_1().child(
                 view()
-                    .p_5()
+                    .px_6()
+                    .pt_5()
+                    .pb_6()
                     .gap_4()
+                    .w_full()
                     .max_w(px(900.0))
+                    .self_center()
                     .child(when(move || adding.get(), move || add_panel(adding)))
                     .child(
                         when(move || profiles.with(|p| !p.is_empty()), move || {

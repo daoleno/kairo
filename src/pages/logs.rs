@@ -106,7 +106,7 @@ pub fn page() -> impl IntoElement {
                                 .text_size(px(size::small()))
                                 .tabular_nums()
                                 .text_color(move || theme().muted_foreground)
-                                .w(px(60.0))
+                                .w(px(60.0 * size::scale()))
                                 .pt(px(1.0)),
                         )
                         .child(

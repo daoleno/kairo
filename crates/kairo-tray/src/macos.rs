@@ -95,6 +95,13 @@ fn item(target: &Target, mtm: MainThreadMarker, title: &str, tag: isize, enabled
     item
 }
 
+/// The item with an SF Symbol before its title, as macOS 26's menus have.
+fn symbol(item: Retained<NSMenuItem>, name: &str) -> Retained<NSMenuItem> {
+    let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None);
+    item.setImage(image.as_deref());
+    item
+}
+
 fn build(target: &Target, menu: &NSMenu, m: &Model) {
     let mtm = MainThreadMarker::from(target);
     menu.removeAllItems();
@@ -105,11 +112,11 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
         menu.addItem(&item(target, mtm, &format!("{} Mode", mode.title()), TAG_MODE + i as isize, true, Some(*mode == m.mode)));
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&item(target, mtm, "System Proxy", TAG_SYSPROXY, m.sysproxy_supported, Some(m.sysproxy)));
-    menu.addItem(&item(target, mtm, "TUN Mode", TAG_TUN, m.tun_allowed || m.tun, Some(m.tun)));
+    menu.addItem(&symbol(item(target, mtm, "System Proxy", TAG_SYSPROXY, m.sysproxy_supported, Some(m.sysproxy)), "network"));
+    menu.addItem(&symbol(item(target, mtm, "TUN Mode", TAG_TUN, m.tun_allowed || m.tun, Some(m.tun)), "point.3.connected.trianglepath.dotted"));
     if let Some((group, choices, now)) = &m.group {
         menu.addItem(&NSMenuItem::separatorItem(mtm));
-        let holder = item(target, mtm, &format!("{group}: {}", now.clone().unwrap_or_default()), 0, m.running, None);
+        let holder = symbol(item(target, mtm, &format!("{group}: {}", now.clone().unwrap_or_default()), 0, m.running, None), "globe");
         unsafe { holder.setAction(None) };
         let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(group));
         sub.setAutoenablesItems(false);
@@ -121,10 +128,13 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
         menu.addItem(&holder);
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&item(target, mtm, if m.running { "Stop Core" } else { "Start Core" }, TAG_CORE, true, None));
-    menu.addItem(&item(target, mtm, "Show Kairo", TAG_SHOW, true, None));
+    menu.addItem(&symbol(
+        item(target, mtm, if m.running { "Stop Core" } else { "Start Core" }, TAG_CORE, true, None),
+        if m.running { "stop.circle" } else { "play.circle" },
+    ));
+    menu.addItem(&symbol(item(target, mtm, "Show Kairo", TAG_SHOW, true, None), "macwindow"));
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&item(target, mtm, "Quit Kairo", TAG_QUIT, true, None));
+    menu.addItem(&symbol(item(target, mtm, "Quit Kairo", TAG_QUIT, true, None), "power"));
 }
 
 fn glyph(mtm: MainThreadMarker, dim: bool) -> Option<Retained<NSImage>> {

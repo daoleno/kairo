@@ -129,9 +129,13 @@ pub fn page() -> impl IntoElement {
         .child(
             scroll().flex_1().child(
                 view()
-                    .p_5()
+                    .px_6()
+                    .pt_5()
+                    .pb_6()
                     .gap_5()
+                    .w_full()
                     .max_w(px(760.0))
+                    .self_center()
                     // --- General ---
                     .child(ui::group(
                         Some("General"),
