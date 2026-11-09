@@ -30,6 +30,7 @@ fn free_port() -> u16 {
 }
 
 /// An origin: `/hello` answers "kairo-ok", `/slow` streams for three seconds,
+/// `/long` for six (a stand-in for a model's answer streaming in),
 /// `/generate_204` answers 204, `/sub` is the subscription.
 async fn origin(listener: TcpListener, subscription: Arc<String>) {
     loop {
@@ -51,6 +52,18 @@ async fn origin(listener: TcpListener, subscription: Arc<String>) {
                 );
                 let _ = s.write_all(head.as_bytes()).await;
                 let _ = s.write_all(sub.as_bytes()).await;
+            } else if path.ends_with("/long") {
+                let _ = s
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 60000\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+                for _ in 0..60 {
+                    if s.write_all(&[b'y'; 1000]).await.is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
             } else if path.ends_with("/slow") {
                 let _ = s
                     .write_all(
@@ -360,6 +373,40 @@ rules:
     .await;
     assert_eq!(slow.await.unwrap(), 300000);
     assert!(live.borrow().history.len() >= 2);
+
+    // 5b. A long stream (a model's answer) goes on while the location
+    // changes and the route mode changes back and forth: neither closes it.
+    let long = {
+        let client = client.clone();
+        let url = format!("http://{origin_addr}/long");
+        tokio::spawn(async move { client.get(url).send().await?.bytes().await.map(|b| b.len()) })
+    };
+    wait_for("the long stream", Duration::from_secs(5), || {
+        conns
+            .borrow()
+            .list
+            .iter()
+            .any(|c| c.port == origin_addr.port().to_string() && c.outbound() == "node-b")
+            .then_some(())
+    })
+    .await;
+    svc.select("Proxy".into(), "node-a".into())
+        .await
+        .expect("select");
+    svc.set_mode(Mode::Direct).await.expect("mode");
+    svc.set_mode(Mode::Rule).await.expect("mode");
+    svc.select("Proxy".into(), "node-b".into())
+        .await
+        .expect("select");
+    assert!(
+        !long.is_finished(),
+        "the stream still runs during the switches"
+    );
+    assert_eq!(
+        long.await.unwrap().expect("the stream was not cut"),
+        60000,
+        "the whole answer arrived"
+    );
 
     // 6. Rules and logs.
     let rules = svc.rules().await.expect("rules");

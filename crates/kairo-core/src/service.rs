@@ -404,17 +404,34 @@ impl Service {
             } else {
                 next.mixed_port
             };
-            if crate::ports::wait_free(port, Duration::from_millis(2500)).await {
+            let free_now = tokio::task::spawn_blocking(move || !crate::settings::port_in_use(port))
+                .await
+                .unwrap_or(false);
+            if free_now {
                 continue;
             }
-            let holder = tokio::task::spawn_blocking(move || crate::ports::holder(port))
+            let mut holder = tokio::task::spawn_blocking(move || crate::ports::holder(port))
                 .await
                 .ok()
                 .flatten();
-            let runtime = self.0.paths.runtime_dir().to_string_lossy().into_owned();
+            // A program that can be seen and is not this Kairo's core will not
+            // let go: move at once. Otherwise (this Kairo's core on its way
+            // out, or a holder that cannot be seen) give it a moment.
+            let other_program = holder.as_ref().is_some_and(|h| {
+                h.pid.is_some() && !crate::ports::is_ours(h, &self.0.paths.runtime_dir())
+            });
+            if !other_program {
+                if crate::ports::wait_free(port, Duration::from_millis(2500)).await {
+                    continue;
+                }
+                holder = tokio::task::spawn_blocking(move || crate::ports::holder(port))
+                    .await
+                    .ok()
+                    .flatten();
+            }
             if let Some(h) = &holder
-                && let (Some(pid), Some(cmd)) = (h.pid, &h.command)
-                && cmd.contains(&runtime)
+                && let Some(pid) = h.pid
+                && crate::ports::is_ours(h, &self.0.paths.runtime_dir())
             {
                 log::warn!(
                     "port {port}: a core of this Kairo's (pid {pid}) is still there; stopping it"
@@ -943,7 +960,13 @@ impl Service {
             ),
             None => (NO_PROFILE.to_owned(), String::new()),
         };
-        let built = config::build(&text, &over, &settings).map_err(|e| e.to_string())?;
+        // The profile's own local ports another client holds move aside (the
+        // ones this Kairo's running core holds stay).
+        let runtime = paths.runtime_dir();
+        let built = config::build_moving(&text, &over, &settings, &|p| {
+            crate::ports::held_by_other(p, &runtime)
+        })
+        .map_err(|e| e.to_string())?;
         // The core would stop to download missing geo data while it loads.
         self.ensure_geo(&built).await;
         crate::paths::write_atomic(&paths.candidate_config(), built.as_bytes())
@@ -1001,8 +1024,9 @@ impl Service {
                     .patch_configs(serde_json::json!({ "mode": mode.as_str() }))
                     .await
                     .map_err(|e| e.to_string())?;
-                // Connections made under the old mode would keep their route.
-                let _ = svc.controller().close_all_connections().await;
+                // New connections take the new route; open ones (a model's
+                // answer streaming in, a download) finish on theirs. Only the
+                // user's own Close ends them.
                 svc.refresh_proxies_now().await;
             }
             Ok(())
@@ -1742,22 +1766,10 @@ impl Service {
                 .select(&group, &name)
                 .await
                 .map_err(|e| e.to_string());
-            // Old connections keep the old node; close those of this group.
-            if r.is_ok() {
-                let ctl = svc.controller();
-                let stale: Vec<String> = svc
-                    .0
-                    .connections
-                    .borrow()
-                    .list
-                    .iter()
-                    .filter(|c| c.chains.iter().any(|x| x == &group) && c.outbound() != name)
-                    .map(|c| c.id.clone())
-                    .collect();
-                for id in stale {
-                    let _ = ctl.close_connection(&id).await;
-                }
-            }
+            // Open connections stay on the node they started on (mihomo keeps
+            // them through a switch) and finish there: an automatic switch to a
+            // faster place, or a pick by hand, never cuts a long stream. Only
+            // the user's own Close ends them.
             svc.refresh_proxies_now().await;
             r
         })

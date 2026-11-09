@@ -39,6 +39,21 @@ pub async fn wait_free(port: u16, limit: Duration) -> bool {
     }
 }
 
+/// Whether `holder` is a core of the Kairo whose runtime directory is
+/// `runtime` (its command line names its config there).
+pub fn is_ours(holder: &Holder, runtime: &std::path::Path) -> bool {
+    let runtime = runtime.to_string_lossy();
+    holder
+        .command
+        .as_deref()
+        .is_some_and(|c| c.contains(runtime.as_ref()))
+}
+
+/// Whether a program other than this Kairo's own core holds `port`.
+pub fn held_by_other(port: u16, runtime: &std::path::Path) -> bool {
+    crate::settings::port_in_use(port) && !holder(port).is_some_and(|h| is_ours(&h, runtime))
+}
+
 /// The process listening on TCP `port` on this machine.
 pub fn holder(port: u16) -> Option<Holder> {
     #[cfg(target_os = "linux")]

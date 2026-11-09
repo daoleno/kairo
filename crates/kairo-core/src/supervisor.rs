@@ -1,14 +1,9 @@
-//! Runs the core as a child process: its output kept for diagnosis, a pid file
-//! so a core left behind by a crash is found and stopped, and (on Linux) the
-//! kernel told to stop the core if Kairo dies.
+//! Runs the core as a child process: its output kept for diagnosis, and a pid
+//! file so a core left behind by a crash is found and stopped.
 
-use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::paths::Paths;
 
@@ -17,7 +12,7 @@ const TAIL: usize = 300;
 pub struct CoreProcess {
     child: tokio::process::Child,
     pub pid: u32,
-    tail: Arc<Mutex<VecDeque<String>>>,
+    log: PathBuf,
 }
 
 /// How the core ended.
@@ -62,33 +57,32 @@ impl CoreProcess {
             .arg(paths.runtime_config())
             .current_dir(paths.runtime_dir())
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .kill_on_drop(true);
-        // No PR_SET_PDEATHSIG: when Kairo dies, its guardian puts the system
-        // proxy back and then stops the core. If the guardian is gone too (both
-        // killed at once), the core going on keeps the proxy the system points
-        // at alive, so the computer stays online; the next Kairo stops it.
-        let mut child = command.spawn()?;
+        // The core writes its output to the log file itself, not into a pipe
+        // Kairo reads: a pipe would break when Kairo dies, and the core's next
+        // line would end it (SIGPIPE).
+        let log = paths.logs_dir().join("core.log");
+        let _ = std::fs::create_dir_all(paths.logs_dir());
+        match std::fs::File::create(&log).and_then(|f| Ok((f.try_clone()?, f))) {
+            Ok((out, err)) => command.stdout(out).stderr(err),
+            Err(e) => {
+                log::warn!("core log {}: {e}", log.display());
+                command.stdout(Stdio::null()).stderr(Stdio::null())
+            }
+        };
+        // No PR_SET_PDEATHSIG either: when Kairo dies, its guardian puts the
+        // system proxy back and then stops the core. If the guardian is gone too
+        // (both killed at once), the core going on keeps the proxy the system
+        // points at alive, so the computer stays online; the next Kairo stops it.
+        let child = command.spawn()?;
         let pid = child.id().unwrap_or(0);
         let _ = std::fs::write(paths.core_pid(), pid.to_string());
-        let tail = Arc::new(Mutex::new(VecDeque::with_capacity(TAIL)));
-        let log_path = paths.logs_dir().join("core.log");
-        let log = Arc::new(Mutex::new(std::fs::File::create(&log_path).ok()));
-        if let Some(out) = child.stdout.take() {
-            tokio::spawn(pump(BufReader::new(out), tail.clone(), log.clone()));
-        }
-        if let Some(err) = child.stderr.take() {
-            tokio::spawn(pump(BufReader::new(err), tail.clone(), log.clone()));
-        }
-        Ok(CoreProcess { child, pid, tail })
+        Ok(CoreProcess { child, pid, log })
     }
 
+    /// The last lines it printed.
     pub fn tail(&self) -> Vec<String> {
-        self.tail
-            .lock()
-            .map(|t| t.iter().cloned().collect())
-            .unwrap_or_default()
+        tail_of(&self.log, TAIL)
     }
 
     /// Whether it is still running.
@@ -99,8 +93,6 @@ impl CoreProcess {
     /// Waits for it to exit (cancel-safe).
     pub async fn wait(&mut self) -> Exit {
         let status = self.child.wait().await;
-        // Let the output pumps take the last lines.
-        tokio::time::sleep(Duration::from_millis(50)).await;
         let (code, signal) = match status {
             Ok(s) => (s.code(), signal_of(&s)),
             Err(_) => (None, None),
@@ -143,26 +135,17 @@ fn signal_of(_: &std::process::ExitStatus) -> Option<i32> {
     None
 }
 
-async fn pump<R: tokio::io::AsyncRead + Unpin>(
-    reader: BufReader<R>,
-    tail: Arc<Mutex<VecDeque<String>>>,
-    log: Arc<Mutex<Option<std::fs::File>>>,
-) {
-    let mut lines = reader.lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        if let Ok(mut file) = log.lock()
-            && let Some(f) = file.as_mut()
-        {
-            use std::io::Write;
-            let _ = writeln!(f, "{line}");
-        }
-        if let Ok(mut t) = tail.lock() {
-            if t.len() == TAIL {
-                t.pop_front();
-            }
-            t.push_back(line);
-        }
-    }
+/// The last `n` lines of a file.
+fn tail_of(path: &Path, n: usize) -> Vec<String> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(n)..]
+        .iter()
+        .map(|l| l.to_string())
+        .collect()
 }
 
 /// Stops a core a previous Kairo left running (after a crash), identified by

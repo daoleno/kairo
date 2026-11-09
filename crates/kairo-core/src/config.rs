@@ -99,26 +99,193 @@ pub fn build(
     override_text: &str,
     settings: &Settings,
 ) -> Result<String, ConfigError> {
+    build_moving(profile, override_text, settings, &|_| false)
+}
+
+/// [`build`], with the profile's own local ports that `taken` says another
+/// program holds moved to free ones (see [`move_taken_inbounds`]).
+pub fn build_moving(
+    profile: &str,
+    override_text: &str,
+    settings: &Settings,
+    taken: &dyn Fn(u16) -> bool,
+) -> Result<String, ConfigError> {
     let mut config = parse_mapping(profile).map_err(ConfigError::Profile)?;
-    strip_local_inbounds(&mut config);
+    let avoid = [settings.mixed_port, settings.controller_port];
+    for (from, to) in move_taken_inbounds(&mut config, taken, &avoid) {
+        log::info!("the profile's local port {from} is taken: the core uses {to}");
+    }
     let patch = parse_mapping(override_text).map_err(ConfigError::Override)?;
     merge(&mut config, patch);
     apply_settings(&mut config, settings);
     Ok(serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"))
 }
 
+/// The port in "127.0.0.1:7874", ":1053" or "[::1]:53".
+fn port_of(addr: &str) -> Option<u16> {
+    addr.rsplit(':').next()?.trim().parse().ok()
+}
+
+fn with_port(addr: &str, port: u16) -> String {
+    match addr.rfind(':') {
+        Some(i) => format!("{}:{port}", &addr[..i]),
+        None => format!(":{port}"),
+    }
+}
+
 /// A provider's config may open local ports of its own: a DNS listener
 /// (`dns.listen`, often 127.0.0.1:7874 or :1053), extra `listeners`, port
-/// `tunnels`. Kairo needs none of them (its DNS tool asks the controller), and
-/// another client running the same subscription holds the same ports, so the
-/// core would start with "address already in use". An override that asks for
-/// them still gets them: this runs on the profile only.
-pub fn strip_local_inbounds(config: &mut Mapping) {
-    for key in ["listeners", "tunnels"] {
-        config.remove(key);
+/// `tunnels`. Another client running the same subscription holds the same
+/// ports, and the core would start without them ("address already in use").
+/// They cannot simply go: the profile's own DNS settings may point at them
+/// (`proxy-server-nameserver: [udp://127.0.0.1:7874]` resolves every node's
+/// host through the listener). So each port `taken` says is held, or that is
+/// one of Kairo's own (`avoid`), moves to the next free one, and every DNS
+/// server address that names it follows. Runs on the profile only: an
+/// override's ports are the user's. The moves, as (from, to).
+pub fn move_taken_inbounds(
+    config: &mut Mapping,
+    taken: &dyn Fn(u16) -> bool,
+    avoid: &[u16],
+) -> Vec<(u16, u16)> {
+    // Where each inbound's address lives, read once.
+    let mut ports: Vec<u16> = Vec::new();
+    if let Some(p) = config
+        .get("dns")
+        .and_then(|d| d.get("listen"))
+        .and_then(Value::as_str)
+        .and_then(port_of)
+    {
+        ports.push(p);
     }
+    if let Some(Value::Sequence(ls)) = config.get("listeners") {
+        for l in ls {
+            if let Some(p) = l.get("port").and_then(|v| {
+                v.as_u64()
+                    .and_then(|n| u16::try_from(n).ok())
+                    .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+            }) {
+                ports.push(p);
+            }
+        }
+    }
+    if let Some(Value::Sequence(ts)) = config.get("tunnels") {
+        for t in ts {
+            let addr = match t {
+                Value::String(s) => s.split(',').nth(1).map(str::to_owned),
+                Value::Mapping(m) => m.get("address").and_then(Value::as_str).map(str::to_owned),
+                _ => None,
+            };
+            if let Some(p) = addr.as_deref().and_then(port_of) {
+                ports.push(p);
+            }
+        }
+    }
+    let mut moves: Vec<(u16, u16)> = Vec::new();
+    for &p in &ports {
+        if moves.iter().any(|m| m.0 == p) || !(avoid.contains(&p) || taken(p)) {
+            continue;
+        }
+        let free = (p.saturating_add(1)..p.saturating_add(200)).find(|q| {
+            !avoid.contains(q)
+                && !ports.contains(q)
+                && !moves.iter().any(|m| m.1 == *q)
+                && !taken(*q)
+        });
+        if let Some(q) = free {
+            moves.push((p, q));
+        }
+    }
+    if moves.is_empty() {
+        return moves;
+    }
+    let moved = |p: u16| moves.iter().find(|m| m.0 == p).map(|m| m.1);
     if let Some(Value::Mapping(dns)) = config.get_mut("dns") {
-        dns.remove("listen");
+        if let Some(Value::String(l)) = dns.get_mut("listen")
+            && let Some(q) = port_of(l).and_then(moved)
+        {
+            *l = with_port(l, q);
+        }
+        for (_, v) in dns.iter_mut() {
+            repoint(v, &moves);
+        }
+    }
+    if let Some(Value::Sequence(ls)) = config.get_mut("listeners") {
+        for l in ls {
+            if let Value::Mapping(m) = l
+                && let Some(v) = m.get_mut("port")
+            {
+                let p = v
+                    .as_u64()
+                    .and_then(|n| u16::try_from(n).ok())
+                    .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()));
+                if let Some(q) = p.and_then(moved) {
+                    *v = Value::from(q);
+                }
+            }
+        }
+    }
+    if let Some(Value::Sequence(ts)) = config.get_mut("tunnels") {
+        for t in ts {
+            match t {
+                Value::String(s) => {
+                    let mut f: Vec<String> = s.split(',').map(str::to_owned).collect();
+                    if let Some(a) = f.get_mut(1)
+                        && let Some(q) = port_of(a).and_then(moved)
+                    {
+                        *a = with_port(a, q);
+                        *s = f.join(",");
+                    }
+                }
+                Value::Mapping(m) => {
+                    if let Some(Value::String(a)) = m.get_mut("address")
+                        && let Some(q) = port_of(a).and_then(moved)
+                    {
+                        *a = with_port(a, q);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    moves
+}
+
+/// Points the DNS server addresses in `v` ("udp://127.0.0.1:7874",
+/// "127.0.0.1:7874#DIRECT", "tcp://localhost:7874") at the moved ports. Only
+/// this machine's addresses: a remote server on the same port is another one.
+fn repoint(v: &mut Value, moves: &[(u16, u16)]) {
+    match v {
+        Value::String(s) => {
+            for host in ["127.0.0.1", "localhost", "[::1]", "0.0.0.0"] {
+                for &(from, to) in moves {
+                    let pat = format!("{host}:{from}");
+                    let mut out = String::new();
+                    let mut rest = s.as_str();
+                    while let Some(i) = rest.find(&pat) {
+                        let after = &rest[i + pat.len()..];
+                        let before_ok = i == 0
+                            || !rest[..i]
+                                .chars()
+                                .last()
+                                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '.');
+                        let after_ok = !after.starts_with(|c: char| c.is_ascii_digit());
+                        out.push_str(&rest[..i]);
+                        if before_ok && after_ok {
+                            out.push_str(&format!("{host}:{to}"));
+                        } else {
+                            out.push_str(&pat);
+                        }
+                        rest = after;
+                    }
+                    out.push_str(rest);
+                    *s = out;
+                }
+            }
+        }
+        Value::Sequence(seq) => seq.iter_mut().for_each(|x| repoint(x, moves)),
+        Value::Mapping(m) => m.iter_mut().for_each(|(_, x)| repoint(x, moves)),
+        _ => {}
     }
 }
 
@@ -306,19 +473,52 @@ rules:
     }
 
     #[test]
-    fn a_profile_opens_no_local_ports_of_its_own() {
-        let profile = "dns:\n  enable: true\n  listen: 127.0.0.1:7874\n  nameserver: [1.1.1.1]\nlisteners:\n  - {name: in, type: mixed, port: 7777}\ntunnels:\n  - tcp,127.0.0.1:6553,1.1.1.1:53,DIRECT\nrules:\n  - MATCH,DIRECT\n";
-        let out = build(profile, "", &Settings::default()).unwrap();
+    fn a_profiles_taken_local_ports_move_and_its_dns_follows() {
+        // The shape of a real subscription: the nodes' hosts resolve through
+        // the profile's own DNS listener.
+        let profile = "dns:\n  enable: true\n  listen: 127.0.0.1:7874\n  nameserver: [1.1.1.1, 'tls://9.9.9.9:7874']\n  proxy-server-nameserver: ['udp://127.0.0.1:7874']\n  nameserver-policy:\n    '+.lan': '127.0.0.1:7874#DIRECT'\nlisteners:\n  - {name: in, type: mixed, port: 7777}\ntunnels:\n  - tcp,127.0.0.1:6553,1.1.1.1:53,DIRECT\n  - {network: [udp], address: '127.0.0.1:6554', target: '1.1.1.1:53', proxy: DIRECT}\nrules:\n  - MATCH,DIRECT\n";
+        // Nothing taken: all as the profile has it.
+        let m = parse_mapping(&build(profile, "", &Settings::default()).unwrap()).unwrap();
+        let dns = get(&m, "dns").as_mapping().unwrap();
+        assert_eq!(get(dns, "listen").as_str(), Some("127.0.0.1:7874"));
+        assert_eq!(get(&m, "listeners").as_sequence().unwrap().len(), 1);
+        // Another client holds 7874, 7777, 6553 and 6554.
+        let taken = |p: u16| [7874, 7875, 7777, 6553, 6554].contains(&p);
+        let out = build_moving(profile, "", &Settings::default(), &taken).unwrap();
         let m = parse_mapping(&out).unwrap();
         let dns = get(&m, "dns").as_mapping().unwrap();
-        assert!(dns.get("listen").is_none());
-        assert_eq!(get(dns, "enable").as_bool(), Some(true));
-        assert!(m.get("listeners").is_none() && m.get("tunnels").is_none());
-        // Asked for in the override: kept.
-        let out = build(
+        assert_eq!(get(dns, "listen").as_str(), Some("127.0.0.1:7876"));
+        assert_eq!(
+            get(dns, "proxy-server-nameserver").as_sequence().unwrap()[0].as_str(),
+            Some("udp://127.0.0.1:7876")
+        );
+        let policy = get(dns, "nameserver-policy").as_mapping().unwrap();
+        assert_eq!(get(policy, "+.lan").as_str(), Some("127.0.0.1:7876#DIRECT"));
+        // A server elsewhere on the same port is another server.
+        assert_eq!(
+            get(dns, "nameserver").as_sequence().unwrap()[1].as_str(),
+            Some("tls://9.9.9.9:7874")
+        );
+        let l = &get(&m, "listeners").as_sequence().unwrap()[0];
+        assert_eq!(l.get("port").and_then(Value::as_u64), Some(7778));
+        let t = get(&m, "tunnels").as_sequence().unwrap();
+        assert_eq!(t[0].as_str(), Some("tcp,127.0.0.1:6555,1.1.1.1:53,DIRECT"));
+        assert_eq!(
+            t[1].get("address").and_then(Value::as_str),
+            Some("127.0.0.1:6556")
+        );
+        // A listener on Kairo's own proxy port moves too.
+        let mut s = Settings::default();
+        s.mixed_port = 7874;
+        let m = parse_mapping(&build(profile, "", &s).unwrap()).unwrap();
+        let dns = get(&m, "dns").as_mapping().unwrap();
+        assert_eq!(get(dns, "listen").as_str(), Some("127.0.0.1:7875"));
+        // An override's own listener is the user's: kept.
+        let out = build_moving(
             profile,
             "dns:\n  listen: 127.0.0.1:5353\n",
             &Settings::default(),
+            &|p| p == 5353,
         )
         .unwrap();
         let m = parse_mapping(&out).unwrap();
