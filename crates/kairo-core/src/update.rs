@@ -44,6 +44,7 @@ const LATEST: &str = "https://github.com/daoleno/kairo/releases/latest/download"
 const RELEASES: &str = "https://github.com/daoleno/kairo/releases";
 pub const MANIFEST: &str = "kairo-update.json";
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
+const RETRY_FIRST: Duration = Duration::from_secs(10 * 60);
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -240,15 +241,25 @@ fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
 }
 
 async fn get(url: &str, proxy: Option<&str>, mut progress: impl FnMut(u64, u64)) -> Result<Vec<u8>, String> {
-    let resp = client(proxy)?
-        .get(url)
-        .timeout(Duration::from_secs(900))
-        .send()
-        .await
-        .map_err(|e| format!("Could not reach {}: {e}", host(url)))?;
-    if !resp.status().is_success() {
-        return Err(format!("{} answered HTTP {}", host(url), resp.status().as_u16()));
-    }
+    // GitHub's download servers answer 5xx now and then: try again a few times.
+    let mut attempt = 0;
+    let resp = loop {
+        attempt += 1;
+        let r = client(proxy)?
+            .get(url)
+            .timeout(Duration::from_secs(900))
+            .send()
+            .await
+            .map_err(|e| format!("Could not reach {}: {e}", host(url)));
+        match r {
+            Ok(resp) if resp.status().is_server_error() && attempt < 4 => {}
+            Ok(resp) if resp.status().is_success() => break resp,
+            Ok(resp) => return Err(format!("{} answered HTTP {}", host(url), resp.status().as_u16())),
+            Err(e) if attempt >= 4 => return Err(e),
+            Err(_) => {}
+        }
+        tokio::time::sleep(Duration::from_secs(2 * attempt)).await;
+    };
     let total = resp.content_length().unwrap_or(0);
     let mut out = Vec::with_capacity(total as usize);
     let mut stream = resp.bytes_stream();
@@ -295,11 +306,23 @@ pub fn spawn_checks(svc: Service) {
     tokio::spawn(async move {
         // Let the core come up first: a download may go through it.
         tokio::time::sleep(Duration::from_secs(8)).await;
+        // After a failed check, try again soon (10, 20, 40 … minutes, up to
+        // the usual interval) rather than hours later.
+        let mut retry = RETRY_FIRST;
         loop {
-            if let Err(e) = check(&svc).await {
-                log::warn!("update check: {e}");
-            }
-            tokio::time::sleep(CHECK_EVERY).await;
+            let wait = match check(&svc).await {
+                Ok(_) => {
+                    retry = RETRY_FIRST;
+                    CHECK_EVERY
+                }
+                Err(e) => {
+                    log::warn!("update check: {e}");
+                    let wait = retry;
+                    retry = (retry * 2).min(CHECK_EVERY);
+                    wait
+                }
+            };
+            tokio::time::sleep(wait).await;
         }
     });
 }
