@@ -67,7 +67,7 @@ test("modes switch from the overview and show in the sidebar", async () => {
 test("rules: the running configuration's, searchable", async () => {
   const app = await open("..", desktop);
   await app.press("Rules");
-  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Rules  ")), slow);
+  await app.waitUntil(() => has(app.texts(), (t) => /^\d+ rules$/.test(t)), slow);
   expect(app.texts()).toContain("Match");
   await app.type("text:Type, payload or target", "REJECT");
   await app.waitUntil(() => has(app.texts(), (t) => / of \d+$/.test(t)), slow);

@@ -14,7 +14,7 @@ use std::rc::Rc;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use super::{HEADER_HEIGHT, Icon, Variant, popup_button, search_field, size, title};
+use super::{HEADER_HEIGHT, Icon, Variant, search_field, size, title};
 use crate::chrome::{self, Glyph, Tool, ToolEvent, Toolbar};
 use crate::store::Page;
 
@@ -153,16 +153,12 @@ impl Spec {
                 }
             }
             Spec::Choice { options, selected, choose, .. } => {
-                let opts = options.clone();
-                // `popup_button` copies its callbacks.
+                // Few choices, all in sight: a segmented control.
                 let selected = stored(selected);
                 let choose = stored(choose);
-                popup_button(
-                    move || opts.iter().enumerate().map(|(i, o)| (i, (*o).to_owned())).collect(),
-                    move || selected.with(|f| f()),
-                    move |i| choose.with(|f| f(i)),
-                )
-                .min_w(px(110.0))
+                super::segmented(options.iter().enumerate().map(|(i, o)| (i, *o)).collect(), move || selected.with(|f| f()), move |i| {
+                    choose.with(|f| f(i))
+                })
                 .into_element()
             }
         }
