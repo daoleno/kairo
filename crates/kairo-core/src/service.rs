@@ -212,6 +212,10 @@ struct Inner {
     ai_busy: std::sync::atomic::AtomicBool,
     ai_hold_at: std::sync::atomic::AtomicI64,
     ai_checked_at: std::sync::atomic::AtomicI64,
+    /// Process names of local connections the core came back without a name
+    /// for (macOS), and whether a look for them is running.
+    proc_names: Mutex<crate::procname::Names>,
+    proc_busy: std::sync::atomic::AtomicBool,
     /// Ends the app (the launcher's Quit), for "Restart to Update".
     quit: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
@@ -305,6 +309,8 @@ impl Service {
             ai_busy: std::sync::atomic::AtomicBool::new(false),
             ai_hold_at: std::sync::atomic::AtomicI64::new(0),
             ai_checked_at: std::sync::atomic::AtomicI64::new(0),
+            proc_names: Mutex::new(crate::procname::Names::default()),
+            proc_busy: std::sync::atomic::AtomicBool::new(false),
         }));
         let actor = svc.clone();
         rt.spawn(async move { actor.core_actor(core_rx).await });
@@ -891,6 +897,53 @@ impl Service {
         out
     }
 
+    /// Gives the connections the core could not name the process of (macOS)
+    /// the name `lsof` knows them by, and looks again, off the async threads,
+    /// when one it has not seen appears.
+    fn name_unnamed(&self, list: &mut [Connection], now: i64) {
+        if !crate::procname::enabled() {
+            return;
+        }
+        let port = |c: &Connection| {
+            c.source
+                .rsplit_once(':')
+                .and_then(|(_, p)| p.parse::<u16>().ok())
+        };
+        let mut unnamed = Vec::new();
+        {
+            let names = self.0.proc_names.lock().expect("proc names");
+            for c in list.iter_mut().filter(|c| c.process.is_empty()) {
+                let Some(p) = port(c) else { continue };
+                match names.get(p) {
+                    Some(n) => c.process = n.to_owned(),
+                    None => unnamed.push(p),
+                }
+            }
+            if !names.due(now, unnamed.iter().copied()) {
+                return;
+            }
+        }
+        if self
+            .0
+            .proc_busy
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+        let svc = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let found = crate::procname::lookup();
+            svc.0
+                .proc_names
+                .lock()
+                .expect("proc names")
+                .replace(found, unix());
+            svc.0
+                .proc_busy
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
+
     fn take_connections(&self, resp: ConnectionsResponse) {
         let previous = self.0.connections.borrow().clone();
         let by_id: HashMap<&str, &Connection> =
@@ -909,10 +962,19 @@ impl Service {
         let count = list.len();
         drop(by_id);
         let now = unix();
+        self.name_unnamed(&mut list, now);
         // Kairo's own checks go through the proxy too: they are not a tool's.
         let own = std::env::current_exe().ok();
+        let young = |c: &Connection| {
+            c.process.is_empty()
+                && crate::procname::enabled()
+                && crate::activity::parse_time(&c.start).is_none_or(|t| now - t < 3)
+        };
         let tools: Vec<Connection> = list
             .iter()
+            // A connection still without a name is counted once it has one
+            // (or has lived three seconds without), not under "Unknown" first.
+            .filter(|c| !young(c))
             .filter(|c| {
                 own.as_deref().is_none_or(|p| {
                     c.process_path.is_empty() || std::path::Path::new(&c.process_path) != p

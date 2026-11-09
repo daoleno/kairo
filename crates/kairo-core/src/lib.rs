@@ -14,6 +14,7 @@ pub mod model;
 pub mod paths;
 pub mod places;
 pub mod ports;
+pub mod procname;
 pub mod profile;
 pub mod service;
 pub mod settings;
