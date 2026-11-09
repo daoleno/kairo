@@ -97,6 +97,9 @@ pub struct State {
     pub notice: Option<Notice>,
     /// A problem the core reported at start that it survives (a port in use).
     pub warning: Option<String>,
+    /// Kairo is finding the first place of a new subscription (or replacing
+    /// a provider's note in use); later checks happen without saying so.
+    pub locating: bool,
 }
 
 impl State {
@@ -157,6 +160,8 @@ struct Inner {
     apply_lock: tokio::sync::Mutex<()>,
     /// One update check or install at a time.
     update_lock: tokio::sync::Mutex<()>,
+    /// A subscription was just added: its first place is still to be found.
+    fresh: std::sync::atomic::AtomicBool,
     /// Ends the app (the launcher's Quit), for "Restart to Update".
     quit: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
@@ -244,6 +249,7 @@ impl Service {
             apply_lock: tokio::sync::Mutex::new(()),
             update_lock: tokio::sync::Mutex::new(()),
             quit: Mutex::new(None),
+            fresh: std::sync::atomic::AtomicBool::new(false),
         }));
         let actor = svc.clone();
         rt.spawn(async move { actor.core_actor(core_rx).await });
@@ -1016,7 +1022,7 @@ impl Service {
             return Err(format!("{name} is not one of this subscription's locations"));
         }
         for (g, member) in steps {
-            self.select(g, member).await?;
+            self.select_inner(g, member).await?;
         }
         Ok(())
     }
@@ -1060,6 +1066,10 @@ impl Service {
         if keep || current.as_ref().is_some_and(|c| c.name == best.name) {
             return Ok(current.map(|c| c.name));
         }
+        // A place picked by hand meanwhile wins.
+        if !self.settings().auto_location {
+            return Ok(current.map(|c| c.name));
+        }
         self.go_through(&best.name).await?;
         Ok(Some(best.name))
     }
@@ -1071,9 +1081,19 @@ impl Service {
         if !self.settings().auto_location || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return;
         }
-        if let Err(e) = self.pick_fastest(false).await {
+        // Say so only when there is no real place yet: a new subscription, or
+        // a provider's note in use. Otherwise it checks quietly.
+        let on_note = self.main_group().is_some_and(|g| {
+            crate::places::current(&self.0.proxies.borrow().groups, &g).is_none_or(|p| crate::places::is_note(&p.name))
+        });
+        let fresh = self.0.fresh.swap(false, std::sync::atomic::Ordering::SeqCst);
+        if fresh || on_note {
+            self.modify(|s| s.locating = true);
+        }
+        if let Err(e) = self.pick_fastest(fresh || on_note).await {
             log::warn!("automatic location: {e}");
         }
+        self.modify(|s| s.locating = false);
         RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
@@ -1158,6 +1178,11 @@ impl Service {
         });
         self.save_profiles();
         if first {
+            if self.settings().auto_location {
+                // From the first frame of Home until the first place is chosen.
+                self.0.fresh.store(true, std::sync::atomic::Ordering::SeqCst);
+                self.modify(|s| s.locating = true);
+            }
             let _ = self.activate_inner(profile.id).await.map_err(|e| self.notify(e, true));
         }
     }
@@ -1360,7 +1385,22 @@ impl Service {
         })
     }
 
+    /// Picks `name` in `group` by hand: in a group of places (the main one or
+    /// its member selectors) that ends the automatic location.
     pub fn select(&self, group: String, name: String) -> impl Future<Output = Result<(), String>> + 'static {
+        let svc = self.clone();
+        self.run(async move {
+            let place_group = svc.main_group().is_some_and(|m| crate::places::place_groups(&svc.0.proxies.borrow().groups, &m).contains(&group));
+            if place_group && svc.settings().auto_location {
+                let mut next = svc.settings();
+                next.auto_location = false;
+                svc.update_settings(next).await?;
+            }
+            svc.select_inner(group, name).await
+        })
+    }
+
+    fn select_inner(&self, group: String, name: String) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
             // Show it at once; the refresh confirms.

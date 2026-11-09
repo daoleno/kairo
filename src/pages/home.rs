@@ -182,12 +182,10 @@ enum Conn {
 
 fn conn() -> Conn {
     let store = store();
-    let testing = store.proxies.with(|p| !p.0.testing.is_empty());
     store.state.with(|s| match &s.core {
         CoreStatus::Running { .. } if s.task.is_some() => Conn::Connecting("Updating…"),
         CoreStatus::Running { .. } => {
-            // Automatic and no place measured yet: the first test is running (or about to).
-            if s.settings.auto_location && s.profiles.active.is_some() && (testing || current_place().is_none_or(|p| p.delay.is_none())) && current_place().is_none_or(|p| p.delay.is_none()) {
+            if s.locating {
                 Conn::Connecting("Finding the fastest location…")
             } else {
                 Conn::On
@@ -580,8 +578,9 @@ fn traffic() -> impl IntoElement {
         store.live.with(|live| {
             let h = height;
             let points: Vec<u64> = live.history.iter().map(|t| t.down + t.up).collect();
-            let mut p = Painter::new();
-            if points.len() < 2 || w <= 0.0 {
+            // A quiet baseline the width of the strip, under everything.
+            let mut p = Painter::new().begin_path().move_to(0.0, h - 3.0).line_to(w, h - 3.0).stroke_color(quiet).line_width(2.0).line_cap(LineCap::Round).stroke();
+            if points.len() < 2 || w <= 0.0 || points.iter().all(|v| *v == 0) {
                 return p;
             }
             let peak = points.iter().copied().max().unwrap_or(0).max(32 * 1024) as f32 * 1.2;
