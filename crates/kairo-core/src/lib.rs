@@ -2,6 +2,7 @@
 //! profiles and settings, talks to the core's controller, and owns the system
 //! proxy and TUN. The NSH app and the tray are views over [`service::Service`].
 
+pub mod ai;
 pub mod autostart;
 pub mod config;
 pub mod controller;
