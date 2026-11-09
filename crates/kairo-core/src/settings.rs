@@ -127,6 +127,8 @@ pub struct Settings {
     pub auto_location: bool,
     /// The accent (`graphite`, `ember`, `iris`, `sage`...; empty: Kairo's).
     pub accent: String,
+    /// AI services on one exit, local models off the proxy, domestic AI direct.
+    pub ai: crate::ai::AiSettings,
 }
 
 impl Default for Settings {
@@ -155,6 +157,7 @@ impl Default for Settings {
             core_path: None,
             auto_location: true,
             accent: String::new(),
+            ai: crate::ai::AiSettings::default(),
         }
     }
 }

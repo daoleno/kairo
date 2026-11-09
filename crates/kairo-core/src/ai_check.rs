@@ -265,6 +265,89 @@ pub fn odd_ones(checks: &[Check]) -> Option<(String, Vec<&'static str>)> {
     (!odd.is_empty()).then(|| (best.0.to_owned(), odd))
 }
 
+/// A connection held open for a while: what a long answer streaming in needs
+/// from the exit and the network between.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hold {
+    /// Still open after `secs` seconds, and a second request on it worked.
+    Held { secs: u64 },
+    /// It ended (or the second request failed) after `after` seconds.
+    Dropped { after: u64 },
+    /// The test could not run (the service was not reached).
+    Failed { why: String },
+}
+
+/// Watches a connection until `secs` have passed. `Ok` when `alive` stayed
+/// true; `Err(elapsed)` at the first look where it was not. Checks every
+/// `step`.
+pub async fn watch_alive(
+    secs: u64,
+    step: Duration,
+    mut alive: impl FnMut() -> bool,
+) -> Result<(), u64> {
+    let started = tokio::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(secs) {
+        tokio::time::sleep(step).await;
+        if !alive() {
+            return Err(started.elapsed().as_secs());
+        }
+    }
+    Ok(())
+}
+
+/// Opens a connection to `host` through the proxy, keeps it for `secs`
+/// seconds and asks on it again. `find` returns the id of the open connection
+/// to `host` that began at or after a unix time; `alive` says whether an id
+/// is still open (both read what the core reports).
+pub async fn hold(
+    proxy_port: u16,
+    host: &str,
+    path: &str,
+    secs: u64,
+    find: impl Fn(&str, i64) -> Option<String>,
+    alive: impl Fn(&str) -> bool,
+    now: impl Fn() -> i64,
+) -> Hold {
+    let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{proxy_port}")) else {
+        return Hold::Failed { why: "no proxy client".into() };
+    };
+    let Ok(http) = reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(Duration::from_secs(20))
+        .pool_idle_timeout(None)
+        .http2_keep_alive_interval(Duration::from_secs(15))
+        .http2_keep_alive_while_idle(true)
+        .user_agent("Kairo-check")
+        .build()
+    else {
+        return Hold::Failed { why: "no proxy client".into() };
+    };
+    let url = format!("https://{host}{path}");
+    let t0 = now();
+    if let Err(e) = http.get(&url).send().await {
+        return Hold::Failed { why: short(&e) };
+    }
+    // The core lists a connection a moment after it opens.
+    let mut id = None;
+    for _ in 0..10 {
+        id = find(host, t0 - 2);
+        if id.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    let Some(id) = id else {
+        return Hold::Failed { why: "the core did not list the connection".into() };
+    };
+    if let Err(after) = watch_alive(secs, Duration::from_secs(3), || alive(&id)).await {
+        return Hold::Dropped { after };
+    }
+    match http.get(&url).send().await {
+        Ok(_) if alive(&id) => Hold::Held { secs },
+        _ => Hold::Dropped { after: secs },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,5 +435,25 @@ mod tests {
         assert!(matches!(c.api, Api::Unreachable { .. }));
         assert_eq!(c.country, Country::Unknown);
         assert!(c.trouble());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn watches_a_connection_until_the_time_is_up_or_it_ends() {
+        // Stays open: Ok after the whole span.
+        assert_eq!(watch_alive(90, Duration::from_secs(3), || true).await, Ok(()));
+        // Ends on the fifth look: reported at about 15 s.
+        let mut looks = 0;
+        let r = watch_alive(90, Duration::from_secs(3), || {
+            looks += 1;
+            looks < 5
+        })
+        .await;
+        assert_eq!(r, Err(15));
+    }
+
+    #[tokio::test]
+    async fn a_hold_through_a_dead_proxy_fails_instead_of_hanging() {
+        let h = hold(9, "claude.ai", "/", 1, |_, _| None, |_| false, || 0).await;
+        assert!(matches!(h, Hold::Failed { .. }));
     }
 }

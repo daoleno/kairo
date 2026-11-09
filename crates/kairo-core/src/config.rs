@@ -116,9 +116,33 @@ pub fn build_moving(
         log::info!("the profile's local port {from} is taken: the core uses {to}");
     }
     let patch = parse_mapping(override_text).map_err(ConfigError::Override)?;
+    // AI on its own exit, local models off the proxy. It goes in before the
+    // override, so the override's `prepend-rules` still come first and a
+    // `rules:` of its own replaces everything, as it always did. "All
+    // Traffic" is then rules with the Location as the rest (see `core_mode`).
+    let all_traffic = settings.mode == crate::settings::Mode::Global;
+    let applied = crate::ai::apply(&mut config, &settings.ai, &settings.tray_group, all_traffic);
     merge(&mut config, patch);
     apply_settings(&mut config, settings);
+    // No group of locations to send the rest through (a bare list of nodes):
+    // the core's own global mode is the only "All Traffic" there is.
+    if all_traffic && settings.ai.enabled && applied.as_ref().is_none_or(|a| a.main.is_none()) {
+        set(&mut config, "mode", "global");
+    }
     Ok(serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"))
+}
+
+/// The mode the core runs for a setting. mihomo's own `global` ignores the
+/// rules, which would let AI traffic follow the Location; with the AI layer
+/// on, "All Traffic" is the `rule` mode over rules that send everything
+/// through the Location.
+pub fn core_mode(settings: &Settings) -> &'static str {
+    use crate::settings::Mode;
+    if settings.ai.enabled && settings.mode == Mode::Global {
+        Mode::Rule.as_str()
+    } else {
+        settings.mode.as_str()
+    }
 }
 
 /// The port in "127.0.0.1:7874", ":1053" or "[::1]:53".
@@ -315,7 +339,7 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
         set(config, "bind-address", "*");
     }
     set(config, "ipv6", s.ipv6);
-    set(config, "mode", s.mode.as_str());
+    set(config, "mode", core_mode(s));
     set(config, "log-level", s.log_level.as_str());
     set(
         config,
@@ -564,8 +588,23 @@ rules:
             get(get(&m, "tun").as_mapping().unwrap(), "enable").as_bool(),
             Some(false)
         );
-        // Untouched parts stay.
-        assert_eq!(get(&m, "rules").as_sequence().unwrap().len(), 2);
+        // Untouched parts stay: the profile's own rules come last, after
+        // the AI layer's.
+        let rules = get(&m, "rules").as_sequence().unwrap();
+        assert!(rules.len() > 2);
+        let tail: Vec<_> = rules[rules.len() - 2..].iter().filter_map(Value::as_str).collect();
+        let profile = parse_mapping(PROFILE).unwrap();
+        let own: Vec<_> = get(&profile, "rules")
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(tail, own);
+        // With the layer off the config is the profile's own.
+        s.ai.enabled = false;
+        let out = build(PROFILE, "", &s).unwrap();
+        assert_eq!(get(&parse_mapping(&out).unwrap(), "rules").as_sequence().unwrap().len(), 2);
     }
 
     #[test]
@@ -579,7 +618,9 @@ prepend-rules:
 append-proxies:
   - {name: b, type: direct}
 "#;
-        let out = build(PROFILE, over, &Settings::default()).unwrap();
+        let mut plain = Settings::default();
+        plain.ai.enabled = false;
+        let out = build(PROFILE, over, &plain).unwrap();
         let m = parse_mapping(&out).unwrap();
         let dns = get(&m, "dns").as_mapping().unwrap();
         assert_eq!(
@@ -596,6 +637,11 @@ append-proxies:
         assert_eq!(rules.len(), 3);
         assert_eq!(get(&m, "proxies").as_sequence().unwrap().len(), 2);
         assert!(m.get("prepend-rules").is_none());
+        // With the AI layer on, the person's own rule still comes first.
+        let out = build(PROFILE, over, &Settings::default()).unwrap();
+        let rules = get(&parse_mapping(&out).unwrap(), "rules").as_sequence().unwrap().clone();
+        assert_eq!(rules[0].as_str(), Some("DOMAIN,kairo.dev,DIRECT"));
+        assert!(rules.iter().any(|r| r.as_str().is_some_and(|r| r.contains("claude.ai"))));
     }
 
     #[test]

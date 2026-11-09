@@ -533,6 +533,48 @@ pub fn exit_state(config: &Mapping, exit: Option<&AiExit>) -> ExitState {
     ExitState::Gone
 }
 
+/// The node a group goes through now, following selectors that point at other
+/// selectors ("Proxies" → "Asia" → "Tokyo 03").
+pub fn resolve(groups: &[crate::model::Group], group: &str) -> Option<String> {
+    let mut name = group.to_owned();
+    for _ in 0..8 {
+        let g = groups.iter().find(|g| g.name == name)?;
+        let now = g.now.clone()?;
+        match g.members.iter().find(|m| m.name == now) {
+            Some(m) if m.is_group => name = now,
+            Some(_) => return Some(now),
+            None => return None,
+        }
+    }
+    None
+}
+
+/// What to select in the AI group so it follows the Location: the Location
+/// group itself when the AI group lists it, else the node the Location is on.
+pub fn follow_target(groups: &[crate::model::Group], group: &str, main: &str) -> Option<String> {
+    let g = groups.iter().find(|g| g.name == group)?;
+    if g.members.iter().any(|m| m.name == main) {
+        return Some(main.to_owned());
+    }
+    let node = resolve(groups, main)?;
+    g.members.iter().any(|m| m.name == node).then_some(node)
+}
+
+/// Where the AI traffic goes: the pinned exit when it is a node of the group
+/// and still the server it was; else follow the Location.
+pub fn want(
+    groups: &[crate::model::Group],
+    group: &str,
+    main: &str,
+    exit: Option<&str>,
+) -> Option<String> {
+    let g = groups.iter().find(|g| g.name == group)?;
+    match exit {
+        Some(n) if g.members.iter().any(|m| m.name == n) => Some(n.to_owned()),
+        _ => follow_target(groups, group, main),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,6 +803,66 @@ rules:
                 assert!(seen.insert(*x), "{x} is both foreign and domestic");
             }
         }
+    }
+
+    fn group(name: &str, now: &str, members: &[(&str, bool)]) -> crate::model::Group {
+        crate::model::Group {
+            name: name.into(),
+            kind: "Selector".into(),
+            now: Some(now.into()),
+            members: members
+                .iter()
+                .map(|(n, is_group)| crate::model::Node {
+                    name: (*n).into(),
+                    kind: String::new(),
+                    udp: false,
+                    delay: None,
+                    alive: true,
+                    is_group: *is_group,
+                })
+                .collect(),
+            hidden: false,
+            test_url: None,
+        }
+    }
+
+    #[test]
+    fn resolves_through_nested_selectors_and_follows_or_pins() {
+        let groups = vec![
+            group("Proxies", "Asia", &[("Asia", true), ("DIRECT", false)]),
+            group("Asia", "Tokyo 03", &[("Tokyo 03", false), ("Tokyo 07", false)]),
+            group("AI", "Proxies", &[("Proxies", true), ("Tokyo 03", false), ("Tokyo 07", false)]),
+            group("Narrow", "Tokyo 03", &[("Tokyo 03", false)]),
+        ];
+        assert_eq!(resolve(&groups, "Proxies").as_deref(), Some("Tokyo 03"));
+        assert_eq!(resolve(&groups, "AI").as_deref(), Some("Tokyo 03"));
+        assert_eq!(resolve(&groups, "Nope"), None);
+        // Follow: the Location group when listed, else the node it is on.
+        assert_eq!(follow_target(&groups, "AI", "Proxies").as_deref(), Some("Proxies"));
+        assert_eq!(follow_target(&groups, "Narrow", "Proxies").as_deref(), Some("Tokyo 03"));
+        // Pinned: a member wins, a missing one falls back to following.
+        assert_eq!(want(&groups, "AI", "Proxies", Some("Tokyo 07")).as_deref(), Some("Tokyo 07"));
+        assert_eq!(want(&groups, "Narrow", "Proxies", Some("Tokyo 07")).as_deref(), Some("Tokyo 03"));
+        assert_eq!(want(&groups, "AI", "Proxies", None).as_deref(), Some("Proxies"));
+        // A loop of selectors does not hang.
+        let looped = vec![group("A", "B", &[("B", true)]), group("B", "A", &[("A", true)])];
+        assert_eq!(resolve(&looped, "A"), None);
+    }
+
+    #[test]
+    fn all_traffic_without_locations_keeps_the_cores_global() {
+        let text = "proxies:\n  - {name: a, type: anytls, server: a.example.net, port: 443, password: x}\nrules:\n  - MATCH,DIRECT\n";
+        let mut s = crate::settings::Settings::default();
+        s.mode = crate::settings::Mode::Global;
+        let out = crate::config::build(text, "", &s).unwrap();
+        let m = cfg(&out);
+        assert_eq!(m.get("mode").and_then(Value::as_str), Some("global"));
+        // With locations, All Traffic is rules.
+        let out = crate::config::build(PLAIN, "", &s).unwrap();
+        assert_eq!(cfg(&out).get("mode").and_then(Value::as_str), Some("rule"));
+        s.ai.enabled = false;
+        let out = crate::config::build(PLAIN, "", &s).unwrap();
+        assert_eq!(cfg(&out).get("mode").and_then(Value::as_str), Some("global"));
     }
 
     /// The core itself accepts what the layer writes (skipped without a core:

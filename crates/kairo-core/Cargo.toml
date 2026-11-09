@@ -16,7 +16,7 @@ serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "time", "sync", "fs", "io-util"] }
 tokio-tungstenite = "0.28"
 futures-util = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip", "http2"] }
 sha2 = "0.10"
 hex = "0.4"
 flate2 = "1"
@@ -29,4 +29,5 @@ tar = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
