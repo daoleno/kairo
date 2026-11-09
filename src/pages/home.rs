@@ -268,6 +268,7 @@ fn home() -> impl IntoElement {
 fn hero() -> impl IntoElement {
     let store = store();
     let state = computed(conn);
+    let last_press = signal(None::<(bool, std::time::Instant)>);
     let on = move || {
         matches!(state.get(), Conn::On | Conn::Connecting(_))
             && !matches!(state.get(), Conn::Connecting("Disconnecting…"))
@@ -315,10 +316,22 @@ fn hero() -> impl IntoElement {
         .items_center()
         .gap_3()
         .py_4()
-        .child(
-            big_switch(on, move |next| store.run(store.svc().connect(next)))
-                .disabled(move || matches!(state.get(), Conn::Connecting(_))),
-        )
+        .child(big_switch(on, move |_| {
+            // A second press soon after the first undoes it, whatever the
+            // screen shows yet: the last press wins (the service orders
+            // them). Later, the screen is the truth.
+            let next = match last_press.get() {
+                Some((v, at))
+                    if at.elapsed() < std::time::Duration::from_secs(3)
+                        && !matches!(state.get(), Conn::Failed(_)) =>
+                {
+                    !v
+                }
+                _ => !on(),
+            };
+            last_press.set(Some((next, std::time::Instant::now())));
+            store.run(store.svc().connect(next));
+        }))
         .child(
             text(headline)
                 .text_size(px(size::display()))
