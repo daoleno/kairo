@@ -13,6 +13,9 @@ use std::sync::Arc;
 use kairo_core::Service;
 use kairo_core::paths::Paths;
 
+#[cfg(target_os = "macos")]
+mod mac_chrome;
+
 fn root() -> nsh_engine_root::Root {
     nsh_engine_root::Root::of::<nsh_app_kairo::App>().tokens(nsh_app_kairo::tokens())
 }
@@ -272,7 +275,7 @@ mod platform {
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
-    use nsh_platform_macos::{AppOptions, AppSource, Appearance};
+    use nsh_platform_macos::{AppOptions, AppSource, Appearance, Components};
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
 
@@ -311,9 +314,20 @@ mod platform {
                 }
             });
         }
+        let spike = std::env::var("KAIRO_SPIKE").unwrap_or_default();
+        let native = spike != "nsh";
+        nsh_app_kairo::chrome::set_native(native);
+        nsh_app_kairo::chrome::set_glass_sidebar(!native);
+        nsh_app_kairo::chrome::set_native_controls(spike != "nshcontrols" && spike != "nsh");
+        let components = Components::default();
+        crate::mac_chrome::controls::register(&components);
+        if native {
+            crate::mac_chrome::install(svc.clone());
+        }
         nsh_platform_macos::run_app(
             AppSource::Rust(super::root()),
             AppOptions {
+                components,
                 title: "Kairo".to_owned(),
                 size: (1180, 760),
                 appearance: Appearance::System,

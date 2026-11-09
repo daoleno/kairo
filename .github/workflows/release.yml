@@ -67,13 +67,15 @@ jobs:
 
   macos:
     needs: verify
-    runs-on: macos-15
+    # The macOS 26 SDK: AppKit draws Liquid Glass only for apps linked against it.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
+      - run: sw_vers; xcodebuild -version; xcrun --show-sdk-version
       - run: scripts/package-macos.sh
       - name: The app and its core are universal and signed
         run: |

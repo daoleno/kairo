@@ -87,6 +87,11 @@ impl Store {
         follow(conn_rx, move |c: &Arc<Connections>| store.connections.set(Snap(c.clone())));
         follow(prox_rx, move |p: &Arc<Proxies>| store.proxies.set(Snap(p.clone())));
         follow(log_rx, move |n: &u64| store.log_seq.set(*n));
+        if crate::chrome::native() {
+            // The platform's sidebar and menus select pages too.
+            follow(crate::chrome::bridge().page.subscribe(), move |p: &Page| store.page.set(*p));
+            effect(move || crate::chrome::select(store.page.get()));
+        }
         store
     }
 

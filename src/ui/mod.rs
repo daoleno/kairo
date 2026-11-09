@@ -5,6 +5,7 @@ pub mod icons;
 
 use nsh_base::{button, input, switch, theme, ButtonElement as Button, Input};
 
+use nsh_core::JsonValue;
 use nsh_core::prelude::*;
 
 pub use icons::{Icon, icon};
@@ -175,7 +176,22 @@ pub fn icon_btn(glyph: Icon, label: &'static str) -> Button {
 // --- Controls ----------------------------------------------------------------------
 
 /// An on/off switch in the platform's proportions.
-pub fn toggle(checked: impl Fn() -> bool + 'static, label: &'static str, on_change: impl Fn(bool) + 'static) -> impl IntoElement {
+pub fn toggle(checked: impl Fn() -> bool + 'static, label: &'static str, on_change: impl Fn(bool) + 'static) -> AnyElement {
+    if crate::chrome::native_controls() {
+        // NSSwitch has no title: its label is the row's text beside it.
+        let _ = label;
+        return native("kairo/switch")
+            .prop("on", move || JsonValue::Bool(checked()))
+            .w(px(38.0))
+            .h(px(22.0))
+            .flex_shrink_0()
+            .on_native_event(move |e: &NativeEvent| {
+                if &*e.name == "change" {
+                    on_change(e.data["on"].as_bool().unwrap_or(false));
+                }
+            })
+            .into_element();
+    }
     switch()
         .checked(checked)
         .accessibility_label(label)
@@ -198,6 +214,7 @@ pub fn toggle(checked: impl Fn() -> bool + 'static, label: &'static str, on_chan
                 .transition_transform()
                 .checked(|s| s.translate_x(px(14.0)))
         })
+        .into_element()
 }
 
 /// A segmented control: one of `options`, the selected one raised.
@@ -206,6 +223,27 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
     selected: impl Fn() -> T + Copy + 'static,
     on_select: impl Fn(T) + Copy + 'static,
 ) -> View {
+    if crate::chrome::native_controls() {
+        let values: Vec<T> = options.iter().map(|o| o.0).collect();
+        let labels: Vec<JsonValue> = options.iter().map(|o| JsonValue::from(o.1)).collect();
+        let width = options.iter().map(|o| o.1.len() as f32 * 7.5 + 26.0).sum::<f32>() + 4.0;
+        let index = {
+            let values = values.clone();
+            move || JsonValue::from(values.iter().position(|v| *v == selected()).map_or(-1, |i| i as i64))
+        };
+        return view().flex_shrink_0().child(
+            native("kairo/segmented")
+                .prop("labels", JsonValue::Array(labels))
+                .prop("selected", index)
+                .w(px(width))
+                .h(px(24.0))
+                .on_native_event(move |e: &NativeEvent| {
+                    if let Some(v) = e.data["index"].as_u64().and_then(|i| values.get(i as usize)) {
+                        on_select(*v);
+                    }
+                }),
+        );
+    }
     view()
         .flex_row()
         .flex_shrink_0()
@@ -409,6 +447,18 @@ pub fn empty_state(glyph: Icon, heading: &'static str, detail: impl IntoReactive
 
 /// A page's header: its title on the left, its actions on the right.
 pub fn page_header(heading: impl IntoReactive<SharedString>, actions: Vec<AnyElement>) -> View {
+    if crate::chrome::native() {
+        // The window's toolbar shows the title.
+        let empty = actions.is_empty();
+        return view()
+            .flex_shrink_0()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .px_5()
+            .style_when(move || !empty, |s| s.h(px(44.0)))
+            .children(actions);
+    }
     view()
         .h(px(HEADER_HEIGHT))
         .flex_shrink_0()

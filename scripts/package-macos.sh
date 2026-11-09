@@ -23,6 +23,10 @@ app=dist/Kairo.app
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 # shellcheck disable=SC2086
 lipo -create $bins -output "$app/Contents/MacOS/Kairo"
+# Liquid Glass (the sidebar, toolbar and controls of macOS 26) needs the 26 SDK.
+sdk=$(otool -l "$app/Contents/MacOS/Kairo" | awk '/LC_BUILD_VERSION/{f=1} f&&$1=="sdk"{print $2; exit}')
+echo "linked against the macOS $sdk SDK"
+[ "${sdk%%.*}" -ge 26 ] || { echo "the macOS 26 SDK or later is needed (got $sdk)" >&2; exit 1; }
 
 # The core: both official builds, joined, signed on its own first.
 cores=$(mktemp -d)

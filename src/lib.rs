@@ -1,6 +1,7 @@
 //! Kairo: a native mihomo client. This crate is the UI, written with Native
 //! Shell (NSH) in Rust; `kairo-core` is the engine and `kairo-tray` the tray.
 
+pub mod chrome;
 mod pages;
 mod shell;
 pub mod store;
@@ -44,7 +45,7 @@ pub fn App() -> impl IntoElement {
         })
     });
 
-    if os() == Os::MacOs {
+    if os() == Os::MacOs && !chrome::native() {
         nsh_core::element::desktop::set_title_bar(nsh_core::desktop::TitleBarStyle::Hidden, Some(px(ui::HEADER_HEIGHT)));
     }
     // macOS has a menu bar; GTK apps on Linux keep their window free of one.

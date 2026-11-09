@@ -4,6 +4,7 @@
 use kairo_core::CoreStatus;
 use nsh_base::{button, theme};
 use nsh_core::element::desktop::title_bar;
+use nsh_core::GlassEffect;
 use nsh_core::prelude::*;
 
 use crate::pages;
@@ -114,12 +115,12 @@ fn sidebar() -> impl IntoElement {
         &[Page::Connections, Page::Rules, Page::Logs, Page::Dns],
         &[Page::Settings],
     ];
+    let glass = crate::chrome::glass_sidebar();
     view()
         .w(px(SIDEBAR_WIDTH))
         .flex_shrink_0()
-        .bg(move || theme().sidebar)
-        .border_r_1()
-        .border_color(move || theme().sidebar_border)
+        .style_when(move || !glass, |s| s.bg(move || theme().sidebar).border_r_1().border_color(move || theme().sidebar_border))
+        .style_when(move || glass, |s| s.m_2().rounded(px(18.0)).glass_effect(GlassEffect::Regular))
         .window_drag(true)
         // Room for macOS's traffic lights when the title bar is hidden.
         .pt(move || if title_bar().top > px(0.0) { title_bar().top + px(6.0) } else { px(12.0) })
@@ -179,7 +180,7 @@ pub fn shell() -> impl IntoElement {
         .flex_row()
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
-        .child(sidebar())
+        .child(when(|| !crate::chrome::native(), sidebar))
         .child(
             view()
                 .flex_1()
