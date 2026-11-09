@@ -148,7 +148,15 @@ mod mac {
 
     pub fn holder(port: u16) -> Option<Holder> {
         let out = std::process::Command::new("/usr/sbin/lsof")
-            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpc"])
+            // `+c 0`: the whole command name, not lsof's first nine characters.
+            .args([
+                "-nP",
+                "+c",
+                "0",
+                &format!("-iTCP:{port}"),
+                "-sTCP:LISTEN",
+                "-Fpc",
+            ])
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
