@@ -1106,6 +1106,12 @@ impl Service {
                 // answer streaming in, a download) finish on theirs. Only the
                 // user's own Close ends them.
                 svc.refresh_proxies_now().await;
+                // Leaving or entering Direct changes what a check measures.
+                let moved = (before.mode == Mode::Direct) != (mode == Mode::Direct);
+                if moved {
+                    let me = svc.clone();
+                    tokio::spawn(async move { me.run_ai_check(true).await });
+                }
             }
             Ok(())
         })

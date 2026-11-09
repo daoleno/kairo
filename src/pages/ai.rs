@@ -300,10 +300,27 @@ fn alerts(selected: Signal<Option<&'static str>>, tiles: Memo<Vec<Tile>>) -> imp
     let store = store();
     dynamic(move || {
         let alert = store.state.with(|s| s.ai.alert.clone());
+        let direct = store
+            .state
+            .with(|s| s.settings.mode == kairo_core::Mode::Direct);
         let odd = store.state.with(|s| ai_check::odd_ones(&s.ai.checks));
         let tiles = tiles.get();
         untracked(move || {
             let mut out = view().gap_2();
+            if direct {
+                out = out.child(banner(
+                    "Route is Direct".to_owned(),
+                    "Everything goes out directly, so AI tools are not using the exit and nothing is checked."
+                        .to_owned(),
+                    vec![Some(
+                        ui::capsule("Use Smart", true)
+                            .on_press(move || {
+                                store.run(store.svc().set_mode(kairo_core::Mode::Rule))
+                            })
+                            .into_element(),
+                    )],
+                ));
+            }
             if let Some(AiAlert::ExitGone { was }) = alert {
                 let place = exit_place();
                 let now = place

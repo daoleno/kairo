@@ -329,6 +329,16 @@ impl Service {
         if !st.settings.ai.enabled || !self.running() || st.profiles.active.is_none() {
             return;
         }
+        // With the Route on Direct the core sends everything out directly,
+        // so a check would measure this computer's own way out, not the exit:
+        // show nothing rather than something that reads as the exit's.
+        if st.settings.mode == crate::settings::Mode::Direct {
+            self.modify(|s| {
+                s.ai.checks.clear();
+                s.ai.holds.clear();
+            });
+            return;
+        }
         let now = unix();
         if !forced && now - self.0.ai_checked_at.load(Ordering::SeqCst) < MIN_GAP {
             return;
