@@ -23,9 +23,10 @@ pub struct AiService {
     pub mono: &'static str,
     /// Domain suffixes that are this service.
     pub suffixes: &'static [&'static str],
-    /// The host the API answers on, with the statuses that mean "reachable"
-    /// when asked without a key (a 401 is the API saying it wants a key).
-    pub api: Option<(&'static str, &'static [u16])>,
+    /// The API's host and a path to ask, with the statuses that mean
+    /// "reachable" when asked without a key (a 401 is the API saying it wants
+    /// one). Measured, not guessed: see the check's tests and the plan.
+    pub api: Option<(&'static str, &'static str, &'static [u16])>,
     /// A Cloudflare-fronted host whose `/cdn-cgi/trace` says where the
     /// service sees the connection from. `None`: only an estimate is possible.
     pub trace_host: Option<&'static str>,
@@ -40,8 +41,13 @@ pub const SERVICES: &[AiService] = &[
         id: "claude",
         name: "Claude",
         mono: "C",
-        suffixes: &["claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com"],
-        api: Some(("api.anthropic.com", &[401, 403])),
+        suffixes: &[
+            "claude.ai",
+            "claude.com",
+            "anthropic.com",
+            "claudeusercontent.com",
+        ],
+        api: Some(("api.anthropic.com", "/v1/models", &[401])),
         trace_host: Some("claude.ai"),
         tools: &["claude"],
     },
@@ -49,8 +55,13 @@ pub const SERVICES: &[AiService] = &[
         id: "chatgpt",
         name: "ChatGPT",
         mono: "O",
-        suffixes: &["chatgpt.com", "openai.com", "oaistatic.com", "oaiusercontent.com"],
-        api: Some(("api.openai.com", &[401])),
+        suffixes: &[
+            "chatgpt.com",
+            "openai.com",
+            "oaistatic.com",
+            "oaiusercontent.com",
+        ],
+        api: Some(("api.openai.com", "/v1/models", &[401])),
         trace_host: Some("chatgpt.com"),
         tools: &["codex", "chatgpt"],
     },
@@ -69,7 +80,11 @@ pub const SERVICES: &[AiService] = &[
             "deepmind.google",
             "deepmind.com",
         ],
-        api: Some(("generativelanguage.googleapis.com", &[403, 404])),
+        api: Some((
+            "generativelanguage.googleapis.com",
+            "/v1beta/models",
+            &[403],
+        )),
         trace_host: None,
         tools: &["gemini"],
     },
@@ -78,7 +93,7 @@ pub const SERVICES: &[AiService] = &[
         name: "Cursor",
         mono: "Cu",
         suffixes: &["cursor.sh", "cursor.com", "cursorapi.com", "cursor-cdn.com"],
-        api: Some(("api2.cursor.sh", &[200])),
+        api: Some(("api2.cursor.sh", "/", &[200])),
         trace_host: None,
         tools: &["cursor"],
     },
@@ -91,7 +106,7 @@ pub const SERVICES: &[AiService] = &[
             "copilot-proxy.githubusercontent.com",
             "copilot.microsoft.com",
         ],
-        api: Some(("api.githubcopilot.com", &[200, 401, 404])),
+        api: Some(("api.githubcopilot.com", "/", &[404])),
         trace_host: None,
         tools: &["copilot"],
     },
@@ -117,11 +132,20 @@ pub const SERVICES: &[AiService] = &[
 
 /// AI services that run in China: reached directly, never through the exit.
 pub const DOMESTIC: &[(&str, &[&str])] = &[
-    ("Kimi", &["kimi.com", "kimi.ai", "moonshot.cn", "moonshot.ai"]),
+    (
+        "Kimi",
+        &["kimi.com", "kimi.ai", "moonshot.cn", "moonshot.ai"],
+    ),
     ("DeepSeek", &["deepseek.com"]),
     ("Doubao", &["doubao.com", "volces.com", "volcengine.com"]),
-    ("Tongyi", &["tongyi.aliyun.com", "qianwen.com", "dashscope.aliyuncs.com"]),
-    ("Zhipu", &["bigmodel.cn", "zhipuai.cn", "chatglm.cn", "z.ai"]),
+    (
+        "Tongyi",
+        &["tongyi.aliyun.com", "qianwen.com", "dashscope.aliyuncs.com"],
+    ),
+    (
+        "Zhipu",
+        &["bigmodel.cn", "zhipuai.cn", "chatglm.cn", "z.ai"],
+    ),
     ("Yuanbao", &["yuanbao.tencent.com", "hunyuan.tencent.com"]),
     ("MiniMax", &["minimaxi.com", "minimax.chat"]),
     ("Ernie", &["yiyan.baidu.com", "wenxin.baidu.com"]),
@@ -266,9 +290,16 @@ pub fn main_group_name(config: &Mapping, preferred: &str) -> Option<String> {
     let selectors: Vec<&Mapping> = all
         .iter()
         .copied()
-        .filter(|g| is_select(g) && !hidden(g) && name_of(&Value::Mapping((*g).clone())) != Some("GLOBAL"))
+        .filter(|g| {
+            is_select(g) && !hidden(g) && name_of(&Value::Mapping((*g).clone())) != Some("GLOBAL")
+        })
         .collect();
-    let name = |g: &Mapping| g.get("name").and_then(Value::as_str).unwrap_or("").to_owned();
+    let name = |g: &Mapping| {
+        g.get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
     if !preferred.is_empty()
         && let Some(g) = selectors.iter().find(|g| name(g) == preferred)
     {
@@ -403,7 +434,9 @@ pub fn apply(
             suffix_rules(&mut rules, sfx, "DIRECT");
         }
     }
-    if ai.downloads && let Some(m) = &main {
+    if ai.downloads
+        && let Some(m) = &main
+    {
         suffix_rules(&mut rules, DOWNLOADS, m);
     }
     for s in SERVICES {
@@ -422,7 +455,11 @@ pub fn apply(
     } else {
         prepend(config, rules);
     }
-    Some(Applied { group, adopted, main })
+    Some(Applied {
+        group,
+        adopted,
+        main,
+    })
 }
 
 fn prepend(config: &mut Mapping, rules: Vec<Value>) {
@@ -508,7 +545,7 @@ mod tests {
 proxies:
   - {name: "🇯🇵 Tokyo 03", type: anytls, server: a.example.net, port: 443, password: x}
   - {name: "🇯🇵 Tokyo 07", type: anytls, server: b.example.net, port: 443, password: x}
-  - {name: "282.21 G | 500.00 G", type: anytls, server: c.example.net, port: 443}
+  - {name: "282.21 G | 500.00 G", type: anytls, server: c.example.net, port: 443, password: x}
 proxy-groups:
   - {name: Proxies, type: select, proxies: ["🇯🇵 Tokyo 03", "🇯🇵 Tokyo 07", DIRECT]}
   - {name: Netflix, type: select, proxies: [Proxies, DIRECT]}
@@ -519,7 +556,7 @@ rules:
 
     const WITH_AI: &str = r#"
 proxies:
-  - {name: "🇯🇵 Tokyo 03", type: anytls, server: a.example.net, port: 443}
+  - {name: "🇯🇵 Tokyo 03", type: anytls, server: a.example.net, port: 443, password: x}
 proxy-groups:
   - {name: Proxies, type: select, proxies: ["🇯🇵 Tokyo 03"]}
   - {name: AI, type: select, proxies: ["🇯🇵 Tokyo 03", Proxies]}
@@ -552,10 +589,15 @@ rules:
     #[test]
     fn tools_by_path() {
         assert_eq!(
-            tool_service("/Applications/Cursor.app/Contents/MacOS/Cursor").unwrap().id,
+            tool_service("/Applications/Cursor.app/Contents/MacOS/Cursor")
+                .unwrap()
+                .id,
             "cursor"
         );
-        assert_eq!(tool_service("/home/me/.local/bin/claude").unwrap().id, "claude");
+        assert_eq!(
+            tool_service("/home/me/.local/bin/claude").unwrap().id,
+            "claude"
+        );
         assert!(tool_service("/usr/bin/curl").is_none());
     }
 
@@ -566,8 +608,13 @@ rules:
         assert_eq!(done.group, KAIRO_AI_GROUP);
         assert!(!done.adopted);
         assert_eq!(done.main.as_deref(), Some("Proxies"));
-        let g = groups(&c).into_iter().find(|g| members(g).contains(&"Proxies")
-            && g.get("name").and_then(Value::as_str) == Some(KAIRO_AI_GROUP)).unwrap();
+        let g = groups(&c)
+            .into_iter()
+            .find(|g| {
+                members(g).contains(&"Proxies")
+                    && g.get("name").and_then(Value::as_str) == Some(KAIRO_AI_GROUP)
+            })
+            .unwrap();
         // The Location first, then the nodes; the provider's note is no place.
         assert_eq!(members(g), ["Proxies", "🇯🇵 Tokyo 03", "🇯🇵 Tokyo 07"]);
         assert_eq!(g.get("hidden").and_then(Value::as_bool), Some(true));
@@ -601,8 +648,12 @@ rules:
         let pos = |needle: &str| r.iter().position(|x| x == needle).unwrap();
         assert_eq!(pos("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve"), 0);
         assert!(pos("DOMAIN-SUFFIX,deepseek.com,DIRECT") > pos("DOMAIN,localhost,DIRECT"));
-        assert!(pos("DOMAIN-SUFFIX,huggingface.co,Proxies") > pos("DOMAIN-SUFFIX,deepseek.com,DIRECT"));
-        assert!(pos("DOMAIN-SUFFIX,claude.ai,Kairo AI") > pos("DOMAIN-SUFFIX,huggingface.co,Proxies"));
+        assert!(
+            pos("DOMAIN-SUFFIX,huggingface.co,Proxies") > pos("DOMAIN-SUFFIX,deepseek.com,DIRECT")
+        );
+        assert!(
+            pos("DOMAIN-SUFFIX,claude.ai,Kairo AI") > pos("DOMAIN-SUFFIX,huggingface.co,Proxies")
+        );
         // The subscription's own rules are untouched, after ours.
         assert!(pos("DOMAIN-SUFFIX,example.org,Proxies") > pos("DOMAIN-SUFFIX,claude.ai,Kairo AI"));
         assert_eq!(r.last().unwrap(), "MATCH,Proxies");
@@ -611,14 +662,21 @@ rules:
     #[test]
     fn switches_turn_parts_off() {
         let mut c = cfg(PLAIN);
-        let ai = AiSettings { domestic_direct: false, downloads: false, ..Default::default() };
+        let ai = AiSettings {
+            domestic_direct: false,
+            downloads: false,
+            ..Default::default()
+        };
         apply(&mut c, &ai, "", false).unwrap();
         let r = rules(&c);
         assert!(!r.iter().any(|x| x.contains("deepseek.com")));
         assert!(!r.iter().any(|x| x.contains("huggingface.co")));
         assert!(r.iter().any(|x| x.contains("claude.ai")));
         let mut off = cfg(PLAIN);
-        let ai = AiSettings { enabled: false, ..Default::default() };
+        let ai = AiSettings {
+            enabled: false,
+            ..Default::default()
+        };
         assert!(apply(&mut off, &ai, "", false).is_none());
         assert_eq!(off, cfg(PLAIN));
     }
@@ -657,7 +715,11 @@ rules:
         let c = cfg(PLAIN);
         let fp = fingerprint(&c, "🇯🇵 Tokyo 03").unwrap();
         assert_ne!(fp, fingerprint(&c, "🇯🇵 Tokyo 07").unwrap());
-        let exit = AiExit { name: "🇯🇵 Tokyo 03".into(), fingerprint: fp, since: 0 };
+        let exit = AiExit {
+            name: "🇯🇵 Tokyo 03".into(),
+            fingerprint: fp,
+            since: 0,
+        };
         assert_eq!(exit_state(&c, Some(&exit)), ExitState::Same);
         assert_eq!(exit_state(&c, None), ExitState::Unpinned);
 
@@ -675,7 +737,11 @@ rules:
         let s: AiSettings = serde_json::from_str("{}").unwrap();
         assert!(s.enabled && s.domestic_direct && s.downloads && s.exit.is_none());
         let s = AiSettings {
-            exit: Some(AiExit { name: "x".into(), fingerprint: "f".into(), since: 5 }),
+            exit: Some(AiExit {
+                name: "x".into(),
+                fingerprint: "f".into(),
+                since: 5,
+            }),
             ..Default::default()
         };
         let back: AiSettings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
@@ -693,6 +759,27 @@ rules:
         for (_, sfx) in DOMESTIC {
             for x in *sfx {
                 assert!(seen.insert(*x), "{x} is both foreign and domestic");
+            }
+        }
+    }
+
+    /// The core itself accepts what the layer writes (skipped without a core:
+    /// set KAIRO_TEST_CORE to a mihomo binary).
+    #[tokio::test]
+    async fn the_core_accepts_the_layers_config() {
+        let Some(core) = std::env::var_os("KAIRO_TEST_CORE").map(std::path::PathBuf::from) else {
+            return;
+        };
+        for text in [PLAIN, WITH_AI] {
+            for all in [false, true] {
+                let mut c = cfg(text);
+                apply(&mut c, &AiSettings::default(), "", all).unwrap();
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join("config.yaml");
+                std::fs::write(&file, serde_yaml::to_string(&Value::Mapping(c)).unwrap()).unwrap();
+                crate::config::validate(&core, dir.path(), &file)
+                    .await
+                    .unwrap();
             }
         }
     }
