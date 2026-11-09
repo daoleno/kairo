@@ -3,6 +3,7 @@
 
 pub mod accent;
 pub mod chrome;
+pub mod palette;
 mod pages;
 mod shell;
 pub mod store;
@@ -73,7 +74,7 @@ fn location_items(store: Store) -> Vec<MenuItem> {
     let auto = store.state.with(|s| s.settings.auto_location);
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
     let (now, mut list) = store.proxies.with(|p| match places::main_group(&p.0.groups, &preferred) {
-        Some(g) => (g.now.clone(), places::places(g)),
+        Some(g) => (places::current(&p.0.groups, g).map(|c| c.name), places::places(&p.0.groups, g)),
         None => (None, vec![]),
     });
     list.retain(|p| !p.is_group);

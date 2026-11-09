@@ -46,7 +46,7 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
                     store.run(store.svc().update_all_profiles())
                 })
                 .enabled(move || any_remote() && !updating_all()),
-                toolbar::button("profiles.add", "Add Profile", Glyph::Add, Icon::Plus, move || adding.set(true))
+                toolbar::button("profiles.add", "Add Subscription", Glyph::Add, Icon::Plus, move || adding.set(true))
                     .enabled(move || !adding.get())
                     .prominent(),
             ],
@@ -78,10 +78,10 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
                         .otherwise(move || {
                             ui::empty_state(
                                 Icon::Profiles,
-                                "No profiles yet",
-                                "A profile is the configuration the core runs: a subscription URL from your provider, or a YAML file.",
+                                "No subscriptions yet",
+                                "A subscription link from your provider, or a Clash / mihomo config file.",
                                 (!adding.get_untracked()).then(|| {
-                                    ui::btn_icon(Icon::Plus, "Add Profile", Variant::Primary).on_press(move || adding.set(true)).into_element()
+                                    ui::btn_icon(Icon::Plus, "Add Subscription", Variant::Primary).on_press(move || adding.set(true)).into_element()
                                 }),
                             )
                         }),
@@ -95,6 +95,8 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
     let url = signal(String::new());
     let name = signal(String::new());
     let busy = signal(false);
+    // Why the last try failed, until the next: in the provider's words, with Retry.
+    let problem = signal(None::<String>);
     let valid = move || url.with(|u| {
         let u = u.trim();
         u.starts_with("http://") || u.starts_with("https://")
@@ -104,12 +106,18 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
             return;
         }
         busy.set(true);
+        problem.set(None);
         let n = name.get_untracked().trim().to_owned();
-        store.run_then(store.svc().add_remote(url.get_untracked().trim().to_owned(), (!n.is_empty()).then_some(n)), move |r| {
+        let f = store.svc().add_remote(url.get_untracked().trim().to_owned(), (!n.is_empty()).then_some(n));
+        spawn(async move {
+            let r = f.await;
             busy.set(false);
-            if r.is_ok() {
-                store.info("Profile added");
-                adding.set(false);
+            match r {
+                Ok(_) => {
+                    store.info("Subscription added");
+                    adding.set(false);
+                }
+                Err(e) => problem.set(Some(e)),
             }
         });
     };
@@ -117,7 +125,7 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
         let svc = store.svc();
         spawn(async move {
             let picked = pick_paths(
-                OpenDialog::files().filter(FileFilter::new("Clash / mihomo config", ["yaml", "yml", "txt"])).title("Import a Profile"),
+                OpenDialog::files().filter(FileFilter::new("Clash / mihomo config", ["yaml", "yml", "txt"])).title("Import a Config"),
             )
             .await;
             match picked {
@@ -125,7 +133,7 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
                     if let Some(path) = paths.into_iter().next() {
                         store.run_then(svc.add_file(path), move |r| {
                             if r.is_ok() {
-                                store.info("Profile imported");
+                                store.info("Config imported");
                                 adding.set(false);
                             }
                         });
@@ -139,7 +147,7 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
     ui::card()
         .p_4()
         .gap_3()
-        .child(ui::section_label("New Profile"))
+        .child(ui::section_label("New Subscription"))
         .child(
             view()
                 .gap_1()
@@ -152,6 +160,20 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
                 .child(ui::muted("Name (optional; the provider's name is used otherwise)"))
                 .child(ui::field(name, "My Provider").w(px(320.0)).on_submit(move |_: &str| submit())),
         )
+        .child(when(
+            move || problem.with(|p| p.is_some()),
+            move || {
+                let said = move || crate::pages::home::explain(&problem.get().unwrap_or_default());
+                view()
+                    .gap_2()
+                    .p_3()
+                    .rounded(px(14.0))
+                    .bg(move || theme().destructive.opacity(0.08))
+                    .child(text(move || said().0).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
+                    .child(when(move || said().1.is_some(), move || ui::muted(move || said().1.unwrap_or_default())))
+                    .child(view().flex_row().child(ui::capsule("Retry", false).on_press(move || submit())))
+            },
+        ))
         .child(
             view()
                 .flex_row()
@@ -285,10 +307,12 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
                 .child(when(
                     move || p.with(|p| p.last_error.is_some()),
                     move || {
-                        text(move || -> SharedString { p.with(|p| p.last_error.clone().unwrap_or_default()).into() })
-                            .text_size(px(size::small()))
-                            .text_color(move || theme().destructive)
-                            .number_of_lines(2)
+                        text(move || -> SharedString {
+                            p.with(|p| format!("Couldn't update — using the saved copy. {}", crate::pages::home::explain(p.last_error.as_deref().unwrap_or_default()).0)).into()
+                        })
+                        .text_size(px(size::small()))
+                        .text_color(move || theme().muted_foreground)
+                        .number_of_lines(2)
                     },
                 )),
         )
@@ -445,7 +469,7 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
                 .window_drag(true)
                 .child(
                     button()
-                        .accessibility_label("Back to Profiles")
+                        .accessibility_label("Back to Subscriptions")
                         .on_press(move || editing.set(None))
                         .flex_row()
                         .items_center()

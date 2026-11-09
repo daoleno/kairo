@@ -43,6 +43,15 @@ impl Mode {
         }
     }
 
+    /// The route's name in Kairo's words.
+    pub fn route(self) -> &'static str {
+        match self {
+            Mode::Rule => "Smart",
+            Mode::Global => "All Traffic",
+            Mode::Direct => "Direct",
+        }
+    }
+
     pub fn parse(s: &str) -> Option<Mode> {
         match s.to_ascii_lowercase().as_str() {
             "rule" => Some(Mode::Rule),

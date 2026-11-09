@@ -10,6 +10,7 @@ also keeps sending requests through Kairo's mixed port so the live views move.
     python3 -I scripts/fixture.py --port 18080 [--traffic 17897]
 
 Subscription URL: http://127.0.0.1:<port>/sub
+A provider's notice instead of a config: http://127.0.0.1:<port>/notice
 """
 
 import argparse
@@ -137,6 +138,11 @@ async def origin_handler(reader, writer, sub):
             + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
             + body
         )
+    elif path.endswith("/notice"):
+        # A provider that answers with a message instead of a config (fetching
+        # not enabled on its website, an expired plan).
+        body = "请登录网站后台，在订阅页面开启订阅获取。每次开启后，订阅可获取有效时间为：10 分钟".encode()
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n" + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
     elif path.startswith("/stream"):
         size = random.randint(1_000_000, 6_000_000)
         writer.write(f"HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n".encode())

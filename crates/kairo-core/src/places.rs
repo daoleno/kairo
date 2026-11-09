@@ -16,16 +16,17 @@ pub fn main_group<'a>(groups: &'a [Group], preferred: &str) -> Option<&'a Group>
         return Some(g);
     }
     let followers = |name: &str| groups.iter().filter(|g| g.name != name && g.name != "GLOBAL" && g.members.iter().any(|m| m.name == name)).count();
-    let real = |g: &Group| g.members.iter().filter(|m| !m.is_group && !is_builtin(&m.name)).count();
-    // Most followed, then most places; the first in config order on a tie.
-    let mut best: Option<(&Group, (usize, usize))> = None;
+    let reachable = |g: &Group| !places(groups, g).is_empty();
+    // Most followed (the group every app group lists); the first in config
+    // order on a tie (configs list the main choice first).
+    let mut best: Option<(&Group, usize)> = None;
     for g in selectors() {
-        let score = (followers(&g.name), real(g));
-        if score.1 == 0 && !g.members.iter().any(|m| m.is_group) {
+        if !reachable(g) {
             continue;
         }
-        if best.is_none_or(|(_, b)| score > b) {
-            best = Some((g, score));
+        let f = followers(&g.name);
+        if best.is_none_or(|(_, b)| f > b) {
+            best = Some((g, f));
         }
     }
     best.map(|(g, _)| g).or_else(|| selectors().next())
@@ -90,10 +91,67 @@ pub struct Place {
     pub is_group: bool,
 }
 
-/// The main group's members as places: notes and mihomo's own outbounds left
-/// out (they are not somewhere to go).
-pub fn places(group: &Group) -> Vec<Place> {
-    group.members.iter().filter(|m| !is_note(&m.name) && !is_builtin(&m.name)).map(place).collect()
+/// The places the main group reaches: its nodes, and the nodes of the
+/// selector groups among its members ("Asia", "United States"), each once.
+/// Notes and mihomo's own outbounds are left out (not somewhere to go).
+pub fn places(groups: &[Group], main: &Group) -> Vec<Place> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let mut push = |m: &Node, out: &mut Vec<Place>| {
+        if !m.is_group && !is_note(&m.name) && !is_builtin(&m.name) && seen.insert(m.name.clone()) {
+            out.push(place(m));
+        }
+    };
+    for m in &main.members {
+        push(m, &mut out);
+    }
+    for m in main.members.iter().filter(|m| m.is_group) {
+        if let Some(g) = groups.iter().find(|g| g.name == m.name && g.selectable()) {
+            for n in &g.members {
+                push(n, &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// The selections that make the main group go through `name`: itself, or
+/// the member selector that has it, then that selector in the main group.
+pub fn route_to(groups: &[Group], main: &Group, name: &str) -> Vec<(String, String)> {
+    if main.members.iter().any(|m| m.name == name) {
+        return vec![(main.name.clone(), name.to_owned())];
+    }
+    // The member group in use first, then the others in order.
+    let mut members: Vec<&Node> = main.members.iter().filter(|m| m.is_group).collect();
+    members.sort_by_key(|m| main.now.as_deref() != Some(m.name.as_str()));
+    for m in members {
+        if let Some(g) = groups.iter().find(|g| g.name == m.name && g.selectable())
+            && g.members.iter().any(|n| n.name == name)
+        {
+            return vec![(g.name.clone(), name.to_owned()), (main.name.clone(), g.name.clone())];
+        }
+    }
+    vec![]
+}
+
+/// The node the main group goes through now (through a member selector).
+pub fn current(groups: &[Group], main: &Group) -> Option<Place> {
+    let now = main.now.as_deref()?;
+    match main.members.iter().find(|m| m.name == now)? {
+        m if !m.is_group => Some(place(m)),
+        m => {
+            let g = groups.iter().find(|g| g.name == m.name)?;
+            let inner = g.now.as_deref()?;
+            g.members.iter().find(|n| n.name == inner && !n.is_group).map(place)
+        }
+    }
+}
+
+/// The groups whose members are places: the main one and its member selectors.
+pub fn place_groups(groups: &[Group], main: &Group) -> Vec<String> {
+    let mut out = vec![main.name.clone()];
+    out.extend(main.members.iter().filter(|m| m.is_group && groups.iter().any(|g| g.name == m.name && g.selectable())).map(|m| m.name.clone()));
+    out
 }
 
 pub fn place(node: &Node) -> Place {
@@ -108,8 +166,8 @@ pub fn notes(group: &Group) -> Vec<String> {
 }
 
 /// The fastest place that answered.
-pub fn fastest(group: &Group) -> Option<Place> {
-    places(group).into_iter().filter(|p| !p.is_group && p.delay.is_some_and(|d| d > 0)).min_by_key(|p| p.delay)
+pub fn fastest(groups: &[Group], main: &Group) -> Option<Place> {
+    places(groups, main).into_iter().filter(|p| p.delay.is_some_and(|d| d > 0)).min_by_key(|p| p.delay)
 }
 
 /// A flag at the start of the name (two regional indicators), and the rest.
@@ -309,11 +367,43 @@ mod tests {
     }
 
     #[test]
+    fn a_main_group_of_groups() {
+        // The fixture's shape: Proxy picks a region group, the region its node.
+        let mut proxy = group("Proxy", &["Auto", "Asia", "US", "DIRECT"]);
+        for m in &mut proxy.members {
+            m.is_group = m.name != "DIRECT";
+        }
+        proxy.now = Some("Asia".into());
+        let mut auto = group("Auto", &["🇯🇵 Tokyo 01", "🇺🇸 Seattle 01"]);
+        auto.kind = "URLTest".into();
+        let mut asia = group("Asia", &["🇯🇵 Tokyo 01", "🇭🇰 HK 02"]);
+        asia.now = Some("🇭🇰 HK 02".into());
+        let us = group("US", &["🇺🇸 Seattle 01"]);
+        let mut fin = group("Final", &["Proxy", "DIRECT"]);
+        fin.members[0].is_group = true;
+        let mut ai = group("AI", &["US", "Asia", "Proxy"]);
+        for m in &mut ai.members {
+            m.is_group = true;
+        }
+        let gs = vec![proxy.clone(), auto, asia, us, ai, fin];
+        assert_eq!(main_group(&gs, "").unwrap().name, "Proxy");
+        let names: Vec<String> = places(&gs, &proxy).into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["🇯🇵 Tokyo 01", "🇭🇰 HK 02", "🇺🇸 Seattle 01"]);
+        assert_eq!(current(&gs, &proxy).unwrap().name, "🇭🇰 HK 02");
+        assert_eq!(
+            route_to(&gs, &proxy, "🇺🇸 Seattle 01"),
+            [("US".to_string(), "🇺🇸 Seattle 01".to_string()), ("Proxy".to_string(), "US".to_string())]
+        );
+        assert_eq!(route_to(&gs, &proxy, "🇯🇵 Tokyo 01")[0].0, "Asia");
+    }
+
+    #[test]
     fn fastest_skips_notes_and_failures() {
         let mut g = group("Proxies", &[]);
         g.members = vec![node("282.21 G | 500.00 G", Some(20)), node("🇭🇰 HK 1", Some(0)), node("🇯🇵 JP 1", Some(48)), node("🇸🇬 SG 1", Some(39))];
-        assert_eq!(fastest(&g).unwrap().name, "🇸🇬 SG 1");
-        let regions = by_region(&places(&g));
+        let gs = vec![g.clone()];
+        assert_eq!(fastest(&gs, &g).unwrap().name, "🇸🇬 SG 1");
+        let regions = by_region(&places(&gs, &g));
         assert_eq!(regions.iter().map(|r| r.0).collect::<Vec<_>>(), ["Singapore", "Japan", "Hong Kong"]);
     }
 }
@@ -330,7 +420,7 @@ mod real {
         let main = super::main_group(&groups, "").unwrap();
         println!("main: {} ({} members)", main.name, main.members.len());
         println!("notes: {:?}", super::notes(main));
-        for (r, ps) in super::by_region(&super::places(main)) {
+        for (r, ps) in super::by_region(&super::places(&groups, main)) {
             println!("{r}: {}", ps.len());
         }
         for a in super::app_choices(&groups, &main.name) {

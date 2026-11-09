@@ -48,6 +48,17 @@ impl CoreStatus {
             CoreStatus::Failed { .. } => "Stopped with an error",
         }
     }
+
+    /// The state as a person says it (the core runs: connected).
+    pub fn plain(&self) -> &'static str {
+        match self {
+            CoreStatus::Stopped => "Not Connected",
+            CoreStatus::Starting => "Connecting",
+            CoreStatus::Running { .. } => "Connected",
+            CoreStatus::Stopping => "Disconnecting",
+            CoreStatus::Failed { .. } => "Couldn't Connect",
+        }
+    }
 }
 
 /// A message for the user, shown once.
@@ -86,6 +97,14 @@ pub struct State {
     pub notice: Option<Notice>,
     /// A problem the core reported at start that it survives (a port in use).
     pub warning: Option<String>,
+}
+
+impl State {
+    /// The connection as a person says it: nothing to connect through yet
+    /// is "Not Set Up", whatever the core does meanwhile.
+    pub fn plain(&self) -> &'static str {
+        if self.profiles.active.is_none() { "Not Set Up" } else { self.core.plain() }
+    }
 }
 
 /// The live numbers.
@@ -147,6 +166,17 @@ struct Inner {
 pub struct Service(Arc<Inner>);
 
 static GLOBAL: OnceLock<Service> = OnceLock::new();
+
+/// Awaits futures together.
+async fn futures_join<T>(fs: Vec<impl Future<Output = T>>) -> Vec<T> {
+    let handles: Vec<_> = fs.into_iter().map(|f| Box::pin(f)).collect();
+    let mut out = Vec::new();
+    // Each is already running on the runtime (`run`); awaiting in order is fine.
+    for h in handles {
+        out.push(h.await);
+    }
+    out
+}
 
 /// Turns a task's failure into the user's words.
 fn joined<T>(r: Result<Result<T, String>, tokio::task::JoinError>) -> Result<T, String> {
@@ -961,8 +991,8 @@ impl Service {
         crate::places::main_group(&self.0.proxies.borrow().groups, &preferred).cloned()
     }
 
-    /// Goes through `name` (a place of the main group); `None`: the fastest,
-    /// kept so (automatic).
+    /// Goes through `name` (a place the main group reaches); `None`: the
+    /// fastest, kept so (automatic).
     pub fn set_location(&self, name: Option<String>) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
@@ -971,33 +1001,66 @@ impl Service {
                 next.auto_location = name.is_none();
                 svc.update_settings(next).await?;
             }
-            let group = svc.main_group().ok_or("This subscription has no locations to choose from")?;
             match name {
-                Some(n) => svc.select(group.name, n).await,
+                Some(n) => svc.go_through(&n).await,
                 None => svc.pick_fastest(true).await.map(|_| ()),
             }
         })
     }
 
-    /// Tests the locations and goes through the fastest (when `force`, or when
+    /// Selects the way to `name`: in its selector, then that selector in the main group.
+    async fn go_through(&self, name: &str) -> Result<(), String> {
+        let group = self.main_group().ok_or("This subscription has no locations to choose from")?;
+        let steps = crate::places::route_to(&self.0.proxies.borrow().groups, &group, name);
+        if steps.is_empty() {
+            return Err(format!("{name} is not one of this subscription's locations"));
+        }
+        for (g, member) in steps {
+            self.select(g, member).await?;
+        }
+        Ok(())
+    }
+
+    /// Tests every place (the main group and its member selectors) at once.
+    pub fn test_places(&self) -> impl Future<Output = Result<(), String>> + 'static {
+        let svc = self.clone();
+        self.run(async move {
+            let Some(group) = svc.main_group() else { return Ok(()) };
+            let names = crate::places::place_groups(&svc.0.proxies.borrow().groups, &group);
+            let tests: Vec<_> = names.into_iter().map(|g| svc.test_group(g)).collect();
+            let mut last = Ok(());
+            for r in futures_join(tests).await {
+                if r.is_err() {
+                    last = r;
+                }
+            }
+            last
+        })
+    }
+
+    /// Tests the places and goes through the fastest (when `force`, or when
     /// the current one is a note, failed, or much slower). The place it chose.
     async fn pick_fastest(&self, force: bool) -> Result<Option<String>, String> {
+        if self.main_group().is_none() {
+            return Ok(None);
+        }
+        self.test_places().await?;
         let Some(group) = self.main_group() else { return Ok(None) };
-        self.test_group(group.name.clone()).await?;
-        let Some(group) = self.main_group() else { return Ok(None) };
-        let Some(best) = crate::places::fastest(&group) else {
+        let (best, current) = {
+            let groups = &self.0.proxies.borrow().groups;
+            (crate::places::fastest(groups, &group), crate::places::current(groups, &group))
+        };
+        let Some(best) = best else {
             return Err("No location answered. Check the network, or update the subscription".into());
         };
-        let now = group.now.clone().unwrap_or_default();
-        let current = group.members.iter().find(|m| m.name == now);
         let keep = !force
-            && current.is_some_and(|c| {
+            && current.as_ref().is_some_and(|c| {
                 !crate::places::is_note(&c.name) && c.delay.is_some_and(|d| d > 0 && d <= best.delay.unwrap_or(0).saturating_mul(3) / 2 + 40)
             });
-        if keep || now == best.name {
-            return Ok(Some(now));
+        if keep || current.as_ref().is_some_and(|c| c.name == best.name) {
+            return Ok(current.map(|c| c.name));
         }
-        self.select(group.name, best.name.clone()).await?;
+        self.go_through(&best.name).await?;
         Ok(Some(best.name))
     }
 

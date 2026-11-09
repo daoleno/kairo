@@ -558,6 +558,8 @@ pub fn popup_button<T: Clone + PartialEq + 'static>(
     };
     base_button(Variant::Secondary)
         .min_w(px(120.0))
+        .rounded_full()
+        .px_3p5()
         .justify_between()
         .on_press(move || {
             let current = selected();

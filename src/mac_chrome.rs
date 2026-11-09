@@ -696,8 +696,8 @@ impl Footer {
             }
             _ => self.update.setHidden(true),
         }
-        self.status.setStringValue(&NSString::from_str(s.core.title()));
-        self.mode.setStringValue(&NSString::from_str(&format!("· {}", s.settings.mode.title())));
+        self.status.setStringValue(&NSString::from_str(s.plain()));
+        self.mode.setStringValue(&NSString::from_str(&format!("· {}", s.settings.mode.route())));
         let tint = match &s.core {
             CoreStatus::Running { .. } => NSColor::systemGreenColor(),
             CoreStatus::Starting | CoreStatus::Stopping => NSColor::systemOrangeColor(),

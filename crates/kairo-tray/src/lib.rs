@@ -63,17 +63,17 @@ impl Model {
         let proxies = svc.proxies().borrow().clone();
         let s = &state.settings;
         let main = kairo_core::places::main_group(&proxies.groups, &s.tray_group);
-        let now_place = main.and_then(|g| g.now.as_ref().and_then(|n| g.members.iter().find(|m| &m.name == n))).map(kairo_core::places::place);
+        let now_place = main.and_then(|g| kairo_core::places::current(&proxies.groups, g));
         let label_of = |p: &kairo_core::places::Place| format!("{}{}", p.flag.clone().map(|f| f + "  ").unwrap_or_default(), p.title);
         let group = main.map(|g| {
-            let mut places: Vec<_> = kairo_core::places::places(g).into_iter().filter(|p| !p.is_group).collect();
+            let mut places = kairo_core::places::places(&proxies.groups, g);
             places.sort_by_key(|p| match p.delay {
                 Some(d) if d > 0 => d,
                 _ => u32::MAX,
             });
             let mut choices = vec![Choice { name: String::new(), label: "Fastest".into(), delay: None }];
             choices.extend(places.into_iter().take(PLACES).map(|p| Choice { label: label_of(&p), name: p.name, delay: p.delay }));
-            let now = if s.auto_location { Some(String::new()) } else { g.now.clone() };
+            let now = if s.auto_location { Some(String::new()) } else { now_place.as_ref().map(|p| p.name.clone()) };
             (g.name.clone(), choices, now)
         });
         let place = match (&now_place, s.auto_location) {

@@ -83,8 +83,8 @@ fn core_footer() -> impl IntoElement {
                 .items_center()
                 .gap_2()
                 .child(ui::dot(tone))
-                .child(text(move || status().title()).text_size(px(size::small())).font_weight(FontWeight::MEDIUM).flex_1())
-                .child(text(move || store.state.with(|s| s.settings.mode.title())).text_size(px(size::small())).text_color(move || theme().muted_foreground)),
+                .child(text(move || store.state.with(|s| s.plain())).text_size(px(size::small())).font_weight(FontWeight::MEDIUM).flex_1())
+                .child(text(move || store.state.with(|s| s.settings.mode.route())).text_size(px(size::small())).text_color(move || theme().muted_foreground)),
         )
         .child(
             view()
@@ -204,4 +204,5 @@ pub fn shell() -> impl IntoElement {
                 })),
         )
         .child(toast())
+        .child(crate::palette::palette())
 }

@@ -67,16 +67,9 @@ pub fn page() -> impl IntoElement {
                                         let group = stored(a.group.clone());
                                         let now = a.now.clone().unwrap_or_default();
                                         let options: Vec<(String, String)> = a.options.iter().map(|o| (o.clone(), option_title(o, &main, &direct))).collect();
-                                        let detail: SharedString = if a.follows_main {
-                                            "Follows your location".into()
-                                        } else if a.direct {
-                                            "Goes direct".into()
-                                        } else {
-                                            format!("Through {}", option_title(&now, &main, &direct)).into()
-                                        };
                                         let selected = stored(now);
                                         ui::row_view()
-                                            .child(view().flex_1().min_w(px(0.0)).gap_0p5().child(ui::body(a.group.clone())).child(ui::muted(detail).text_size(px(size::small()))))
+                                            .child(view().flex_1().min_w(px(0.0)).child(ui::body(a.group.clone())))
                                             .child(ui::popup_button(move || options.clone(), move || selected.with(|s| s.clone()), move |v: String| {
                                                 store.run(store.svc().select(group.with(|g| g.clone()), v))
                                             }))

@@ -233,8 +233,8 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
             let l = live.borrow_and_update().clone();
             footer.update(&s, &l);
             let n = |v: usize| if v > 0 { v.to_string() } else { String::new() };
-            counts[2].set_label(&n(s.profiles.profiles.len()));
-            counts[3].set_label(&n(l.connections));
+            counts[3].set_label(&n(s.profiles.profiles.len()));
+            counts[4].set_label(&n(l.connections));
             let scheme = match s.settings.theme {
                 Theme::System => adw::ColorScheme::Default,
                 Theme::Light => adw::ColorScheme::ForceLight,
@@ -385,8 +385,8 @@ impl Footer {
             }
             _ => self.update.set_visible(false),
         }
-        self.status.set_label(s.core.title());
-        self.mode.set_label(s.settings.mode.title());
+        self.status.set_label(s.plain());
+        self.mode.set_label(s.settings.mode.route());
         let tone = match &s.core {
             CoreStatus::Running { .. } => "success",
             CoreStatus::Starting | CoreStatus::Stopping => "warning",
@@ -399,7 +399,7 @@ impl Footer {
         self.down.set_visible(running);
         self.up.set_label(&format!("↑ {}", kairo_core::speed(l.up)));
         self.down.set_label(&format!("↓ {}", kairo_core::speed(l.down)));
-        self.root.update_property(&[gtk::accessible::Property::Label(&format!("{} · {}", s.core.title(), s.settings.mode.title()))]);
+        self.root.update_property(&[gtk::accessible::Property::Label(&format!("{} · {}", s.plain(), s.settings.mode.route()))]);
     }
 }
 

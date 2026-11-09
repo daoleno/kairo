@@ -15,9 +15,10 @@ use crate::ui::{self, Icon, icon, size};
 
 pub fn page() -> impl IntoElement {
     let store = store();
-    let has_profile = move || store.state.with(|s| s.profiles.active.is_some());
+    // Only a change of this rebuilds the page (not every state update).
+    let has_profile = computed(move || store.state.with(|s| s.profiles.active.is_some()));
     view().flex_1().child(toolbar::floating(Page::Overview, String::new, vec![])).child(dynamic(move || {
-        if has_profile() { untracked(home).into_element() } else { untracked(welcome).into_element() }
+        if has_profile.get() { untracked(home).into_element() } else { untracked(welcome).into_element() }
     }))
 }
 
@@ -205,8 +206,7 @@ fn current_place() -> Option<Place> {
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
     store.proxies.with(|p| {
         let g = places::main_group(&p.0.groups, &preferred)?;
-        let now = g.now.clone()?;
-        g.members.iter().find(|m| m.name == now).map(places::place)
+        places::current(&p.0.groups, g)
     })
 }
 
@@ -251,7 +251,7 @@ fn hero() -> impl IntoElement {
                         parts.push(format!("{d} ms"));
                     }
                     if auto {
-                        parts.push("fastest".into());
+                        parts.push("automatic".into());
                     }
                     if sysproxy_off {
                         parts.push("apps opt in by port".into());
@@ -402,10 +402,14 @@ fn location_row() -> impl IntoElement {
 /// The locations were never tested, or long ago: test them now.
 fn test_if_stale() {
     let store = store();
-    let Some(group) = store.svc().main_group() else { return };
-    let untested = group.members.iter().filter(|m| !m.is_group && m.delay.is_none()).count();
-    if untested * 2 >= group.members.len() && !store.proxies.with_untracked(|p| p.0.testing.contains(&group.name)) {
-        spawn(store.svc().test_group(group.name));
+    let (untested, total, testing) = store.proxies.with_untracked(|p| {
+        let preferred = store.state.with_untracked(|s| s.settings.tray_group.clone());
+        let Some(g) = places::main_group(&p.0.groups, &preferred) else { return (0, 0, true) };
+        let all = places::places(&p.0.groups, g);
+        (all.iter().filter(|p| p.delay.is_none()).count(), all.len(), !p.0.testing.is_empty())
+    });
+    if total > 0 && untested * 2 >= total && !testing {
+        spawn(store.svc().test_places());
     }
 }
 
@@ -418,8 +422,9 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
         let q = query.get().to_lowercase();
         store.proxies.with(|p| {
             let Some(g) = places::main_group(&p.0.groups, &preferred()) else { return (None, vec![], false) };
-            let all: Vec<Place> = places::places(g).into_iter().filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q) || p.region.to_lowercase().contains(&q)).collect();
-            (g.now.clone(), places::by_region(&all), p.0.testing.contains(&g.name))
+            let current = places::current(&p.0.groups, g).map(|c| c.name);
+            let all: Vec<Place> = places::places(&p.0.groups, g).into_iter().filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q) || p.region.to_lowercase().contains(&q)).collect();
+            (current, places::by_region(&all), !p.0.testing.is_empty())
         })
     };
     let pick = move |name: Option<String>| {
@@ -428,7 +433,7 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
     };
     view()
         .w(px(360.0))
-        .max_h(px(480.0))
+        .max_h(move || px((nsh_core::element::window().height.0 - 340.0).clamp(220.0, 520.0)))
         .rounded(px(22.0))
         .bg(move || theme().popover)
         .shadow_xl()
@@ -444,9 +449,7 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
                 .child(ui::search_field(query, "Search locations").flex_1())
                 .child(
                     ui::icon_btn(Icon::Bolt, "Test Again").on_press(move || {
-                        if let Some(g) = store.svc().main_group() {
-                            spawn(store.svc().test_group(g.name));
-                        }
+                        spawn(store.svc().test_places());
                     }),
                 ),
         )
@@ -456,7 +459,7 @@ fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
                     .px_2()
                     .pb_2()
                     .child(place_row(None, move || auto(), move || {
-                        let fastest = store.proxies.with(|p| places::main_group(&p.0.groups, &preferred()).and_then(places::fastest));
+                        let fastest = store.proxies.with(|p| places::main_group(&p.0.groups, &preferred()).and_then(|g| places::fastest(&p.0.groups, g)));
                         fastest.map(|f| format!("{} · {}", f.title, ui::delay_text(f.delay))).unwrap_or_default()
                     }, pick))
                     .child(dynamic(move || {
