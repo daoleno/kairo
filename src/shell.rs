@@ -185,6 +185,8 @@ pub fn shell() -> impl IntoElement {
             view()
                 .flex_1()
                 .min_w(px(0.0))
+                // Clear of a sidebar floating over the content (macOS).
+                .pl(move || px(store.insets.get().left))
                 .child(dynamic(move || {
                     let page = store.page.get();
                     untracked(|| match page {

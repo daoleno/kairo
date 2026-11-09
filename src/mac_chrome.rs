@@ -388,6 +388,27 @@ fn show_tools(toolbar: &NSToolbar, delegate: &Toolbar, tools: Vec<Tool>) {
     }
 }
 
+// --- The content ----------------------------------------------------------------
+
+define_class!(
+    /// Holds the NSH view and tells it where the sidebar and the toolbar
+    /// float over it (its safe area), whenever that changes.
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "KairoContentView"]
+    struct ContentView;
+
+    impl ContentView {
+        #[unsafe(method(layout))]
+        fn layout(&self) {
+            // SAFETY: NSView's own layout.
+            let _: () = unsafe { msg_send![super(self), layout] };
+            let i = self.safeAreaInsets();
+            chrome::set_insets(chrome::Insets { top: i.top as f32, left: i.left as f32 });
+        }
+    }
+);
+
 // --- The window ---------------------------------------------------------------------
 
 struct Installed {
@@ -461,8 +482,12 @@ pub fn install(svc: Service) {
         let sidebar_vc = NSViewController::new(mtm);
         sidebar_vc.setView(&side);
 
-        // Content: the NSH view, below the toolbar or under it.
-        let container = NSView::new(mtm);
+        // Content: the NSH view, under the toolbar and the sidebar, which
+        // float over it (flush: beside the sidebar and below the toolbar).
+        let flush = std::env::var("KAIRO_SPIKE").as_deref() == Ok("flush");
+        let under_toolbar = under_toolbar || !flush;
+        // SAFETY: NSView's designated initializer.
+        let container: Retained<ContentView> = unsafe { msg_send![ContentView::alloc(mtm), initWithFrame: frame] };
         nsh.removeFromSuperview();
         nsh.setTranslatesAutoresizingMaskIntoConstraints(false);
         container.addSubview(&nsh);
@@ -479,6 +504,9 @@ pub fn install(svc: Service) {
         ]));
         let content_vc = NSViewController::new(mtm);
         content_vc.setView(&container);
+        if flush {
+            chrome::set_insets(chrome::Insets::default());
+        }
 
         let split = NSSplitViewController::new(mtm);
         let side_item = NSSplitViewItem::sidebarWithViewController(&sidebar_vc);
@@ -487,6 +515,8 @@ pub fn install(svc: Service) {
         side_item.setCanCollapse(true);
         let content_item = NSSplitViewItem::splitViewItemWithViewController(&content_vc);
         content_item.setMinimumThickness(560.0);
+        // The sidebar floats over the content (macOS 26's glass sidebar).
+        content_item.setAutomaticallyAdjustsSafeAreaInsets(!flush);
         split.addSplitViewItem(&side_item);
         split.addSplitViewItem(&content_item);
 

@@ -143,8 +143,18 @@ pub enum ToolEvent {
     Chose(&'static str, usize),
 }
 
+/// Where the platform's chrome floats over the content (points): the
+/// toolbar at the top, the sidebar at the left. The content's background runs
+/// under them; what it shows starts inside.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Insets {
+    pub top: f32,
+    pub left: f32,
+}
+
 pub struct Bridge {
     pub page: watch::Sender<Page>,
+    pub insets: watch::Sender<Insets>,
     pub toolbar: watch::Sender<Toolbar>,
     pub events: mpsc::UnboundedSender<ToolEvent>,
     events_rx: Mutex<Option<mpsc::UnboundedReceiver<ToolEvent>>>,
@@ -163,6 +173,7 @@ pub fn bridge() -> &'static Bridge {
         let (tx, rx) = mpsc::unbounded_channel();
         Bridge {
             page: watch::channel(Page::Overview).0,
+            insets: watch::channel(Insets::default()).0,
             toolbar: watch::channel(Toolbar::default()).0,
             events: tx,
             events_rx: Mutex::new(Some(rx)),
@@ -178,4 +189,9 @@ pub fn select(page: Page) {
 /// Reports a tool's event from the chrome.
 pub fn tool_event(event: ToolEvent) {
     let _ = bridge().events.send(event);
+}
+
+/// The chrome's new insets (macOS: the content's safe area).
+pub fn set_insets(insets: Insets) {
+    bridge().insets.send_if_modified(|i| std::mem::replace(i, insets) != insets);
 }

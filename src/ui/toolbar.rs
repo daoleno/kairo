@@ -239,7 +239,9 @@ pub fn toolbar(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<S
                 mine
             });
         });
-        return view();
+        // Room for the window's toolbar where it floats over the content.
+        let store = crate::store::store();
+        return view().flex_shrink_0().h(move || px(store.insets.get().top));
     }
     view()
         .h(px(HEADER_HEIGHT))

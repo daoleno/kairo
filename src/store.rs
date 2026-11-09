@@ -63,6 +63,8 @@ pub struct Store {
     pub proxies: Signal<Snap<Proxies>>,
     pub log_seq: Signal<u64>,
     pub page: Signal<Page>,
+    /// Where the platform's chrome floats over the content.
+    pub insets: Signal<crate::chrome::Insets>,
     /// The connections page is paused (the list stops following).
     pub toast: Signal<Option<(u64, SharedString, bool)>>,
 }
@@ -82,6 +84,7 @@ impl Store {
             log_seq: signal(*log_rx.borrow()),
             page: signal(*crate::chrome::bridge().page.borrow()),
             toast: signal(None),
+            insets: signal(*crate::chrome::bridge().insets.borrow()),
             svc: stored(svc),
         };
         follow(state_rx, move |s: &State| {
@@ -99,6 +102,7 @@ impl Store {
             // The platform's sidebar and menus select pages too.
             follow(crate::chrome::bridge().page.subscribe(), move |p: &Page| store.page.set(*p));
             effect(move || crate::chrome::select(store.page.get()));
+            follow(crate::chrome::bridge().insets.subscribe(), move |i: &crate::chrome::Insets| store.insets.set(*i));
             if let Some(mut events) = crate::chrome::bridge().take_events() {
                 spawn(async move {
                     while let Some(event) = events.recv().await {
