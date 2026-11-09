@@ -224,6 +224,9 @@ pub struct AiSettings {
     /// Master switch: off, the config is the subscription's own.
     pub enabled: bool,
     pub exit: Option<AiExit>,
+    /// AI follows the Location (no exit pinned, and none pinned for it): the
+    /// person's choice, or the state after a pinned exit went away.
+    pub follow: bool,
     /// Kimi, DeepSeek, Doubao... go direct.
     pub domestic_direct: bool,
     /// Model, package and image downloads follow the Location.
@@ -235,6 +238,7 @@ impl Default for AiSettings {
         Self {
             enabled: true,
             exit: None,
+            follow: false,
             domestic_direct: true,
             downloads: true,
         }
@@ -830,22 +834,48 @@ rules:
     fn resolves_through_nested_selectors_and_follows_or_pins() {
         let groups = vec![
             group("Proxies", "Asia", &[("Asia", true), ("DIRECT", false)]),
-            group("Asia", "Tokyo 03", &[("Tokyo 03", false), ("Tokyo 07", false)]),
-            group("AI", "Proxies", &[("Proxies", true), ("Tokyo 03", false), ("Tokyo 07", false)]),
+            group(
+                "Asia",
+                "Tokyo 03",
+                &[("Tokyo 03", false), ("Tokyo 07", false)],
+            ),
+            group(
+                "AI",
+                "Proxies",
+                &[("Proxies", true), ("Tokyo 03", false), ("Tokyo 07", false)],
+            ),
             group("Narrow", "Tokyo 03", &[("Tokyo 03", false)]),
         ];
         assert_eq!(resolve(&groups, "Proxies").as_deref(), Some("Tokyo 03"));
         assert_eq!(resolve(&groups, "AI").as_deref(), Some("Tokyo 03"));
         assert_eq!(resolve(&groups, "Nope"), None);
         // Follow: the Location group when listed, else the node it is on.
-        assert_eq!(follow_target(&groups, "AI", "Proxies").as_deref(), Some("Proxies"));
-        assert_eq!(follow_target(&groups, "Narrow", "Proxies").as_deref(), Some("Tokyo 03"));
+        assert_eq!(
+            follow_target(&groups, "AI", "Proxies").as_deref(),
+            Some("Proxies")
+        );
+        assert_eq!(
+            follow_target(&groups, "Narrow", "Proxies").as_deref(),
+            Some("Tokyo 03")
+        );
         // Pinned: a member wins, a missing one falls back to following.
-        assert_eq!(want(&groups, "AI", "Proxies", Some("Tokyo 07")).as_deref(), Some("Tokyo 07"));
-        assert_eq!(want(&groups, "Narrow", "Proxies", Some("Tokyo 07")).as_deref(), Some("Tokyo 03"));
-        assert_eq!(want(&groups, "AI", "Proxies", None).as_deref(), Some("Proxies"));
+        assert_eq!(
+            want(&groups, "AI", "Proxies", Some("Tokyo 07")).as_deref(),
+            Some("Tokyo 07")
+        );
+        assert_eq!(
+            want(&groups, "Narrow", "Proxies", Some("Tokyo 07")).as_deref(),
+            Some("Tokyo 03")
+        );
+        assert_eq!(
+            want(&groups, "AI", "Proxies", None).as_deref(),
+            Some("Proxies")
+        );
         // A loop of selectors does not hang.
-        let looped = vec![group("A", "B", &[("B", true)]), group("B", "A", &[("A", true)])];
+        let looped = vec![
+            group("A", "B", &[("B", true)]),
+            group("B", "A", &[("A", true)]),
+        ];
         assert_eq!(resolve(&looped, "A"), None);
     }
 
@@ -862,7 +892,10 @@ rules:
         assert_eq!(cfg(&out).get("mode").and_then(Value::as_str), Some("rule"));
         s.ai.enabled = false;
         let out = crate::config::build(PLAIN, "", &s).unwrap();
-        assert_eq!(cfg(&out).get("mode").and_then(Value::as_str), Some("global"));
+        assert_eq!(
+            cfg(&out).get("mode").and_then(Value::as_str),
+            Some("global")
+        );
     }
 
     /// The core itself accepts what the layer writes (skipped without a core:

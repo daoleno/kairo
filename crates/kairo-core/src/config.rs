@@ -110,6 +110,17 @@ pub fn build_moving(
     settings: &Settings,
     taken: &dyn Fn(u16) -> bool,
 ) -> Result<String, ConfigError> {
+    build_applied(profile, override_text, settings, taken).map(|(text, _)| text)
+}
+
+/// [`build_moving`], and what the AI layer did (its group, whether the
+/// subscription had one).
+pub fn build_applied(
+    profile: &str,
+    override_text: &str,
+    settings: &Settings,
+    taken: &dyn Fn(u16) -> bool,
+) -> Result<(String, Option<crate::ai::Applied>), ConfigError> {
     let mut config = parse_mapping(profile).map_err(ConfigError::Profile)?;
     let avoid = [settings.mixed_port, settings.controller_port];
     for (from, to) in move_taken_inbounds(&mut config, taken, &avoid) {
@@ -129,7 +140,10 @@ pub fn build_moving(
     if all_traffic && settings.ai.enabled && applied.as_ref().is_none_or(|a| a.main.is_none()) {
         set(&mut config, "mode", "global");
     }
-    Ok(serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"))
+    Ok((
+        serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"),
+        applied,
+    ))
 }
 
 /// The mode the core runs for a setting. mihomo's own `global` ignores the
@@ -592,7 +606,10 @@ rules:
         // the AI layer's.
         let rules = get(&m, "rules").as_sequence().unwrap();
         assert!(rules.len() > 2);
-        let tail: Vec<_> = rules[rules.len() - 2..].iter().filter_map(Value::as_str).collect();
+        let tail: Vec<_> = rules[rules.len() - 2..]
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
         let profile = parse_mapping(PROFILE).unwrap();
         let own: Vec<_> = get(&profile, "rules")
             .as_sequence()
@@ -604,7 +621,13 @@ rules:
         // With the layer off the config is the profile's own.
         s.ai.enabled = false;
         let out = build(PROFILE, "", &s).unwrap();
-        assert_eq!(get(&parse_mapping(&out).unwrap(), "rules").as_sequence().unwrap().len(), 2);
+        assert_eq!(
+            get(&parse_mapping(&out).unwrap(), "rules")
+                .as_sequence()
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -639,9 +662,16 @@ append-proxies:
         assert!(m.get("prepend-rules").is_none());
         // With the AI layer on, the person's own rule still comes first.
         let out = build(PROFILE, over, &Settings::default()).unwrap();
-        let rules = get(&parse_mapping(&out).unwrap(), "rules").as_sequence().unwrap().clone();
+        let rules = get(&parse_mapping(&out).unwrap(), "rules")
+            .as_sequence()
+            .unwrap()
+            .clone();
         assert_eq!(rules[0].as_str(), Some("DOMAIN,kairo.dev,DIRECT"));
-        assert!(rules.iter().any(|r| r.as_str().is_some_and(|r| r.contains("claude.ai"))));
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.as_str().is_some_and(|r| r.contains("claude.ai")))
+        );
     }
 
     #[test]

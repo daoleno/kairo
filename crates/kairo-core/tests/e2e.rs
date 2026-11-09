@@ -129,7 +129,11 @@ async fn connect_proxy(listener: TcpListener, count: Arc<AtomicUsize>) {
 /// loopback, so traffic captured by TUN has somewhere to go.
 fn loopback_for_test_names(target: &str) -> String {
     match target.rsplit_once(':') {
-        Some((host, port)) if host.starts_with("203.0.113.") || host.ends_with(".test") => {
+        Some((host, port))
+            if host.starts_with("203.0.113.")
+                || host.ends_with(".test")
+                || host.ends_with("claude.ai") =>
+        {
             format!("127.0.0.1:{port}")
         }
         _ => target.to_owned(),
@@ -214,6 +218,9 @@ rules:
     settings.secret = "e2e-secret".into();
     settings.test_url = format!("http://{origin_addr}/generate_204");
     settings.test_timeout_ms = 3000;
+    // This test is the core and the service without the AI layer (which sends
+    // loopback traffic direct); the AI layer has a test of its own below.
+    settings.ai.enabled = false;
     settings.save(&paths).unwrap();
     let mixed = settings.mixed_port;
 
@@ -720,4 +727,234 @@ async fn tun_in_a_network_namespace() {
         "no route after TUN"
     );
     svc.stop_core().await;
+}
+
+/// The AI layer against a real core: AI hosts go to their own group on one
+/// pinned exit, a change of location or of exit never cuts an open stream,
+/// loopback stays direct, and "All Traffic" keeps AI where it is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_ai_layer_end_to_end() {
+    use kairo_core::activity::Target;
+    // SAFETY: set before any thread of this test reads the environment.
+    unsafe {
+        std::env::set_var("KAIRO_NO_SYSPROXY", "1");
+        std::env::set_var("KAIRO_NO_UPDATE", "1");
+    }
+    let home = tempfile::tempdir().unwrap();
+    let target = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target");
+    let core = core_binary(&target);
+
+    let origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_addr: SocketAddr = origin_listener.local_addr().unwrap();
+    let (pa, pb) = (
+        TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        TcpListener::bind("127.0.0.1:0").await.unwrap(),
+    );
+    let (pa_port, pb_port) = (
+        pa.local_addr().unwrap().port(),
+        pb.local_addr().unwrap().port(),
+    );
+    let (count_a, count_b) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    tokio::spawn(connect_proxy(pa, count_a.clone()));
+    tokio::spawn(connect_proxy(pb, count_b.clone()));
+    let subscription = format!(
+        r#"
+proxies:
+  - {{name: node-a, type: http, server: 127.0.0.1, port: {pa_port}}}
+  - {{name: node-b, type: http, server: 127.0.0.1, port: {pb_port}}}
+proxy-groups:
+  - {{name: Proxy, type: select, proxies: [node-a, node-b, DIRECT]}}
+rules:
+  - MATCH,Proxy
+"#
+    );
+    tokio::spawn(origin(origin_listener, Arc::new(subscription)));
+
+    let mut paths = Paths::new(home.path());
+    paths.bundled_core = Some(core);
+    paths.ensure().unwrap();
+    let _core = CoreGuard(paths.core_pid());
+    let mut settings = Settings::default();
+    settings.mixed_port = free_port();
+    settings.controller_port = free_port();
+    settings.secret = "e2e-secret".into();
+    settings.test_url = format!("http://{origin_addr}/generate_204");
+    settings.test_timeout_ms = 3000;
+    settings.save(&paths).unwrap();
+    let mixed = settings.mixed_port;
+
+    let svc = Service::start(paths.clone());
+    let state = svc.state();
+    wait_for("the core", Duration::from_secs(20), || {
+        state.borrow().core.is_running().then_some(())
+    })
+    .await;
+    svc.add_remote(format!("http://{origin_addr}/sub"), None)
+        .await
+        .expect("add the subscription");
+
+    // The layer's group is in, hidden, and an exit gets pinned by itself.
+    let proxies = svc.proxies();
+    wait_for("the AI group", Duration::from_secs(20), || {
+        proxies
+            .borrow()
+            .groups
+            .iter()
+            .any(|g| g.name == "Kairo AI" && g.hidden)
+            .then_some(())
+    })
+    .await;
+    let pinned = wait_for("an exit pinned", Duration::from_secs(30), || {
+        state.borrow().settings.ai.exit.clone()
+    })
+    .await;
+    assert!(pinned.name.starts_with("node-"), "{pinned:?}");
+    assert_eq!(state.borrow().ai.group, "Kairo AI");
+    let other = if pinned.name == "node-a" {
+        "node-b"
+    } else {
+        "node-a"
+    };
+    wait_for(
+        "the AI group on the pinned exit",
+        Duration::from_secs(10),
+        || (svc.ai_node().as_deref() == Some(pinned.name.as_str())).then_some(()),
+    )
+    .await;
+
+    // Its rules are in the core, ahead of the subscription's.
+    let rules = svc.rules().await.expect("rules");
+    let at = |kind: &str, payload: &str| {
+        rules
+            .iter()
+            .position(|r| r.kind == kind && r.payload == payload)
+    };
+    assert_eq!(at("IPCIDR", "127.0.0.0/8"), Some(0), "{rules:?}");
+    let claude = at("DomainSuffix", "claude.ai").expect("claude.ai has a rule");
+    assert_eq!(rules[claude].proxy, "Kairo AI");
+    assert_eq!(rules.last().unwrap().kind, "Match");
+
+    let client = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{mixed}")).unwrap())
+        .build()
+        .unwrap();
+    let node_count = |n: &str| {
+        if n == "node-a" {
+            count_a.load(Ordering::SeqCst)
+        } else {
+            count_b.load(Ordering::SeqCst)
+        }
+    };
+    let conns = svc.connections();
+
+    // A long answer from an AI host goes through the exit, and is tallied.
+    let before = node_count(&pinned.name);
+    let long = {
+        let client = client.clone();
+        let url = format!("http://claude.ai:{}/long", origin_addr.port());
+        tokio::spawn(async move { client.get(url).send().await?.bytes().await.map(|b| b.len()) })
+    };
+    let seen = wait_for("the AI connection", Duration::from_secs(5), || {
+        conns
+            .borrow()
+            .list
+            .iter()
+            .find(|c| c.host == "claude.ai")
+            .cloned()
+    })
+    .await;
+    assert_eq!(seen.outbound(), pinned.name);
+    assert!(
+        seen.chains.contains(&"Kairo AI".to_string()),
+        "{:?}",
+        seen.chains
+    );
+    assert!(node_count(&pinned.name) > before);
+    let activity = svc.activity();
+    wait_for("the tally", Duration::from_secs(5), || {
+        activity
+            .borrow()
+            .flows()
+            .iter()
+            .any(|(_, t, f)| **t == Target::Service("claude") && f.open == 1)
+            .then_some(())
+    })
+    .await;
+
+    // Moving the Location does not move AI; moving AI's exit does not cut the stream.
+    svc.select("Proxy".into(), other.into())
+        .await
+        .expect("select");
+    assert_eq!(
+        svc.ai_node().as_deref(),
+        Some(pinned.name.as_str()),
+        "AI stays put"
+    );
+    svc.set_ai_exit(other.into())
+        .await
+        .expect("pin another exit");
+    assert_eq!(svc.ai_node().as_deref(), Some(other));
+    assert_eq!(
+        state.borrow().settings.ai.exit.as_ref().unwrap().name,
+        other
+    );
+    assert!(
+        !long.is_finished(),
+        "the stream still runs after the exit moved"
+    );
+    assert_eq!(long.await.unwrap().expect("not cut"), 60000);
+    // New AI connections take the new exit.
+    let before = node_count(other);
+    client
+        .get(format!("http://claude.ai:{}/hello", origin_addr.port()))
+        .send()
+        .await
+        .unwrap();
+    assert!(node_count(other) > before);
+
+    // Loopback never goes through a node (a local model).
+    client
+        .get(format!("http://{origin_addr}/slow"))
+        .send()
+        .await
+        .unwrap();
+    let local = conns
+        .borrow()
+        .list
+        .iter()
+        .find(|c| c.port == origin_addr.port().to_string() && c.host == "127.0.0.1")
+        .cloned();
+    if let Some(c) = local {
+        assert_eq!(c.outbound(), "DIRECT");
+    }
+
+    // "All Traffic" is rules with the Location as the rest: AI keeps its exit.
+    svc.set_mode(Mode::Global).await.expect("all traffic");
+    let rules = svc.rules().await.expect("rules");
+    let last = rules.last().unwrap();
+    assert_eq!(
+        (last.kind.as_str(), last.proxy.as_str()),
+        ("Match", "Proxy")
+    );
+    assert!(
+        rules
+            .iter()
+            .any(|r| r.payload == "claude.ai" && r.proxy == "Kairo AI")
+    );
+    assert_eq!(svc.ai_node().as_deref(), Some(other));
+    svc.set_mode(Mode::Rule).await.expect("smart");
+
+    // Following the Location is a choice too.
+    svc.ai_follow_location().await.expect("follow");
+    assert!(state.borrow().settings.ai.exit.is_none());
+    let groups = proxies.borrow().groups.clone();
+    let ai = groups.iter().find(|g| g.name == "Kairo AI").unwrap();
+    assert_eq!(ai.now.as_deref(), Some("Proxy"));
+
+    // Turning the layer off puts the subscription's own rules back.
+    let mut next = svc.settings().ai;
+    next.enabled = false;
+    svc.update_ai(next).await.expect("off");
+    let rules = svc.rules().await.expect("rules");
+    assert_eq!(rules.len(), 1, "{rules:?}");
 }

@@ -309,7 +309,9 @@ pub async fn hold(
     now: impl Fn() -> i64,
 ) -> Hold {
     let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{proxy_port}")) else {
-        return Hold::Failed { why: "no proxy client".into() };
+        return Hold::Failed {
+            why: "no proxy client".into(),
+        };
     };
     let Ok(http) = reqwest::Client::builder()
         .proxy(proxy)
@@ -320,7 +322,9 @@ pub async fn hold(
         .user_agent("Kairo-check")
         .build()
     else {
-        return Hold::Failed { why: "no proxy client".into() };
+        return Hold::Failed {
+            why: "no proxy client".into(),
+        };
     };
     let url = format!("https://{host}{path}");
     let t0 = now();
@@ -337,7 +341,9 @@ pub async fn hold(
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
     let Some(id) = id else {
-        return Hold::Failed { why: "the core did not list the connection".into() };
+        return Hold::Failed {
+            why: "the core did not list the connection".into(),
+        };
     };
     if let Err(after) = watch_alive(secs, Duration::from_secs(3), || alive(&id)).await {
         return Hold::Dropped { after };
@@ -440,7 +446,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn watches_a_connection_until_the_time_is_up_or_it_ends() {
         // Stays open: Ok after the whole span.
-        assert_eq!(watch_alive(90, Duration::from_secs(3), || true).await, Ok(()));
+        assert_eq!(
+            watch_alive(90, Duration::from_secs(3), || true).await,
+            Ok(())
+        );
         // Ends on the fifth look: reported at about 15 s.
         let mut looks = 0;
         let r = watch_alive(90, Duration::from_secs(3), || {

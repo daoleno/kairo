@@ -11,6 +11,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
+mod ai_ops;
+
+use crate::activity::Tally;
+use crate::ai_check;
 use crate::config;
 use crate::controller::{ApiError, Controller};
 use crate::core_bin;
@@ -81,6 +85,30 @@ pub struct Task {
     pub progress: Option<f32>,
 }
 
+/// What the AI layer knows: where AI goes and how the checks stand.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AiView {
+    /// The group AI traffic goes to, once the config has it.
+    pub group: String,
+    /// The subscription's own AI group, not one of Kairo's.
+    pub adopted: bool,
+    /// The last check of each service, in the order they are shown.
+    pub checks: Vec<ai_check::Check>,
+    /// The last 90 s hold of each service (by id).
+    pub holds: Vec<(String, ai_check::Hold)>,
+    /// A check is running.
+    pub checking: bool,
+    /// Something the person should know about the exit.
+    pub alert: Option<AiAlert>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AiAlert {
+    /// The pinned exit is no longer in the subscription; AI follows the
+    /// Location until one is chosen.
+    ExitGone { was: String },
+}
+
 /// Everything that changes rarely.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct State {
@@ -107,6 +135,7 @@ pub struct State {
     /// Kairo is finding the first place of a new subscription (or replacing
     /// a provider's note in use); later checks happen without saying so.
     pub locating: bool,
+    pub ai: AiView,
 }
 
 impl State {
@@ -175,6 +204,14 @@ struct Inner {
     update_lock: tokio::sync::Mutex<()>,
     /// A subscription was just added: its first place is still to be found.
     fresh: std::sync::atomic::AtomicBool,
+    /// Which tools talk to which AI services (counts since Kairo opened).
+    activity: watch::Sender<Arc<Tally>>,
+    /// The running config as a mapping, for what the AI layer reads of it.
+    ai_cfg: Mutex<Option<serde_yaml::Mapping>>,
+    /// One AI check at a time, and when the last 90 s hold ran (unix s).
+    ai_busy: std::sync::atomic::AtomicBool,
+    ai_hold_at: std::sync::atomic::AtomicI64,
+    ai_checked_at: std::sync::atomic::AtomicI64,
     /// Ends the app (the launcher's Quit), for "Restart to Update".
     quit: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
@@ -263,6 +300,11 @@ impl Service {
             update_lock: tokio::sync::Mutex::new(()),
             quit: Mutex::new(None),
             fresh: std::sync::atomic::AtomicBool::new(false),
+            activity: watch::Sender::new(Arc::new(Tally::default())),
+            ai_cfg: Mutex::new(None),
+            ai_busy: std::sync::atomic::AtomicBool::new(false),
+            ai_hold_at: std::sync::atomic::AtomicI64::new(0),
+            ai_checked_at: std::sync::atomic::AtomicI64::new(0),
         }));
         let actor = svc.clone();
         rt.spawn(async move { actor.core_actor(core_rx).await });
@@ -272,6 +314,8 @@ impl Service {
         rt.spawn(async move { sched.scheduler().await });
         let places = svc.clone();
         rt.spawn(async move { places.location_loop().await });
+        let checks = svc.clone();
+        rt.spawn(async move { checks.ai_loop().await });
         svc
     }
 
@@ -744,6 +788,8 @@ impl Service {
         tokio::spawn(async move {
             svc.refresh_proxies_now().await;
             svc.keep_fastest().await;
+            svc.ai_sync().await;
+            svc.run_ai_check(false).await;
         });
         if self.settings().system_proxy && self.0.state.borrow().sysproxy_supported {
             self.apply_sysproxy(true);
@@ -862,6 +908,10 @@ impl Service {
         list.sort_by(|a, b| b.start.cmp(&a.start));
         let count = list.len();
         drop(by_id);
+        let now = unix();
+        self.0
+            .activity
+            .send_modify(|a| Arc::make_mut(a).ingest(&list, now));
         self.0.connections.send_replace(Arc::new(Connections {
             upload_total: resp.upload_total,
             download_total: resp.download_total,
@@ -967,7 +1017,7 @@ impl Service {
         // The profile's own local ports another client holds move aside (the
         // ones this Kairo's running core holds stay).
         let runtime = paths.runtime_dir();
-        let built = config::build_moving(&text, &over, &settings, &|p| {
+        let (built, applied) = config::build_applied(&text, &over, &settings, &|p| {
             crate::ports::held_by_other(p, &runtime)
         })
         .map_err(|e| e.to_string())?;
@@ -981,6 +1031,7 @@ impl Service {
         }
         std::fs::rename(paths.candidate_config(), paths.runtime_config())
             .map_err(|e| e.to_string())?;
+        self.ai_config_loaded(&built, applied);
         if reload && self.running() {
             self.controller()
                 .reload(&paths.runtime_config().to_string_lossy())
@@ -988,7 +1039,11 @@ impl Service {
                 .map_err(|e| format!("The core rejected the config: {e}"))?;
             self.refresh_proxies_now().await;
             let svc = self.clone();
-            tokio::spawn(async move { svc.keep_fastest().await });
+            tokio::spawn(async move {
+                svc.keep_fastest().await;
+                svc.ai_sync().await;
+                svc.run_ai_check(false).await;
+            });
         }
         Ok(())
     }
@@ -1021,13 +1076,21 @@ impl Service {
     pub fn set_mode(&self, mode: Mode) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
+            let before = svc.settings();
             svc.modify(|s| s.settings.mode = mode);
             svc.save_settings();
             if svc.running() {
-                svc.controller()
-                    .patch_configs(serde_json::json!({ "mode": mode.as_str() }))
-                    .await
-                    .map_err(|e| e.to_string())?;
+                // "All Traffic" with the AI layer on is other rules, not the
+                // core's global mode: the config is rebuilt and reloaded
+                // (open connections stay on their route through a reload).
+                if before.ai.enabled && (before.mode == Mode::Global || mode == Mode::Global) {
+                    svc.write_config(true).await?;
+                } else {
+                    svc.controller()
+                        .patch_configs(serde_json::json!({ "mode": mode.as_str() }))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
                 // New connections take the new route; open ones (a model's
                 // answer streaming in, a download) finish on theirs. Only the
                 // user's own Close ends them.
@@ -2073,6 +2136,14 @@ impl Service {
             Ok(())
         })
     }
+}
+
+/// Unix seconds now.
+pub fn unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// The local wall clock as `HH:MM:SS`.
