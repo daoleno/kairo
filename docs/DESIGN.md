@@ -57,7 +57,7 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
 - **Accessibility**: AppKit and libadwaita handle Reduce Transparency and Increase Contrast for the chrome;
   the content uses the increased-contrast colors (macOS, read at launch) and stronger borders and secondary
   text under GNOME's high contrast.
-- **Round**: capsules for buttons, segmented controls and pop-up buttons; grouped rows at 16 px radius, popovers
+- **Round**: capsules for buttons, segmented controls and pop-up buttons; grouped rows at 20 px radius, popovers
   at 22, concentric inside them.
 - **Quiet motion**: no animation besides what the toolkit does. Live data updates in place.
 
