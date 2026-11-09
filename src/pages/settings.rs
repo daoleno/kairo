@@ -139,6 +139,8 @@ pub fn page() -> impl IntoElement {
     };
 
     let s = move |f: fn(&Settings) -> bool| move || settings.with(f);
+    // What almost nobody changes is behind one line.
+    let advanced = signal(false);
 
     view()
         .flex_1()
@@ -190,12 +192,6 @@ pub fn page() -> impl IntoElement {
                             )
                             .into_element(),
                             ui::setting_row(
-                                "Start the core with Kairo",
-                                None,
-                                ui::toggle(s(|s| s.auto_start_core), "Start the core with Kairo", set(|s, on| s.auto_start_core = on)),
-                            )
-                            .into_element(),
-                            ui::setting_row(
                                 "Choose the location automatically",
                                 Some("Kairo keeps you on the fastest place, and checks again every ten minutes. Picking one by hand turns this off."),
                                 ui::toggle(s(|s| s.auto_location), "Choose the location automatically", move |on| {
@@ -209,6 +205,34 @@ pub fn page() -> impl IntoElement {
                                 }),
                             )
                             .into_element(),
+                        ],
+                    ))
+                    // --- AI ---
+                    .child(ai_group())
+                    // --- Proxy ---
+                    .child(ui::group(
+                        Some("Proxy"),
+                        vec![
+                            ui::setting_row(
+                                move || -> SharedString {
+                                    if store.state.with(|s| s.sysproxy_supported) { "System proxy".into() } else { "System proxy (not available on this desktop)".into() }
+                                },
+                                None,
+                                ui::toggle(s(|s| s.system_proxy), "System proxy", move |on| store.run(store.svc().set_system_proxy(on))),
+                            )
+                            .into_element(),
+                        ],
+                    ))
+                    // --- TUN ---
+                    .child(tun_group())
+                    // --- Advanced: what almost nobody changes ---
+                    .child(advanced_toggle(advanced))
+                    .child(when(move || advanced.get(), move || {
+                        view()
+                            .gap_5()
+                            .child(ui::group(
+                                Some("Network"),
+                                vec![
                             ui::setting_row(
                                 "Locations from",
                                 Some("The group Kairo picks your location in. Automatic takes the one the other groups follow."),
@@ -233,14 +257,6 @@ pub fn page() -> impl IntoElement {
                                 ),
                             )
                             .into_element(),
-                        ],
-                    ))
-                    // --- AI ---
-                    .child(ai_group())
-                    // --- Proxy ---
-                    .child(ui::group(
-                        Some("Proxy"),
-                        vec![
                             ui::setting_row(
                                 "Proxy port",
                                 Some("HTTP and SOCKS5 on one port; the system proxy points here."),
@@ -262,22 +278,6 @@ pub fn page() -> impl IntoElement {
                             )
                             .into_element(),
                             ui::setting_row(
-                                move || -> SharedString {
-                                    if store.state.with(|s| s.sysproxy_supported) { "System proxy".into() } else { "System proxy (not available on this desktop)".into() }
-                                },
-                                None,
-                                ui::toggle(s(|s| s.system_proxy), "System proxy", move |on| store.run(store.svc().set_system_proxy(on))),
-                            )
-                            .into_element(),
-                        ],
-                    ))
-                    // --- TUN ---
-                    .child(tun_group())
-                    // --- Controller ---
-                    .child(ui::group(
-                        Some("Controller"),
-                        vec![
-                            ui::setting_row(
                                 "Controller port",
                                 Some("mihomo's API, on 127.0.0.1 only."),
                                 text_field(|d| d.controller_port.clone(), |d, v| d.controller_port = v, "9097", 90.0).text_right(),
@@ -286,19 +286,15 @@ pub fn page() -> impl IntoElement {
                             ui::setting_row(
                                 "Secret",
                                 Some("Required by every API request."),
-                                view()
-                                    .flex_row()
-                                    .gap_1()
-                                    .child(text_field(|d| d.secret.clone(), |d, v| d.secret = v, "secret", 260.0))
-                                    .child(ui::icon_btn(Icon::Restart, "New Secret").on_press(move || draft.update(|d| d.secret = kairo_core::settings::new_secret()))),
+                                text_field(|d| d.secret.clone(), |d, v| d.secret = v, "secret", 260.0),
                             )
                             .into_element(),
-                        ],
-                    ))
-                    // --- Delay test ---
-                    .child(ui::group(
-                        Some("Delay Test"),
-                        vec![
+                                ],
+                            ))
+                            .child(tun_stack_group())
+                            .child(ui::group(
+                                Some("Delay Test"),
+                                vec![
                             ui::setting_row(
                                 "Test URL",
                                 Some("Requested through each node; groups with their own URL use theirs."),
@@ -316,10 +312,10 @@ pub fn page() -> impl IntoElement {
                                     .child(ui::muted("ms")),
                             )
                             .into_element(),
-                        ],
-                    ))
-                    // --- Core ---
-                    .child(core_group(text_field(|d| d.core_path.clone(), |d, v| d.core_path = v, "The bundled core", 300.0)))
+                                ],
+                            ))
+                            .child(core_group(text_field(|d| d.core_path.clone(), |d, v| d.core_path = v, "The bundled core", 300.0)))
+                    }))
                     .child(about_group()),
             ),
         )
@@ -345,12 +341,6 @@ fn tun_group() -> impl IntoElement {
     let privilege = computed(move || store.state.with(|s| s.tun_privilege));
     let granting = signal(false);
     let tun_on = move || store.state.with(|s| s.settings.tun);
-    let stack = move || store.state.with(|s| s.settings.tun_stack.clone());
-    let set_stack = move |v: String| {
-        let mut next = store.svc().settings();
-        next.tun_stack = v;
-        store.run(store.svc().update_settings(next));
-    };
     let detail = move || -> SharedString {
         match privilege.get() {
             None => "Install the core to use TUN.".into(),
@@ -409,6 +399,22 @@ fn tun_group() -> impl IntoElement {
                     }),
                 )
                 .into_element(),
+        ],
+    )
+}
+
+/// The TUN stack: Mixed suits most people, so it sits under Advanced.
+fn tun_stack_group() -> impl IntoElement {
+    let store = store();
+    let stack = move || store.state.with(|s| s.settings.tun_stack.clone());
+    let set_stack = move |v: String| {
+        let mut next = store.svc().settings();
+        next.tun_stack = v;
+        store.run(store.svc().update_settings(next));
+    };
+    ui::group(
+        Some("TUN Stack"),
+        vec![
             ui::setting_row(
                 "Stack",
                 Some("Mixed suits most; gVisor is the most compatible, System the fastest."),
@@ -433,6 +439,31 @@ fn tun_group() -> impl IntoElement {
     )
 }
 
+/// "Advanced", a line that opens the settings few people need.
+fn advanced_toggle(open: Signal<bool>) -> impl IntoElement {
+    nsh_base::button()
+        .accessibility_label("Advanced")
+        .on_press(move || open.set(!open.get_untracked()))
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .px_1()
+        .h(px(32.0))
+        .cursor_pointer()
+        .child(ui::section_label("Advanced"))
+        .child(
+            crate::ui::icon(Icon::ChevronDown, 12.0)
+                .text_color(move || theme().muted_foreground)
+                .rotate(move || {
+                    if open.get() {
+                        0.0
+                    } else {
+                        -std::f32::consts::FRAC_PI_2
+                    }
+                }),
+        )
+}
+
 fn core_group(core_path_field: impl IntoElement) -> impl IntoElement {
     let store = store();
     let version = move || -> SharedString {
@@ -445,34 +476,7 @@ fn core_group(core_path_field: impl IntoElement) -> impl IntoElement {
         Some("Core"),
         vec![
             ui::setting_row(version, Some("The official MetaCubeX/mihomo build that ships with Kairo and updates with it."), view()).into_element(),
-            ui::setting_row(
-                "Task",
-                None,
-                ui::muted(move || -> SharedString {
-                    store.state.with(|s| match &s.task {
-                        Some(t) => match t.progress {
-                            Some(p) => format!("{} · {:.0}%", t.label, p * 100.0).into(),
-                            None => format!("{}…", t.label).into(),
-                        },
-                        None => "Idle".into(),
-                    })
-                }),
-            )
-            .style_when(move || store.state.with(|s| s.task.is_none()), |s| s.hidden())
-            .into_element(),
             ui::setting_row("Custom core", Some("Path to a mihomo binary of your own; empty uses Kairo's."), core_path_field).into_element(),
-            ui::setting_row(
-                "GeoIP and GeoSite data",
-                Some("Download the latest databases the rules use."),
-                ui::btn("Update", Variant::Secondary).disabled(move || !store.state.with(|s| s.core.is_running())).on_press(move || {
-                    store.run_then(store.svc().update_geo(), move |r| {
-                        if r.is_ok() {
-                            store.info("Geo databases updated");
-                        }
-                    })
-                }),
-            )
-            .into_element(),
         ],
     )
 }
@@ -558,7 +562,6 @@ fn about_group() -> impl IntoElement {
                     .flex_row()
                     .items_center()
                     .gap_2()
-                    .child(ui::muted(home).number_of_lines(1).max_w(px(320.0)).selectable(true))
                     .child(ui::icon_btn(Icon::External, "Open Data Folder").on_press(move || {
                         let url = home_url.clone();
                         spawn(async move {

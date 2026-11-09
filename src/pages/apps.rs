@@ -46,7 +46,7 @@ pub fn page() -> impl IntoElement {
                 .collect();
             (
                 main.name.clone(),
-                places::app_choices(groups, &main.name),
+                crate::pages::ai::without_ai(places::app_choices(groups, &main.name)),
                 direct,
             )
         })

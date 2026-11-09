@@ -9,7 +9,7 @@ use kairo_core::ai::{self, AiService};
 use kairo_core::ai_check::{self, Api, Check, Country, Hold};
 use kairo_core::places;
 use kairo_core::service::{AiAlert, State};
-use nsh_base::theme;
+use nsh_base::{popover, theme};
 use nsh_core::prelude::*;
 
 use crate::store::store;
@@ -92,10 +92,10 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
                 return Tile {
                     tone: Tone::Bad,
                     flag,
-                    line1: "Not reachable".into(),
+                    line1: "Unreachable".into(),
                     line2: match &c.api {
                         Api::Unreachable { why } => why.clone(),
-                        _ => "No answer through the exit".into(),
+                        _ => "No answer".into(),
                     },
                     ..base
                 };
@@ -135,13 +135,13 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
                 flag,
                 line1: match (country, estimated) {
                     (Some(c), false) => format!("Sees {c}"),
-                    (Some(c), true) => format!("{c} (estimated)"),
+                    (Some(c), true) => format!("≈ {c}"),
                     (None, _) => "Reachable".into(),
                 },
-                line2: if tools.is_empty() {
-                    "Not in use".into()
-                } else {
-                    tools
+                line2: match (estimated, tools.is_empty()) {
+                    (_, false) => tools,
+                    (false, true) => "Not in use".into(),
+                    (true, true) => "Estimated".into(),
                 },
                 ..base
             }
@@ -201,6 +201,19 @@ pub fn on() -> bool {
     store
         .state
         .with(|s| s.settings.ai.enabled && !s.ai.group.is_empty() && s.core.is_running())
+}
+
+/// The app choices without the AI group: with the AI layer on, AI is chosen
+/// on the board and its exit row, not twice.
+pub fn without_ai(mut apps: Vec<places::AppChoice>) -> Vec<places::AppChoice> {
+    let store = store();
+    let group = store
+        .state
+        .with(|s| (s.settings.ai.enabled && s.core.is_running()).then(|| s.ai.group.clone()));
+    if let Some(g) = group.filter(|g| !g.is_empty()) {
+        apps.retain(|a| a.group != g);
+    }
+    apps
 }
 
 /// The place AI goes through now, for the exit row and the alert.
@@ -371,7 +384,12 @@ fn grid(selected: Signal<Option<&'static str>>, tiles: Memo<Vec<Tile>>) -> impl 
             for chunk in tiles.chunks(3) {
                 let mut row = view().flex_row().gap_3();
                 for t in chunk {
-                    row = row.child(tile(t.clone(), selected));
+                    row = row.child(
+                        view()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(tile(t.clone(), selected)),
+                    );
                 }
                 // A short last row keeps the tiles' width.
                 for _ in chunk.len()..3 {
@@ -390,13 +408,12 @@ fn tile(t: Tile, selected: Signal<Option<&'static str>>) -> impl IntoElement {
     let on = move || selected.get() == Some(id);
     let look = matches!(tone, Tone::Look | Tone::Bad);
     nsh_base::button()
+        .w_full()
         .accessibility_label(format!("{}: {} {}", t.name, t.line1, t.line2))
         .selected(on)
         .on_press(move || selected.set(if on() { None } else { Some(id) }))
-        .flex_1()
-        .min_w(px(0.0))
         .gap_3()
-        .p_3p5()
+        .p_3()
         .rounded(px(20.0))
         .cursor_pointer()
         .bg(move || {
@@ -430,7 +447,7 @@ fn tile(t: Tile, selected: Signal<Option<&'static str>>) -> impl IntoElement {
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(text(t.flag).text_size(px(28.0)))
+                .child(text(t.flag).text_size(px(26.0)))
                 .child(
                     view()
                         .flex_1()
@@ -752,7 +769,8 @@ mod tests {
         let t = tiles(&state_with(checks), &Tally::default());
         let c = t.iter().find(|t| t.id == "cursor").unwrap();
         assert_eq!(c.tone, Tone::Ok);
-        assert_eq!(c.line1, "Hong Kong (estimated)");
+        assert_eq!(c.line1, "≈ Hong Kong");
+        assert_eq!(c.line2, "Estimated");
     }
 
     #[test]
@@ -775,7 +793,7 @@ mod tests {
         let claude = t.iter().find(|t| t.id == "claude").unwrap();
         assert_eq!(
             (claude.tone, claude.line1.as_str()),
-            (Tone::Bad, "Not reachable")
+            (Tone::Bad, "Unreachable")
         );
         assert_eq!(claude.line2, "no answer in 12 s");
         let chatgpt = t.iter().find(|t| t.id == "chatgpt").unwrap();
@@ -851,4 +869,155 @@ mod tests {
         assert_eq!(hold_line(None, true).1, "Testing for 90 s…");
         assert_eq!(hold_line(None, false).1, "Not tested yet");
     }
+}
+
+// --- The AI exit -------------------------------------------------------------------
+
+/// The row on Home: where AI tools go out, apart from the Location.
+pub fn exit_row() -> impl IntoElement {
+    let store = store();
+    let open = signal(false);
+    let place = computed(exit_place);
+    let pinned = move || store.state.with(|s| s.settings.ai.exit.is_some());
+    let value = move || -> SharedString {
+        match place.get() {
+            Some(p) => format!("{} · {}", p.title, ui::delay_text(p.delay)).into(),
+            None => "—".into(),
+        }
+    };
+    popover()
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &nsh_base::PopoverEvent| {
+            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
+        .placement(Placement::Bottom)
+        .align(Align::End)
+        .offset(px(6.0))
+        .popup_class("transition-opacity duration-150")
+        .popup_starting_class(Some(SharedString::from("opacity-0")))
+        .trigger(
+            ui::row_view()
+                .cursor_pointer()
+                .child(
+                    text(move || {
+                        place
+                            .get()
+                            .and_then(|p| p.flag)
+                            .unwrap_or_else(|| "◎".into())
+                    })
+                    .text_size(px(size::large() + 2.0)),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap_0p5()
+                        .child(ui::body("AI exit"))
+                        .child(ui::muted(move || -> SharedString {
+                            if pinned() {
+                                "Stays here when the Location changes".into()
+                            } else {
+                                "Follows your Location".into()
+                            }
+                        })),
+                )
+                .child(ui::muted(value).tabular_nums().number_of_lines(1))
+                .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground)),
+        )
+        .child(exit_picker(move || open.set(false)))
+}
+
+fn exit_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
+    let store = store();
+    let query = signal(String::new());
+    let preferred = move || store.state.with(|s| s.settings.tray_group.clone());
+    let pinned = move || store.state.with(|s| s.settings.ai.exit.clone());
+    let list = move || {
+        let q = query.get().to_lowercase();
+        store.proxies.with(|p| {
+            let Some(g) = places::main_group(&p.0.groups, &preferred()) else {
+                return vec![];
+            };
+            let all: Vec<places::Place> = places::places(&p.0.groups, g)
+                .into_iter()
+                .filter(|p| {
+                    q.is_empty()
+                        || p.name.to_lowercase().contains(&q)
+                        || p.region.to_lowercase().contains(&q)
+                })
+                .collect();
+            places::by_region(&all)
+        })
+    };
+    view()
+        .w(px(360.0))
+        .max_h(move || px((nsh_core::element::window().height.0 - 340.0).clamp(220.0, 520.0)))
+        .rounded(px(22.0))
+        .bg(move || theme().popover)
+        .shadow_xl()
+        .border_1()
+        .border_color(move || theme().border.opacity(0.6))
+        .overflow_hidden()
+        .child(
+            view()
+                .p_3()
+                .child(ui::search_field(query, "Search locations")),
+        )
+        .child(
+            scroll().flex_shrink(1.0).child(
+                view()
+                    .px_2()
+                    .pb_2()
+                    .child(
+                        nsh_base::button()
+                            .on_press(move || {
+                                close();
+                                store.run(store.svc().ai_follow_location());
+                            })
+                            .flex_row()
+                            .items_center()
+                            .gap_3()
+                            .h(px(40.0))
+                            .px_3()
+                            .rounded(px(12.0))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(move || theme().accent))
+                            .style_when(
+                                move || pinned().is_none(),
+                                |s| s.bg(move || ui::selection()),
+                            )
+                            .child(icon(Icon::Globe, 15.0).text_color(move || theme().primary))
+                            .child(
+                                ui::body("Follow my Location")
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .flex_1(),
+                            ),
+                    )
+                    .child(dynamic(move || {
+                        let regions = list();
+                        let pinned = pinned();
+                        untracked(move || {
+                            view().children(regions.into_iter().map(move |(region, places)| {
+                                let pinned = pinned.clone();
+                                view()
+                                    .child(ui::section_label(region).px_3().pt_3().pb_1())
+                                    .children(places.into_iter().map(move |p| {
+                                        let chosen =
+                                            pinned.as_ref().is_some_and(|e| e.name == p.name);
+                                        let name = p.name.clone();
+                                        let delay = ui::delay_text(p.delay).to_string();
+                                        crate::pages::home::place_line(p, chosen, delay).on_press(
+                                            move || {
+                                                close();
+                                                store.run(store.svc().set_ai_exit(name.clone()));
+                                            },
+                                        )
+                                    }))
+                            }))
+                        })
+                    })),
+            ),
+        )
 }

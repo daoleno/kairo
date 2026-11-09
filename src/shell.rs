@@ -105,11 +105,6 @@ fn core_footer() -> impl IntoElement {
                         .text_size(px(size::small()))
                         .font_weight(FontWeight::MEDIUM)
                         .flex_1(),
-                )
-                .child(
-                    text(move || store.state.with(|s| s.settings.mode.route()))
-                        .text_size(px(size::small()))
-                        .text_color(move || theme().muted_foreground),
                 ),
         )
         .child(

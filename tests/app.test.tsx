@@ -172,12 +172,23 @@ test("AI: a tile for each service on Home, the flow on Activity, the switches in
   await app.waitFor("text:AI tools use one exit", slow);
   expect(app.shows("text:Domestic AI goes direct")).toBe(true);
   expect(app.shows("text:Downloads follow the Location")).toBe(true);
+  // What almost nobody changes is behind Advanced; what was cut is gone.
+  expect(app.shows("text:Proxy port")).toBe(false);
+  expect(app.shows("text:Start the core with Kairo")).toBe(false);
+  expect(app.shows("text:Locations from")).toBe(false);
+  await app.press("text:Advanced");
+  await app.waitFor("text:Proxy port", slow);
+  expect(app.shows("text:Locations from")).toBe(true);
+  expect(app.shows("text:Secret")).toBe(true);
+  await app.press("text:Advanced");
 });
 
 test("settings: an edit waits for Apply, Revert puts it back", async () => {
   const app = await open("..", desktop);
   await app.press("Settings");
-  await app.waitFor("text:Controller", slow);
+  await app.waitFor("text:TUN Mode", slow);
+  await app.press("text:Advanced");
+  await app.waitFor("text:Controller port", slow);
   expect(has(app.texts(), (t) => t.startsWith("mihomo v") || t.startsWith("v1."))).toBe(true);
   expect(app.shows("text:Unapplied changes")).toBe(false);
   expect(app.value("id:mixed-port")).toBe("27897");

@@ -19,7 +19,7 @@ use crate::ui::{self, Icon, size};
 /// Height of one row of tools or services.
 const ROW: f32 = 50.0;
 /// Width of the exit in the middle.
-const HUB: f32 = 128.0;
+const HUB: f32 = 156.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edge {

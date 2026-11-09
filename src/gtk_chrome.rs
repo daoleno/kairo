@@ -30,8 +30,8 @@ fn icons(page: Page) -> &'static [&'static str] {
     match page {
         Page::Overview => &["go-home-symbolic", "user-home-symbolic"],
         Page::Activity => &[
+            "media-playlist-shuffle-symbolic",
             "utilities-system-monitor-symbolic",
-            "network-transmit-receive-symbolic",
             "emblem-synchronizing-symbolic",
         ],
         Page::Apps => &[

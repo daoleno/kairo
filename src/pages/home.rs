@@ -6,7 +6,6 @@
 use kairo_core::places::{self, Place};
 use kairo_core::{CoreStatus, Mode};
 use nsh_base::{ButtonElement as Button, popover, theme};
-use nsh_core::canvas::{LineCap, LineJoin};
 use nsh_core::prelude::*;
 
 use crate::store::{Page, store};
@@ -499,11 +498,20 @@ fn big_switch(
 
 /// Location, route, apps and sites.
 fn choices() -> impl IntoElement {
-    ui::rows(vec![
-        location_row().into_element(),
-        route_row().into_element(),
-        apps_row().into_element(),
-    ])
+    // The AI exit's row exists while the AI layer is on.
+    let ai = computed(crate::pages::ai::on);
+    dynamic(move || {
+        let ai = ai.get();
+        untracked(move || {
+            let mut rows = vec![location_row().into_element()];
+            if ai {
+                rows.push(crate::pages::ai::exit_row().into_element());
+            }
+            rows.push(route_row().into_element());
+            rows.push(apps_row().into_element());
+            ui::rows(rows).into_element()
+        })
+    })
 }
 
 fn location_row() -> impl IntoElement {
@@ -704,7 +712,7 @@ fn place_row(
         })))
 }
 
-fn place_line(p: Place, chosen: bool, delay: String) -> Button {
+pub(crate) fn place_line(p: Place, chosen: bool, delay: String) -> Button {
     let tone = ui::delay_tone(p.delay);
     nsh_base::button()
         .selected(chosen)
@@ -782,7 +790,7 @@ fn apps_row() -> impl IntoElement {
             let Some(main) = places::main_group(&p.0.groups, &preferred) else {
                 return "".into();
             };
-            let apps = places::app_choices(&p.0.groups, &main.name);
+            let apps = crate::pages::ai::without_ai(places::app_choices(&p.0.groups, &main.name));
             if apps.is_empty() {
                 return "Your subscription has no per-app choices.".into();
             }
@@ -821,75 +829,18 @@ fn apps_row() -> impl IntoElement {
         )
 }
 
-/// What is flowing: speeds and a soft line.
+/// What is flowing: the two speeds, and the way to the Activity page.
 fn traffic() -> impl IntoElement {
     let store = store();
-    let width = signal(0.0_f32);
-    let height = 64.0_f32;
-    let graph = canvas(move || {
-        let w = width.get();
-        let line = color(theme().primary);
-        let quiet = color(ui::track());
-        store.live.with(|live| {
-            let h = height;
-            let points: Vec<u64> = live.history.iter().map(|t| t.down + t.up).collect();
-            // A quiet baseline the width of the strip, under everything.
-            let mut p = Painter::new()
-                .begin_path()
-                .move_to(0.0, h - 3.0)
-                .line_to(w, h - 3.0)
-                .stroke_color(quiet)
-                .line_width(2.0)
-                .line_cap(LineCap::Round)
-                .stroke();
-            if points.len() < 2 || w <= 0.0 || points.iter().all(|v| *v == 0) {
-                return p;
-            }
-            let peak = points.iter().copied().max().unwrap_or(0).max(32 * 1024) as f32 * 1.2;
-            // Nothing flowing: a quiet baseline, not the accent.
-            let line = if points.iter().all(|v| *v == 0) {
-                quiet
-            } else {
-                line
-            };
-            let n = kairo_core::service::HISTORY;
-            let len = points.len();
-            let x = |i: usize| w - (len - 1 - i) as f32 * (w / (n - 1) as f32);
-            let y = |v: u64| h - 3.0 - (v as f32 / peak) * (h - 8.0);
-            // A smooth line: midpoints joined by quadratic curves.
-            p = p.begin_path().move_to(x(0), y(points[0]));
-            for i in 1..len {
-                let (px0, py0) = (x(i - 1), y(points[i - 1]));
-                let (px1, py1) = (x(i), y(points[i]));
-                p = p.quadratic_curve_to(
-                    point(px(px0), px(py0)),
-                    point(px((px0 + px1) / 2.0), px((py0 + py1) / 2.0)),
-                );
-            }
-            p = p.line_to(x(len - 1), y(points[len - 1]));
-            p.stroke_color(line)
-                .line_width(2.5)
-                .line_cap(LineCap::Round)
-                .line_join(LineJoin::Round)
-                .stroke()
-        })
-    })
-    .h(px(height))
-    .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0));
     view()
-        .gap_2()
+        .flex_row()
+        .items_center()
+        .gap_4()
         .px_1()
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_4()
-                .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down)))
-                .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
-                .child(view().flex_1())
-                .child(ui::link_btn("Activity").on_press(move || store.page.set(Page::Activity))),
-        )
-        .child(graph)
+        .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down)))
+        .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
+        .child(view().flex_1())
+        .child(ui::link_btn("Activity").on_press(move || store.page.set(Page::Activity)))
 }
 
 fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
