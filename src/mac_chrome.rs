@@ -561,9 +561,45 @@ fn follow(svc: Service) {
         .expect("chrome thread");
 }
 
+define_class!(
+    /// Installs a downloaded update (the footer's button).
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "KairoUpdateTarget"]
+    struct UpdateTarget;
+
+    unsafe impl NSObjectProtocol for UpdateTarget {}
+
+    impl UpdateTarget {
+        #[unsafe(method(restartToUpdate:))]
+        fn restart(&self, _sender: &AnyObject) {
+            let svc = Service::global();
+            let rt = svc.runtime();
+            rt.spawn(svc.restart_to_update());
+        }
+    }
+);
+
+impl UpdateTarget {
+    fn shared(mtm: MainThreadMarker) -> Retained<UpdateTarget> {
+        thread_local! {
+            static SHARED: RefCell<Option<Retained<UpdateTarget>>> = const { RefCell::new(None) };
+        }
+        SHARED.with(|s| {
+            s.borrow_mut()
+                .get_or_insert_with(|| {
+                    // SAFETY: NSObject's initializer.
+                    unsafe { msg_send![UpdateTarget::alloc(mtm), init] }
+                })
+                .clone()
+        })
+    }
+}
+
 /// The sidebar's foot: the core's state, the mode and the speeds.
 struct Footer {
     root: Retained<NSStackView>,
+    update: Retained<objc2_app_kit::NSButton>,
     dot: Retained<NSImageView>,
     status: Retained<NSTextField>,
     mode: Retained<NSTextField>,
@@ -595,17 +631,32 @@ impl Footer {
         ]), mtm);
         top.setSpacing(6.0);
         let speeds = label(11.0, true);
+        // A downloaded update, one click from installing.
+        let update = unsafe {
+            objc2_app_kit::NSButton::buttonWithTitle_target_action(ns_string!("Restart to Update"), Some(&*UpdateTarget::shared(mtm)), Some(sel!(restartToUpdate:)), mtm)
+        };
+        update.setBezelStyle(objc2_app_kit::NSBezelStyle::Push);
+        update.setKeyEquivalent(ns_string!(""));
+        update.setHidden(true);
         let root = NSStackView::stackViewWithViews(&NSArray::from_retained_slice(&[
+            Retained::into_super(Retained::into_super(update.clone())),
             Retained::into_super(top),
             Retained::into_super(Retained::into_super(speeds.clone())),
         ]), mtm);
         root.setOrientation(objc2_app_kit::NSUserInterfaceLayoutOrientation::Vertical);
         root.setAlignment(objc2_app_kit::NSLayoutAttribute::Leading);
         root.setSpacing(3.0);
-        Footer { root, dot, status, mode, speeds }
+        Footer { root, update, dot, status, mode, speeds }
     }
 
     fn update(&self, s: &kairo_core::State, l: &kairo_core::Live) {
+        match &s.update {
+            kairo_core::UpdateStatus::Ready { version } => {
+                self.update.setTitle(&NSString::from_str(&format!("Restart to Update to {version}")));
+                self.update.setHidden(false);
+            }
+            _ => self.update.setHidden(true),
+        }
         self.status.setStringValue(&NSString::from_str(s.core.title()));
         self.mode.setStringValue(&NSString::from_str(&format!("· {}", s.settings.mode.title())));
         let tint = match &s.core {

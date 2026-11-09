@@ -272,6 +272,7 @@ fn theme_json(probe: &impl IsA<gtk::Widget>) -> String {
 /// The sidebar's foot: the core's state, the mode and the speeds.
 struct Footer {
     root: gtk::Box,
+    update: gtk::Button,
     dot: gtk::Label,
     status: gtk::Label,
     mode: gtk::Label,
@@ -305,12 +306,27 @@ impl Footer {
             .margin_top(10)
             .margin_bottom(12)
             .build();
+        // A downloaded update, one click from installing.
+        let update = gtk::Button::builder().css_classes(["suggested-action", "pill"]).margin_bottom(8).visible(false).build();
+        update.connect_clicked(|_| {
+            let svc = Service::global();
+            let rt = svc.runtime();
+            rt.spawn(svc.restart_to_update());
+        });
+        root.append(&update);
         root.append(&top);
         root.append(&speeds);
-        Footer { root, dot, status, mode, up, down }
+        Footer { root, update, dot, status, mode, up, down }
     }
 
     fn update(&self, s: &State, l: &Live) {
+        match &s.update {
+            kairo_core::UpdateStatus::Ready { version } => {
+                self.update.set_label(&format!("Restart to Update to {version}"));
+                self.update.set_visible(true);
+            }
+            _ => self.update.set_visible(false),
+        }
         self.status.set_label(s.core.title());
         self.mode.set_label(s.settings.mode.title());
         let tone = match &s.core {
