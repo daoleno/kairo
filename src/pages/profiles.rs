@@ -348,6 +348,7 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
         usage: None,
         web_page: None,
         last_error: None,
+        failed_at: None,
         stats: Default::default(),
     });
     let (url0, hours0) = match &initial.source {

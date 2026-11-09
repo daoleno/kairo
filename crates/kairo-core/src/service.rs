@@ -407,7 +407,7 @@ impl Service {
                 .profiles
                 .profiles
                 .iter()
-                .filter(|p| p.update_due(now) && p.last_error.is_none())
+                .filter(|p| p.update_due(now))
                 .map(|p| p.id.clone())
                 .collect();
             for id in due {
@@ -953,6 +953,7 @@ impl Service {
                 usage: download.usage,
                 web_page: download.web_page,
                 last_error: None,
+                failed_at: None,
                 stats,
             };
             svc.insert_profile(profile).await;
@@ -980,6 +981,7 @@ impl Service {
                 usage: None,
                 web_page: None,
                 last_error: None,
+                failed_at: None,
                 stats,
             })
             .await;
@@ -1038,6 +1040,7 @@ impl Service {
                         Ok((d, stats)) => {
                             p.updated_at = Some(profile::now());
                             p.last_error = None;
+                            p.failed_at = None;
                             p.stats = *stats;
                             if d.usage.is_some() {
                                 p.usage = d.usage;
@@ -1046,7 +1049,11 @@ impl Service {
                                 p.web_page = d.web_page.clone();
                             }
                         }
-                        Err(e) => p.last_error = Some(e.clone()),
+                        // The saved config stays: the connection keeps working.
+                        Err(e) => {
+                            p.last_error = Some(e.clone());
+                            p.failed_at = Some(profile::now());
+                        }
                     }
                 }
             });

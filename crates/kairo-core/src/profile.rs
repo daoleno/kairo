@@ -80,8 +80,12 @@ pub struct Profile {
     pub usage: Option<Usage>,
     /// The provider's home page (`profile-web-page-url`).
     pub web_page: Option<String>,
-    /// Why the last update failed, until one succeeds.
+    /// Why the last update failed, until one succeeds. The config stays the
+    /// last good one meanwhile.
     pub last_error: Option<String>,
+    /// Unix seconds of the last failed update (scheduled ones retry hourly).
+    #[serde(default)]
+    pub failed_at: Option<i64>,
     /// Counts of the config's parts, for the list.
     #[serde(default)]
     pub stats: ConfigStats,
@@ -99,8 +103,13 @@ impl Profile {
         }
     }
 
-    /// Whether a scheduled update is due at `now` (unix seconds).
+    /// Whether a scheduled update is due at `now` (unix seconds): on its
+    /// interval, or an hour after one failed.
     pub fn update_due(&self, now: i64) -> bool {
+        if self.last_error.is_some() {
+            return matches!(self.source, Source::Remote { interval_hours, .. } if interval_hours > 0)
+                && self.failed_at.is_none_or(|at| now - at >= RETRY_SECS);
+        }
         match &self.source {
             Source::Remote { interval_hours, .. } if *interval_hours > 0 => match self.updated_at {
                 Some(at) => now - at >= i64::from(*interval_hours) * 3600,
@@ -110,6 +119,9 @@ impl Profile {
         }
     }
 }
+
+/// How long a failed scheduled update waits before it tries again.
+pub const RETRY_SECS: i64 = 3600;
 
 /// How many proxies, groups and rules a config has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -165,6 +177,10 @@ pub enum ProfileError {
     NodeList,
     #[error("Not valid YAML: {0}")]
     Yaml(String),
+    /// The provider answered with a message instead of a config (a login or
+    /// "enable fetching" notice, an expired plan): its own words.
+    #[error("Your provider says: {0}")]
+    Notice(String),
     #[error("The config has no proxies, proxy providers or proxy groups")]
     NoProxies,
     #[error("Download failed: {0}")]
@@ -180,11 +196,16 @@ pub fn inspect(text: &str) -> Result<ConfigStats, ProfileError> {
     if trimmed.is_empty() {
         return Err(ProfileError::Empty);
     }
+    if looks_like_html(trimmed) {
+        return Err(ProfileError::Notice(notice_of(&strip_tags(trimmed))));
+    }
     let value: serde_yaml::Value = match serde_yaml::from_str(trimmed) {
         Ok(v) => v,
         Err(err) => {
             return Err(if looks_like_base64(trimmed) {
                 ProfileError::NodeList
+            } else if looks_like_prose(trimmed) {
+                ProfileError::Notice(notice_of(trimmed))
             } else {
                 ProfileError::Yaml(err.to_string())
             });
@@ -193,6 +214,8 @@ pub fn inspect(text: &str) -> Result<ConfigStats, ProfileError> {
     let Some(map) = value.as_mapping() else {
         return Err(if looks_like_base64(trimmed) {
             ProfileError::NodeList
+        } else if value.is_string() || looks_like_prose(trimmed) {
+            ProfileError::Notice(notice_of(trimmed))
         } else {
             ProfileError::Yaml("the top level is not a mapping".into())
         });
@@ -214,6 +237,50 @@ pub fn inspect(text: &str) -> Result<ConfigStats, ProfileError> {
         return Err(ProfileError::NoProxies);
     }
     Ok(stats)
+}
+
+/// A short message for a person rather than a config: few lines, no YAML keys
+/// at the start of a line.
+fn looks_like_prose(text: &str) -> bool {
+    text.len() <= 2000
+        && text.lines().count() <= 12
+        && !text.lines().any(|l| {
+            let l = l.trim_start();
+            l.starts_with('-') || l.split_once(':').is_some_and(|(k, _)| !k.is_empty() && !k.contains(char::is_whitespace) && k.is_ascii())
+        })
+}
+
+fn looks_like_html(text: &str) -> bool {
+    let head = text.get(..text.len().min(200)).unwrap_or(text).to_ascii_lowercase();
+    head.starts_with("<!doctype html") || head.starts_with("<html") || head.contains("<body")
+}
+
+fn strip_tags(html: &str) -> String {
+    let body = html.find("<body").map_or(html, |i| &html[i..]);
+    let mut out = String::new();
+    let mut tag = false;
+    for c in body.chars() {
+        match c {
+            '<' => tag = true,
+            '>' => {
+                tag = false;
+                out.push(' ');
+            }
+            c if !tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The notice, on one line and not too long to show.
+fn notice_of(text: &str) -> String {
+    let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.chars().count() > 240 {
+        format!("{}…", one.chars().take(240).collect::<String>())
+    } else {
+        one
+    }
 }
 
 fn looks_like_base64(text: &str) -> bool {
@@ -419,6 +486,21 @@ mod tests {
     }
 
     #[test]
+    fn provider_notices_in_their_words() {
+        let zh = "请登录系统网站后台，或在系统网站后台的订阅(SS/Trojan)页面开启订阅获取。每次开启后，订阅可获取有效时间为：10 分钟";
+        assert_eq!(inspect(zh), Err(ProfileError::Notice(zh.into())));
+        assert_eq!(inspect("Subscription expired.\nRenew at the dashboard"), Err(ProfileError::Notice("Subscription expired. Renew at the dashboard".into())));
+        assert_eq!(
+            inspect("<!DOCTYPE html><html><body><h1>Login required</h1></body></html>"),
+            Err(ProfileError::Notice("Login required".into()))
+        );
+        assert_eq!(ProfileError::Notice("x".into()).to_string(), "Your provider says: x");
+        // Configs and broken YAML stay what they were.
+        assert!(matches!(inspect("port: 7890\nproxies: [\n"), Err(ProfileError::Yaml(_))));
+        assert_eq!(inspect("port: 7890"), Err(ProfileError::NoProxies));
+    }
+
+    #[test]
     fn inspect_counts_and_rejects() {
         let text = "proxies:\n  - {name: a, type: direct}\nproxy-groups:\n  - {name: G, type: select, proxies: [a]}\nrules:\n  - MATCH,G\n";
         let stats = inspect(text).unwrap();
@@ -442,6 +524,7 @@ mod tests {
             usage: None,
             web_page: None,
             last_error: None,
+            failed_at: None,
             stats: ConfigStats::default(),
         };
         assert!(!p.update_due(1000 + 11 * 3600));
@@ -452,6 +535,13 @@ mod tests {
         assert!(!p.update_due(i64::MAX / 2));
         p.source = Source::Local { origin: None };
         assert!(!p.update_due(i64::MAX / 2));
+        // A failed one keeps its config and tries again an hour later.
+        p.source = Source::Remote { url: "u".into(), interval_hours: 12 };
+        p.updated_at = Some(1000);
+        p.last_error = Some("Your provider says: log in".into());
+        p.failed_at = Some(5000);
+        assert!(!p.update_due(5000 + RETRY_SECS - 1));
+        assert!(p.update_due(5000 + RETRY_SECS));
     }
 
     #[test]
@@ -468,6 +558,7 @@ mod tests {
             usage: None,
             web_page: None,
             last_error: None,
+            failed_at: None,
             stats: ConfigStats::default(),
         });
         index.active = Some(index.profiles[0].id.clone());
