@@ -20,12 +20,30 @@ enum Order {
     Total,
 }
 
-/// Column widths (the host takes the rest).
-const W_PROCESS: f32 = 120.0;
-const W_RULE: f32 = 150.0;
-const W_CHAIN: f32 = 170.0;
-const W_SPEED: f32 = 84.0;
-const W_TOTAL: f32 = 84.0;
+/// Column widths at the text's size (the host takes the rest).
+fn w(points: f32) -> f32 {
+    (points * size::scale()).round()
+}
+#[allow(non_snake_case)]
+fn W_PROCESS() -> f32 {
+    w(110.0)
+}
+#[allow(non_snake_case)]
+fn W_RULE() -> f32 {
+    w(140.0)
+}
+#[allow(non_snake_case)]
+fn W_CHAIN() -> f32 {
+    w(150.0)
+}
+#[allow(non_snake_case)]
+fn W_SPEED() -> f32 {
+    w(76.0)
+}
+#[allow(non_snake_case)]
+fn W_TOTAL() -> f32 {
+    w(76.0)
+}
 const W_CLOSE: f32 = 32.0;
 
 pub fn page() -> impl IntoElement {
@@ -51,6 +69,8 @@ pub fn page() -> impl IntoElement {
     let count = move || rows.with(|r| r.len());
     // With the inspector open the table keeps the columns the inspector doesn't show.
     let compact = computed(move || selected.with(Option::is_some));
+    // Cores name processes only where they can see them (often not at all).
+    let processes = computed(move || store.connections.with(|c| c.0.list.iter().any(|c| !c.process.is_empty())));
     let total = move || store.connections.with(|c| c.0.list.len());
 
     view()
@@ -92,8 +112,8 @@ pub fn page() -> impl IntoElement {
                     view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .child(header_row(order, compact))
-                        .child(when(move || count() > 0, move || table(rows, selected, compact)).otherwise(move || {
+                        .child(header_row(order, compact, processes))
+                        .child(when(move || count() > 0, move || table(rows, selected, compact, processes)).otherwise(move || {
                             ui::empty_state(
                                 Icon::Connections,
                                 "No connections",
@@ -137,7 +157,7 @@ fn head(label: &'static str, w: Option<f32>, right: bool, sort: Option<(Signal<O
     }
 }
 
-fn header_row(order: Signal<Order>, compact: Memo<bool>) -> impl IntoElement {
+fn header_row(order: Signal<Order>, compact: Memo<bool>, processes: Memo<bool>) -> impl IntoElement {
     let wide = move || !compact.get();
     view()
         .flex_row()
@@ -149,12 +169,12 @@ fn header_row(order: Signal<Order>, compact: Memo<bool>) -> impl IntoElement {
         .border_color(move || theme().border)
         .bg(move || ui::subtle())
         .child(head("Host", None, false, None))
-        .child(when(wide, move || head("Process", Some(W_PROCESS), false, None)))
-        .child(when(wide, move || head("Rule", Some(W_RULE), false, None)))
-        .child(head("Node", Some(W_CHAIN), false, None))
-        .child(head("Down", Some(W_SPEED), true, Some((order, Order::Download))))
-        .child(when(wide, move || head("Up", Some(W_SPEED), true, Some((order, Order::Upload)))))
-        .child(head("Total", Some(W_TOTAL), true, Some((order, Order::Total))))
+        .child(when(move || wide() && processes.get(), move || head("Process", Some(W_PROCESS()), false, None)))
+        .child(when(wide, move || head("Rule", Some(W_RULE()), false, None)))
+        .child(head("Node", Some(W_CHAIN()), false, None))
+        .child(head("Down", Some(W_SPEED()), true, Some((order, Order::Download))))
+        .child(when(wide, move || head("Up", Some(W_SPEED()), true, Some((order, Order::Upload)))))
+        .child(head("Total", Some(W_TOTAL()), true, Some((order, Order::Total))))
         .child(view().w(px(W_CLOSE)))
 }
 
@@ -170,7 +190,7 @@ fn cell(content: impl IntoReactive<SharedString>, w: Option<f32>, right: bool, m
     }
 }
 
-fn table(rows: Memo<Arc<Vec<Connection>>>, selected: Signal<Option<String>>, compact: Memo<bool>) -> impl IntoElement {
+fn table(rows: Memo<Arc<Vec<Connection>>>, selected: Signal<Option<String>>, compact: Memo<bool>, processes: Memo<bool>) -> impl IntoElement {
     let store = store();
     let narrow = move || compact.get();
     virtual_list(move || rows.with(|r| r.len()), move |at| {
@@ -194,25 +214,25 @@ fn table(rows: Memo<Arc<Vec<Connection>>>, selected: Signal<Option<String>>, com
             .style_when(is, |s| s.bg(move || ui::selection()))
             .child(cell(f(|c| format!("{}:{}", c.host, c.port)), None, false, false))
             .child(
-                cell(f(|c| if c.process.is_empty() { "—".into() } else { c.process.clone() }), Some(W_PROCESS), false, true)
-                    .style_when(narrow, |s| s.hidden()),
+                cell(f(|c| if c.process.is_empty() { "—".into() } else { c.process.clone() }), Some(W_PROCESS()), false, true)
+                    .style_when(move || narrow() || !processes.get(), |s| s.hidden()),
             )
             .child(
                 cell(
                     f(|c| if c.rule_payload.is_empty() { c.rule.clone() } else { format!("{} {}", c.rule, c.rule_payload) }),
-                    Some(W_RULE),
+                    Some(W_RULE()),
                     false,
                     true,
                 )
                 .style_when(narrow, |s| s.hidden()),
             )
-            .child(cell(f(|c| c.outbound().to_owned()), Some(W_CHAIN), false, false))
-            .child(cell(f(|c| if c.down_speed == 0 { "—".into() } else { kairo_core::speed(c.down_speed) }), Some(W_SPEED), true, false))
+            .child(cell(f(|c| c.outbound().to_owned()), Some(W_CHAIN()), false, false))
+            .child(cell(f(|c| if c.down_speed == 0 { "—".into() } else { kairo_core::speed(c.down_speed) }), Some(W_SPEED()), true, false))
             .child(
-                cell(f(|c| if c.up_speed == 0 { "—".into() } else { kairo_core::speed(c.up_speed) }), Some(W_SPEED), true, false)
+                cell(f(|c| if c.up_speed == 0 { "—".into() } else { kairo_core::speed(c.up_speed) }), Some(W_SPEED()), true, false)
                     .style_when(narrow, |s| s.hidden()),
             )
-            .child(cell(f(|c| kairo_core::bytes(c.download + c.upload)), Some(W_TOTAL), true, true))
+            .child(cell(f(|c| kairo_core::bytes(c.download + c.upload)), Some(W_TOTAL()), true, true))
             .child(
                 view().w(px(W_CLOSE)).items_end().child(
                     ui::icon_btn(Icon::Close, "Close Connection").size(px(22.0)).on_press(move || store.run(store.svc().close_connection(id()))),
