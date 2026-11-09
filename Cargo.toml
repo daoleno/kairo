@@ -35,6 +35,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nsh-platform-linux = { version = "0.4.0", default-features = false }
+libadwaita = { version = "0.9", features = ["v1_5"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nsh-platform-macos = { version = "0.4.0", default-features = false }

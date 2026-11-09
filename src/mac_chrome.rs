@@ -363,9 +363,11 @@ fn follow(svc: Service) {
                         }
                         other => other.title().to_owned(),
                     };
+                    let theme = s.settings.theme;
                     dispatch2::DispatchQueue::main().exec_async(move || {
                         INSTALLED.with(|i| {
                             if let Some(i) = i.borrow().as_ref() {
+                                set_appearance(&i.window, theme);
                                 i.window.setTitle(&NSString::from_str(page.title()));
                                 i.window.setSubtitle(&NSString::from_str(&subtitle));
                                 i.sidebar.select(page);
@@ -381,6 +383,20 @@ fn follow(svc: Service) {
             });
         })
         .expect("chrome thread");
+}
+
+/// The window's appearance (and so the sidebar's, the toolbar's and the
+/// controls') follows Kairo's own setting; System follows the Mac.
+fn set_appearance(window: &NSWindow, theme: kairo_core::Theme) {
+    use objc2_app_kit::{NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua};
+    // SAFETY: AppKit's constant appearance names.
+    let name = match theme {
+        kairo_core::Theme::System => None,
+        kairo_core::Theme::Light => Some(unsafe { NSAppearanceNameAqua }),
+        kairo_core::Theme::Dark => Some(unsafe { NSAppearanceNameDarkAqua }),
+    };
+    let appearance = name.and_then(NSAppearance::appearanceNamed);
+    window.setAppearance(appearance.as_deref());
 }
 
 // --- Native controls in the content ---------------------------------------------------

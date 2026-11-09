@@ -22,6 +22,14 @@ pub enum Page {
 }
 
 impl Page {
+    pub const ALL: [Page; 8] =
+        [Page::Overview, Page::Proxies, Page::Profiles, Page::Connections, Page::Rules, Page::Logs, Page::Dns, Page::Settings];
+
+    /// The page named `name` (its title, any case).
+    pub fn named(name: &str) -> Option<Page> {
+        Page::ALL.into_iter().find(|p| p.title().eq_ignore_ascii_case(name))
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Page::Overview => "Overview",
@@ -72,7 +80,7 @@ impl Store {
             connections: signal(Snap(conn_rx.borrow().clone())),
             proxies: signal(Snap(prox_rx.borrow().clone())),
             log_seq: signal(*log_rx.borrow()),
-            page: signal(Page::Overview),
+            page: signal(if crate::chrome::native() { *crate::chrome::bridge().page.borrow() } else { Page::Overview }),
             toast: signal(None),
             svc: stored(svc),
         };

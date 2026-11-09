@@ -15,6 +15,8 @@ use kairo_core::paths::Paths;
 
 #[cfg(target_os = "macos")]
 mod mac_chrome;
+#[cfg(target_os = "linux")]
+mod gtk_chrome;
 
 fn root() -> nsh_engine_root::Root {
     nsh_engine_root::Root::of::<nsh_app_kairo::App>().tokens(nsh_app_kairo::tokens())
@@ -124,6 +126,11 @@ fn main() {
     // (single instance, the core's ports).
     kairo_core::update::wait_for_previous();
     let minimized = std::env::args().any(|a| a == "--minimized");
+    // `--page <name>` opens on that page (screenshots, docs).
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(page) = args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1)).and_then(|n| nsh_app_kairo::store::Page::named(n)) {
+        nsh_app_kairo::chrome::select(page);
+    }
     platform::run(minimized);
 }
 
@@ -164,7 +171,9 @@ mod platform {
         glib::set_application_name("Kairo");
         // One Kairo per user: a second launch shows the first one's window and
         // leaves (before it touches the core or the system proxy).
-        let app = gtk::Application::builder().application_id(APP_ID).build();
+        let native = std::env::var("KAIRO_SPIKE").as_deref() != Ok("nsh");
+        nsh_app_kairo::chrome::set_native(native);
+        let app: gtk::Application = libadwaita::Application::builder().application_id(APP_ID).build().upcast();
         if let Err(e) = app.register(None::<&gio::Cancellable>) {
             log::warn!("no session bus registration ({e}); running on our own");
         }
@@ -207,13 +216,24 @@ mod platform {
                     window.present();
                     return;
                 }
-                let window = gtk::ApplicationWindow::builder()
-                    .application(app)
-                    .title("Kairo")
-                    .icon_name(APP_ID)
-                    .default_width(1180)
-                    .default_height(760)
-                    .build();
+                let window: gtk::ApplicationWindow = if native {
+                    libadwaita::ApplicationWindow::builder()
+                        .application(app)
+                        .title("Kairo")
+                        .icon_name(APP_ID)
+                        .default_width(1180)
+                        .default_height(760)
+                        .build()
+                        .upcast()
+                } else {
+                    gtk::ApplicationWindow::builder()
+                        .application(app)
+                        .title("Kairo")
+                        .icon_name(APP_ID)
+                        .default_width(1180)
+                        .default_height(760)
+                        .build()
+                };
                 window.set_size_request(860, 560);
                 let view = AppView::new(AppOptions {
                     app_id: APP_ID.into(),
@@ -222,7 +242,11 @@ mod platform {
                     appearance: Appearance::System,
                     ..AppOptions::default()
                 });
-                window.set_child(Some(&view.widget()));
+                if let Some(adw_window) = window.downcast_ref::<libadwaita::ApplicationWindow>() {
+                    crate::gtk_chrome::build(adw_window, view.clone(), svc.clone());
+                } else {
+                    window.set_child(Some(&view.widget()));
+                }
                 view.load(nsh_platform_linux::App::Rust(super::root()));
                 *view_slot.borrow_mut() = Some(view);
 
