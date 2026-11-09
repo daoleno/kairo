@@ -3,17 +3,22 @@
 ## Information architecture
 
 ```
-Home           the switch and what it means now ("Connected · Tokyo 01 · 22 ms"); Location, Route,
-               Apps & Sites; a traffic line; the subscription's usage. Without a subscription: Welcome,
-               one link field and Connect.
-Apps & Sites   the subscription's other selectors (Netflix, AI …), one choice each
+Home           the switch and what it means now ("Connected · Tokyo 01 · 22 ms"); AI: a tile per service
+               (the country it sees, what tools use it), what stays on this computer and what goes direct;
+               Location, AI exit, Route, Apps & Sites; the two speeds; the subscription's usage. Without a
+               subscription: Welcome, one link field and Connect.
+Activity       which tools talk to which AI services: tools │ the AI exit │ services, lines as thick as the
+               traffic, dashed for what stays off the exit; "All connections" opens the table
+Apps & Sites   the subscription's other selectors (Netflix, Telegram …), one choice each (AI is on Home)
 ── Advanced ── (the sidebar folds away on Home and Apps & Sites)
 Groups         groups (left) │ the selected group's members (right); sort, filter, delay tests
 Subscriptions  list (usage, expiry, schedule, errors) → detail (details form, overrides editor)
 Connections    live table, sortable, searchable; inspector; totals and core memory
-Rules · Logs · DNS
-Settings       General, Proxy, TUN, Controller, Delay Test, Core, About
-⌘K / Ctrl+K    every page, action and location
+Rules · Logs
+Settings       General, AI, Proxy (system proxy), TUN Mode, About; Advanced (folded): Network, TUN Stack,
+               Delay Test, Core
+⌘K / Ctrl+K    every page (DNS is only here), action and location
+⌘1…⌘8          Home, Activity, Apps & Sites, Groups, Subscriptions, Connections, Rules, Logs
 Menu bar       Connection (Connect, Location, Route, Core) and Go (macOS); the main menu (Linux)
 Tray           status, Connected, Location (Fastest and the 15 quickest), Route, Open Kairo, Quit
 ```
@@ -60,6 +65,25 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
 - **Round**: capsules for buttons, segmented controls and pop-up buttons; grouped rows at 20 px radius, popovers
   at 22, concentric inside them.
 - **Quiet motion**: no animation besides what the toolkit does. Live data updates in place.
+
+## AI
+
+- **One exit, pinned**: AI traffic goes to a select group (the subscription's own AI group when its first
+  rule for OpenAI or Anthropic points at one, else a hidden `Kairo AI`). The exit is a server, kept by its
+  type, host and port, so a rename does not lose it. Choosing it goes straight to the core's `select`: no
+  connection is closed. A server that leaves the subscription raises an alert; AI follows the Location
+  until a new one is pinned. An AI group that already went somewhere stays there: that is the pin.
+- **Rules first, then the profile's**: the layer's rules come before the profile's (loopback and private
+  addresses direct; domestic AI direct; downloads to the Location; AI hosts to the AI group); a user's
+  override `prepend-rules` still come before these. "All Traffic" is rules with the Location as the rest,
+  not mihomo's global mode (which ignores rules).
+- **Say what was measured**: reachable (a TCP/HTTP answer through the exit), API (the status without a key,
+  as the service gives it), country (Cloudflare's trace when the service is behind it, else an estimate marked
+  as one), a connection held 90 seconds. No "fine", no "safe": the footer on every detail says Kairo shows
+  what the service sees and that the person's location and the service's terms still apply.
+- **Counts, not content**: the Activity page keeps (tool, service, bytes, open connections); never a URL, a
+  header or a key. Kairo's own checks are left out. The core reads process names (`find-process-mode`) for it.
+- **Never**: change the system language or time zone, give an IP to an account, or read AI traffic.
 
 ## Behaviour rules
 

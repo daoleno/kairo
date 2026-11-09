@@ -280,7 +280,7 @@ fn flow(graph: Memo<Graph>) -> impl IntoElement {
 
 fn column(nodes: Vec<Node>, right: bool) -> impl IntoElement {
     view()
-        .w(px(168.0))
+        .w(px(200.0))
         .flex_shrink_0()
         .children(nodes.into_iter().map(move |n| {
             view()

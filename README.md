@@ -1,12 +1,24 @@
 # Kairo
 
-A clean, native [mihomo](https://github.com/MetaCubeX/mihomo) client for macOS and Linux: AppKit on the Mac,
-GTK 4 and libadwaita on Linux, written in Rust on [NSH](https://nsh.dev).
+A clean, native [mihomo](https://github.com/MetaCubeX/mihomo) client for macOS and Linux, made for AI work:
+your AI tools go out through one exit that stays put, and Kairo shows what each service sees. AppKit on the
+Mac, GTK 4 and libadwaita on Linux, written in Rust on [NSH](https://nsh.dev).
 
 ![Kairo on Linux](docs/screenshots/home-light.png)
 
 ## What it does
 
+- **AI work**: Claude, ChatGPT, Gemini, Cursor, Copilot, Perplexity and Grok go through one **AI exit**. It
+  is pinned to a server (the same server, even if the provider renames it), and it stays there when the
+  Location changes by itself. Kimi, DeepSeek, Doubao, Tongyi and the other domestic AI go direct, and local
+  models (Ollama, LM Studio, your LAN) are never proxied. Hugging Face, PyPI, Ollama, Docker and GitHub
+  downloads follow the Location. Home shows a tile per service with what Kairo measured: whether it is
+  reachable, whether its API answers (without a key), the country it sees (from Cloudflare's trace when the
+  service sits behind it, otherwise a marked estimate), and whether a connection stays open for 90 seconds.
+  The checks run when you connect and every ten minutes. If the pinned server leaves your subscription,
+  Kairo says so and AI follows the Location until you pick another. **Activity** draws which tools talk to
+  which services, as lines as thick as the traffic. Kairo shows what a service sees; where you are and the
+  service's own terms still apply. Settings → AI turns each part off.
 - **Core**: the official mihomo build is inside every package, pinned and checked against its published
   SHA-256 when the package is built. It starts with Kairo (all traffic goes direct until you add a profile)
   and comes back if it crashes. A custom core binary also works.
@@ -30,12 +42,14 @@ GTK 4 and libadwaita on Linux, written in Rust on [NSH](https://nsh.dev).
 - **TUN**: one switch. The core alone gets the one-time privilege it needs: `cap_net_admin` through
   `pkexec setcap` on Linux, setuid through the administrator prompt on macOS. Kairo itself never runs
   privileged. See [TUN and privileges](#tun-and-privileges).
-- **Live views**: a traffic graph, totals and memory. The connections table (sortable and searchable, with an
+- **Live views**: speeds, totals and memory. The connections table (sortable and searchable, with an
   inspector and close or close-all) stays smooth with thousands of rows. You also get the rules and rule
   providers, and the logs (live level, search, pause).
-- **DNS tool**: query the core's resolver for A, AAAA, CNAME, MX, TXT or NS records, and flush the fake-IP cache.
-- **Settings**: ports, LAN, IPv6, bypass list, TUN stack, controller and secret, delay test URL, appearance,
-  launch at login, start minimized, keep running in the tray, and the tray's quick-switch group.
+- **DNS tool**: query the core's resolver for A, AAAA, CNAME, MX, TXT or NS records, and flush the fake-IP cache
+  (⌘K → Go to DNS).
+- **Settings**: appearance, launch at login, start minimized, keep running in the tray, the AI switches, the
+  system proxy and TUN. **Advanced** holds ports, LAN, IPv6, the bypass list, the TUN stack, controller and
+  secret, the delay test and the core.
 - **Tray / menu bar**: status and speeds, mode, system proxy, TUN, node quick switch, start/stop the core,
   show the window, and quit.
 
