@@ -117,6 +117,9 @@ fn main() {
     if guardian::is_guardian() {
         guardian::run();
     }
+    // Started by "Restart to Update": the Kairo it replaces must be gone first
+    // (single instance, the core's ports).
+    kairo_core::update::wait_for_previous();
     let minimized = std::env::args().any(|a| a == "--minimized");
     platform::run(minimized);
 }
@@ -189,6 +192,7 @@ mod platform {
         }
         app.add_action(&quit_action);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
+        svc.set_quit_hook(quit.clone());
 
         app.connect_activate({
             let svc = svc.clone();
@@ -288,9 +292,14 @@ mod platform {
         let svc = super::start_primary();
         let quit_svc = svc.clone();
         let quit = Arc::new(move || {
-            quit_svc.shutdown();
-            nsh_platform_macos::quit_app();
+            let svc = quit_svc.clone();
+            // AppKit wants the main thread; the tray and the updater call from others.
+            dispatch2::DispatchQueue::main().exec_async(move || {
+                svc.shutdown();
+                nsh_platform_macos::quit_app();
+            });
         });
+        svc.set_quit_hook(quit.clone());
         let hooks = kairo_tray::Hooks { show: Arc::new(present), quit };
         let tray_ok = kairo_tray::start(svc.clone(), hooks).is_ok();
         let settings = svc.settings();

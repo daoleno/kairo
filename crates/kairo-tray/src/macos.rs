@@ -121,7 +121,7 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
         menu.addItem(&holder);
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&item(target, mtm, if m.running { "Stop Core" } else { "Start Core" }, TAG_CORE, m.running || m.can_start, None));
+    menu.addItem(&item(target, mtm, if m.running { "Stop Core" } else { "Start Core" }, TAG_CORE, true, None));
     menu.addItem(&item(target, mtm, "Show Kairo", TAG_SHOW, true, None));
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     menu.addItem(&item(target, mtm, "Quit Kairo", TAG_QUIT, true, None));

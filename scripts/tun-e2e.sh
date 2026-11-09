@@ -1,9 +1,11 @@
 #!/bin/sh
 # The TUN end-to-end test, in a user + network namespace (no root, no change
-# to this machine's network). Needs a core: KAIRO_TEST_CORE=/path/to/mihomo.
+# to this machine's network). The core: KAIRO_TEST_CORE, else
+# target/mihomo/mihomo (scripts/fetch-mihomo.sh).
 set -e
 cd "$(dirname "$0")/.."
-: "${KAIRO_TEST_CORE:?set KAIRO_TEST_CORE to a mihomo binary}"
+KAIRO_TEST_CORE=${KAIRO_TEST_CORE:-$PWD/target/mihomo/mihomo}
+[ -x "$KAIRO_TEST_CORE" ] || { echo "no core: run scripts/fetch-mihomo.sh or set KAIRO_TEST_CORE" >&2; exit 1; }
 bin=$(cargo test -p kairo-core --test e2e --no-run --message-format=json 2>/dev/null \
   | python3 -c 'import sys, json
 for line in sys.stdin:

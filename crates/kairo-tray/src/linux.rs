@@ -103,7 +103,7 @@ impl ksni::Tray for KairoTray {
         items.push(
             StandardItem {
                 label: if m.running { "Stop Core".into() } else { "Start Core".into() },
-                enabled: m.running || m.can_start,
+                enabled: true,
                 activate: Box::new(|t: &mut Self| act::toggle_core(&t.svc, t.model.running)),
                 ..Default::default()
             }

@@ -1,190 +1,47 @@
-//! The mihomo core binary: finding the right official build for this machine,
-//! downloading it with its SHA-256 checked against the release, and reading the
-//! installed version.
+//! The mihomo core binary. Kairo ships one (see [`crate::paths::bundled_core`])
+//! and runs a copy of it from its data directory, so that TUN's one-time grant
+//! (file capabilities on Linux, setuid on macOS) is given to Kairo's own copy and
+//! never to a file inside the app or a system package. The copy follows the
+//! bundled core: when an app update brings another version, it is replaced.
 
-use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
-use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-
 use crate::paths::{Paths, write_atomic};
-
-const RELEASES: &str = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest";
-
-/// The installed core, as recorded when it was downloaded.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CoreMeta {
-    pub version: String,
-    pub asset: String,
-    pub sha256: String,
-    pub installed_at: i64,
-}
-
-/// A release asset to download.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Release {
-    pub version: String,
-    pub asset: String,
-    pub url: String,
-    pub sha256: String,
-    pub size: u64,
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
-    #[error("No mihomo build for {0}")]
-    Unsupported(String),
-    #[error("Could not reach GitHub: {0}")]
-    Network(String),
-    #[error("The release has no {0}")]
-    MissingAsset(String),
-    #[error("The download's checksum does not match the release (expected {expected}, got {actual})")]
-    Checksum { expected: String, actual: String },
-    #[error("{0}")]
+    #[error("The mihomo core is missing from this installation of Kairo. Reinstall Kairo to get it back.")]
+    NotBundled,
+    #[error("The mihomo core bundled with Kairo does not run: {0}")]
+    Broken(String),
+    #[error("Could not copy the core: {0}")]
     Io(String),
 }
 
-/// The asset name prefix of the official build for an OS / arch (Rust's names).
-pub fn asset_prefix(os: &str, arch: &str) -> Option<&'static str> {
-    Some(match (os, arch) {
-        ("linux", "x86_64") => "mihomo-linux-amd64-compatible-",
-        ("linux", "aarch64") => "mihomo-linux-arm64-",
-        ("macos", "aarch64") => "mihomo-darwin-arm64-",
-        ("macos", "x86_64") => "mihomo-darwin-amd64-compatible-",
-        ("windows", "x86_64") => "mihomo-windows-amd64-compatible-",
-        ("windows", "aarch64") => "mihomo-windows-arm64-",
-        _ => return None,
-    })
-}
-
-#[derive(Deserialize)]
-struct GhRelease {
-    tag_name: String,
-    assets: Vec<GhAsset>,
-}
-
-#[derive(Deserialize)]
-struct GhAsset {
-    name: String,
-    browser_download_url: String,
-    #[serde(default)]
-    digest: Option<String>,
-    #[serde(default)]
-    size: u64,
-}
-
-fn client(proxy: Option<&str>) -> Result<reqwest::Client, CoreError> {
-    let mut b = reqwest::Client::builder()
-        .user_agent(concat!("Kairo/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(15));
-    b = match proxy {
-        Some(p) => b.proxy(reqwest::Proxy::all(p).map_err(|e| CoreError::Network(e.to_string()))?),
-        None => b.no_proxy(),
+/// Makes `paths.core_bin()` the bundled core unless it already is (the same
+/// version). Returns the version of the core in place.
+pub async fn seed(paths: &Paths) -> Result<String, CoreError> {
+    let target = paths.core_bin();
+    let installed = binary_version(&target).await;
+    let Some(bundled) = paths.bundled_core.clone() else {
+        // A copy from an earlier run still works on its own.
+        return installed.ok_or(CoreError::NotBundled);
     };
-    b.build().map_err(|e| CoreError::Network(e.to_string()))
-}
-
-/// Picks this machine's asset out of a release listing (the JSON of GitHub's API).
-fn pick(release: GhRelease, os: &str, arch: &str) -> Result<Release, CoreError> {
-    let prefix = asset_prefix(os, arch).ok_or_else(|| CoreError::Unsupported(format!("{os} {arch}")))?;
-    let ext = if os == "windows" { ".zip" } else { ".gz" };
-    let name = format!("{prefix}{}{ext}", release.tag_name);
-    let asset = release
-        .assets
-        .into_iter()
-        .find(|a| a.name == name)
-        .ok_or_else(|| CoreError::MissingAsset(name.clone()))?;
-    let sha256 = asset
-        .digest
-        .as_deref()
-        .and_then(|d| d.strip_prefix("sha256:"))
-        .map(str::to_owned)
-        .ok_or_else(|| CoreError::MissingAsset(format!("checksum for {name}")))?;
-    Ok(Release {
-        version: release.tag_name,
-        asset: asset.name,
-        url: asset.browser_download_url,
-        sha256,
-        size: asset.size,
-    })
-}
-
-/// The latest official release's asset for this machine.
-pub async fn latest(proxy: Option<&str>) -> Result<Release, CoreError> {
-    let resp = client(proxy)?
-        .get(RELEASES)
-        .header("Accept", "application/vnd.github+json")
-        .timeout(Duration::from_secs(20))
-        .send()
-        .await
-        .map_err(|e| CoreError::Network(e.to_string()))?;
-    if !resp.status().is_success() {
-        return Err(CoreError::Network(format!("GitHub answered HTTP {}", resp.status().as_u16())));
-    }
-    let release: GhRelease = resp.json().await.map_err(|e| CoreError::Network(e.to_string()))?;
-    pick(release, std::env::consts::OS, std::env::consts::ARCH)
-}
-
-/// Downloads `release`, checks its SHA-256, unpacks it and installs it as the
-/// core. `progress` hears (bytes so far, total).
-pub async fn install(
-    paths: &Paths,
-    release: &Release,
-    proxy: Option<&str>,
-    mut progress: impl FnMut(u64, u64),
-) -> Result<CoreMeta, CoreError> {
-    let resp = client(proxy)?
-        .get(&release.url)
-        .timeout(Duration::from_secs(600))
-        .send()
-        .await
-        .map_err(|e| CoreError::Network(e.to_string()))?;
-    if !resp.status().is_success() {
-        return Err(CoreError::Network(format!("HTTP {}", resp.status().as_u16())));
-    }
-    let total = resp.content_length().unwrap_or(release.size);
-    let mut bytes = Vec::with_capacity(total as usize);
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| CoreError::Network(e.to_string()))?;
-        bytes.extend_from_slice(&chunk);
-        progress(bytes.len() as u64, total);
-    }
-    let actual = hex::encode(Sha256::digest(&bytes));
-    if !actual.eq_ignore_ascii_case(&release.sha256) {
-        return Err(CoreError::Checksum { expected: release.sha256.clone(), actual });
-    }
-    let binary = unpack(&release.asset, &bytes)?;
-    install_binary(paths, &binary)?;
-    let meta = CoreMeta {
-        version: release.version.clone(),
-        asset: release.asset.clone(),
-        sha256: actual,
-        installed_at: crate::profile::now(),
+    let Some(version) = binary_version(&bundled).await else {
+        return installed.ok_or_else(|| CoreError::Broken(bundled.display().to_string()));
     };
-    write_atomic(&paths.core_meta(), &serde_json::to_vec_pretty(&meta).expect("meta"))
-        .map_err(|e| CoreError::Io(e.to_string()))?;
-    Ok(meta)
-}
-
-/// The binary inside a downloaded asset.
-pub fn unpack(asset: &str, bytes: &[u8]) -> Result<Vec<u8>, CoreError> {
-    if asset.ends_with(".gz") {
-        let mut out = Vec::new();
-        flate2::read::GzDecoder::new(bytes)
-            .read_to_end(&mut out)
-            .map_err(|e| CoreError::Io(format!("Could not unpack the core: {e}")))?;
-        Ok(out)
-    } else {
-        Err(CoreError::Unsupported(format!("unpacking {asset}")))
+    if installed.as_deref() == Some(version.as_str()) {
+        return Ok(version);
     }
+    let bytes = tokio::fs::read(&bundled).await.map_err(|e| CoreError::Io(e.to_string()))?;
+    install_binary(paths, &bytes)?;
+    log::info!("core {version} copied from {}", bundled.display());
+    Ok(version)
 }
 
-/// Writes the core binary and makes it executable.
+/// Writes the core binary and makes it executable. Written fresh (not copied
+/// with its metadata), so no quarantine or other attribute comes along.
 pub fn install_binary(paths: &Paths, binary: &[u8]) -> Result<(), CoreError> {
     let target = paths.core_bin();
     write_atomic(&target, binary).map_err(|e| CoreError::Io(e.to_string()))?;
@@ -195,10 +52,6 @@ pub fn install_binary(paths: &Paths, binary: &[u8]) -> Result<(), CoreError> {
             .map_err(|e| CoreError::Io(e.to_string()))?;
     }
     Ok(())
-}
-
-pub fn installed_meta(paths: &Paths) -> Option<CoreMeta> {
-    std::fs::read(paths.core_meta()).ok().and_then(|b| serde_json::from_slice(&b).ok())
 }
 
 /// The version a core binary reports (`mihomo -v`: "Mihomo Meta v1.19.33 linux amd64 ...").
@@ -236,24 +89,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn picks_the_asset_and_checksum() {
-        let json = r#"{"tag_name":"v1.19.33","assets":[
-          {"name":"mihomo-linux-amd64-v1.19.33.gz","browser_download_url":"u1","digest":"sha256:aa","size":1},
-          {"name":"mihomo-linux-amd64-compatible-v1.19.33.gz","browser_download_url":"u2","digest":"sha256:bb","size":2},
-          {"name":"mihomo-darwin-arm64-v1.19.33.gz","browser_download_url":"u3","digest":"sha256:cc","size":3}
-        ]}"#;
-        let r: GhRelease = serde_json::from_str(json).unwrap();
-        let rel = pick(r, "linux", "x86_64").unwrap();
-        assert_eq!((rel.url.as_str(), rel.sha256.as_str()), ("u2", "bb"));
-        let r: GhRelease = serde_json::from_str(json).unwrap();
-        assert_eq!(pick(r, "macos", "aarch64").unwrap().url, "u3");
-        let r: GhRelease = serde_json::from_str(json).unwrap();
-        assert!(matches!(pick(r, "linux", "aarch64"), Err(CoreError::MissingAsset(_))));
-        let r: GhRelease = serde_json::from_str(json).unwrap();
-        assert!(matches!(pick(r, "plan9", "x86_64"), Err(CoreError::Unsupported(_))));
-    }
-
-    #[test]
     fn versions() {
         assert_eq!(
             parse_version("Mihomo Meta v1.19.33 linux amd64 with go1.26.10 Wed Oct 21"),
@@ -262,14 +97,44 @@ mod tests {
         assert!(is_newer("v1.19.33", "v1.19.18"));
         assert!(!is_newer("v1.19.33", "v1.19.33"));
         assert!(is_newer("v1.20.0", "v1.19.99"));
+        assert!(is_newer("0.1.10", "0.1.9"));
     }
 
-    #[test]
-    fn unpacks_gzip() {
-        use std::io::Write;
-        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        enc.write_all(b"binary").unwrap();
-        let gz = enc.finish().unwrap();
-        assert_eq!(unpack("x.gz", &gz).unwrap(), b"binary");
+    #[cfg(unix)]
+    fn fake_core(dir: &Path, version: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(format!("mihomo-{version}"));
+        std::fs::write(&p, format!("#!/bin/sh\necho Mihomo Meta {version} linux amd64\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn seeds_the_bundled_core_and_follows_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = Paths::new(dir.path().join("home"));
+        paths.bundled_core = None;
+        assert!(matches!(seed(&paths).await, Err(CoreError::NotBundled)));
+
+        // First run: copied in.
+        paths.bundled_core = Some(fake_core(dir.path(), "v1.19.33"));
+        assert_eq!(seed(&paths).await.unwrap(), "v1.19.33");
+        assert_eq!(binary_version(&paths.core_bin()).await.as_deref(), Some("v1.19.33"));
+
+        // Same version: the copy (and any grant on it) is left alone.
+        let before = std::fs::metadata(paths.core_bin()).unwrap().modified().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        seed(&paths).await.unwrap();
+        assert_eq!(std::fs::metadata(paths.core_bin()).unwrap().modified().unwrap(), before);
+
+        // An app update brings another core: it replaces the copy.
+        paths.bundled_core = Some(fake_core(dir.path(), "v1.19.34"));
+        assert_eq!(seed(&paths).await.unwrap(), "v1.19.34");
+        assert_eq!(binary_version(&paths.core_bin()).await.as_deref(), Some("v1.19.34"));
+
+        // The bundle went missing: the copy keeps working.
+        paths.bundled_core = Some(dir.path().join("gone"));
+        assert_eq!(seed(&paths).await.unwrap(), "v1.19.34");
     }
 }

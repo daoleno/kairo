@@ -6,8 +6,9 @@
 //!   profiles.json        the profile list (metadata)
 //!   profiles/<id>.yaml   each profile's config, as downloaded or imported
 //!   overrides/<id>.yaml  the user's merge on top of a profile
-//!   core/mihomo          the downloaded core (mihomo.exe on Windows)
-//!   core/version.json    its version and checksum
+//!   core/mihomo          the core Kairo runs: a copy of the one bundled with the app
+//!                        (a copy so that TUN's one-time grant never touches the app itself)
+//!   update/              a verified Kairo update, waiting for a restart
 //!   runtime/             the core's working directory (-d): config.yaml, geo files, cache.db
 //!   state/sysproxy.json  the system proxy as it was before Kairo changed it (crash recovery)
 //!   logs/core.log        the core's recent output
@@ -22,11 +23,13 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Paths {
     pub home: PathBuf,
+    /// The mihomo core shipped with this copy of Kairo (see [`bundled_core`]).
+    pub bundled_core: Option<PathBuf>,
 }
 
 impl Paths {
     pub fn new(home: impl Into<PathBuf>) -> Self {
-        Self { home: home.into() }
+        Self { home: home.into(), bundled_core: bundled_core() }
     }
 
     /// The default location (see the module docs).
@@ -75,8 +78,8 @@ impl Paths {
     pub fn core_bin(&self) -> PathBuf {
         self.core_dir().join(if cfg!(windows) { "mihomo.exe" } else { "mihomo" })
     }
-    pub fn core_meta(&self) -> PathBuf {
-        self.core_dir().join("version.json")
+    pub fn update_dir(&self) -> PathBuf {
+        self.home.join("update")
     }
     pub fn runtime_dir(&self) -> PathBuf {
         self.home.join("runtime")
@@ -115,6 +118,26 @@ impl Paths {
         }
         Ok(())
     }
+}
+
+/// The core that ships with the running Kairo, found next to its executable:
+///
+/// - macOS: `Kairo.app/Contents/MacOS/mihomo`;
+/// - Linux: `<prefix>/lib/kairo/mihomo` for `<prefix>/bin/kairo` (`/usr` for the
+///   .deb, `~/.local` for the tarball's install.sh);
+/// - a development build: `target/mihomo/mihomo` (`scripts/fetch-mihomo.sh`).
+pub fn bundled_core() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe = exe.canonicalize().unwrap_or(exe);
+    bundled_core_for(&exe)
+}
+
+pub fn bundled_core_for(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let name = if cfg!(windows) { "mihomo.exe" } else { "mihomo" };
+    [dir.join(name), dir.join("../lib/kairo").join(name), dir.join("../mihomo").join(name)]
+        .into_iter()
+        .find(|p| p.is_file())
 }
 
 /// Writes `bytes` to `path` through a temporary file in the same directory, so a

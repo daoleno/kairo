@@ -14,10 +14,12 @@ pub mod settings;
 pub mod supervisor;
 pub mod sysproxy;
 pub mod tun;
+pub mod update;
 
 pub use tokio;
 pub use service::{CoreStatus, Live, Notice, Proxies, Service, State, Task};
 pub use settings::{LogLevel, Mode, Settings, Theme};
+pub use update::UpdateStatus;
 
 /// Formats a byte count: `1.2 MB`.
 pub fn bytes(n: u64) -> String {

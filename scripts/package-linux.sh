@@ -1,8 +1,8 @@
 #!/bin/sh
 # dist/Kairo-<version>-linux-<arch>.tar.gz: Kairo's own launcher (window, tray,
-# guardian) in release mode, its .desktop entry, hicolor icons and an install
-# script for ~/.local (or a prefix). The core is not included: Kairo downloads
-# it on first run.
+# guardian) in release mode, the pinned mihomo core (scripts/mihomo.env,
+# checksum verified) in lib/kairo, its .desktop entry, hicolor icons, the
+# licences and an install script for ~/.local (or a prefix).
 set -e
 cd "$(dirname "$0")/.."
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -10,10 +10,26 @@ arch=$(uname -m)
 name="Kairo-$version-linux-$arch"
 out="dist/$name"
 rm -rf "$out" "dist/$name.tar.gz"
-mkdir -p "$out/bin" "$out/share/applications" "$out/share/metainfo"
+mkdir -p "$out/bin" "$out/lib/kairo" "$out/share/applications" "$out/share/metainfo" "$out/share/doc/kairo"
 
 cargo build --release
 cp target/release/kairo "$out/bin/kairo"
+
+# The core, and its licence and source.
+scripts/fetch-mihomo.sh "linux-$arch" "$out/lib/kairo"
+mv "$out/lib/kairo/LICENSE.mihomo" "$out/share/doc/kairo/LICENSE.mihomo"
+. scripts/mihomo.env
+"$out/lib/kairo/mihomo" -v | grep -q "Mihomo Meta $MIHOMO_VERSION "
+cat > "$out/share/doc/kairo/NOTICE" <<NOTICE
+Kairo $version: https://github.com/daoleno/kairo
+Free software under the GNU GPL, version 3 or later (LICENSE).
+
+It ships the mihomo core $MIHOMO_VERSION (lib/kairo/mihomo), the official
+MetaCubeX build, unmodified. mihomo is free software under the GNU GPL,
+version 3 (LICENSE.mihomo). Its source code:
+https://github.com/MetaCubeX/mihomo/tree/$MIHOMO_VERSION
+NOTICE
+cp LICENSE "$out/share/doc/kairo/LICENSE"
 
 for size in 16 24 32 48 64 128 256 512; do
   dir="$out/share/icons/hicolor/${size}x${size}/apps"
@@ -58,6 +74,7 @@ set -e
 prefix=${1:-$HOME/.local}
 here=$(cd "$(dirname "$0")" && pwd)
 install -Dm755 "$here/bin/kairo" "$prefix/bin/kairo"
+install -Dm755 "$here/lib/kairo/mihomo" "$prefix/lib/kairo/mihomo"
 (cd "$here/share" && find . -type f) | while read -r f; do
   install -Dm644 "$here/share/$f" "$prefix/share/$f"
 done
@@ -71,6 +88,7 @@ cat > "$out/uninstall.sh" <<'EOF'
 #!/bin/sh
 # ./uninstall.sh [prefix]   Removes the app; your data (~/.local/share/kairo) stays.
 prefix=${1:-$HOME/.local}
+rm -rf "$prefix/lib/kairo" "$prefix/share/doc/kairo"
 rm -f "$prefix/bin/kairo" "$prefix/share/applications/dev.kairo.app.desktop" \
   "$prefix/share/metainfo/dev.kairo.app.metainfo.xml" \
   "$prefix"/share/icons/hicolor/*/apps/dev.kairo.app.png "$prefix/share/icons/hicolor/scalable/apps/dev.kairo.app.svg"

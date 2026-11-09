@@ -91,6 +91,11 @@ fn core_footer() -> impl IntoElement {
                 .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
                 .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down))),
         )
+        // A downloaded Kairo update: one tap installs it and restarts.
+        .child(when(
+            move || store.state.with(|s| matches!(s.update, kairo_core::UpdateStatus::Ready { .. })),
+            pages::settings::update_button,
+        ))
 }
 
 fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {

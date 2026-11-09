@@ -1,8 +1,9 @@
 #!/bin/sh
 # dist/Kairo-<version>-macos-universal.{dmg,zip}: Kairo.app (Apple silicon and
-# Intel in one binary), ad hoc signed. Run on a Mac with both Rust targets:
+# Intel in one binary) with the pinned mihomo core (scripts/mihomo.env, both
+# builds checksum verified and joined into Contents/MacOS/mihomo), ad hoc
+# signed. Run on a Mac with both Rust targets:
 #   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-# The core is not included: Kairo downloads it on first run.
 set -e
 cd "$(dirname "$0")/.."
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -22,6 +23,28 @@ app=dist/Kairo.app
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 # shellcheck disable=SC2086
 lipo -create $bins -output "$app/Contents/MacOS/Kairo"
+
+# The core: both official builds, joined, signed on its own first.
+cores=$(mktemp -d)
+scripts/fetch-mihomo.sh darwin-aarch64 "$cores/arm64"
+scripts/fetch-mihomo.sh darwin-x86_64 "$cores/x86_64"
+lipo -create "$cores/arm64/mihomo" "$cores/x86_64/mihomo" -output "$app/Contents/MacOS/mihomo"
+chmod 755 "$app/Contents/MacOS/mihomo"
+cp "$cores/arm64/LICENSE.mihomo" "$app/Contents/Resources/LICENSE.mihomo"
+rm -rf "$cores"
+cp LICENSE "$app/Contents/Resources/LICENSE"
+. scripts/mihomo.env
+cat > "$app/Contents/Resources/NOTICE" <<NOTICE
+Kairo $version: https://github.com/daoleno/kairo
+Free software under the GNU GPL, version 3 or later (LICENSE).
+
+It ships the mihomo core $MIHOMO_VERSION (Contents/MacOS/mihomo), the official
+MetaCubeX builds for Apple silicon and Intel joined with lipo, otherwise
+unmodified. mihomo is free software under the GNU GPL, version 3
+(LICENSE.mihomo). Its source code:
+https://github.com/MetaCubeX/mihomo/tree/$MIHOMO_VERSION
+NOTICE
+codesign --force --sign - --identifier dev.kairo.mihomo "$app/Contents/MacOS/mihomo"
 
 iconset=dist/Kairo.iconset
 mkdir -p "$iconset"
@@ -57,8 +80,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 PLIST
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 
-codesign --force --deep --sign - "$app"
-codesign --verify --strict "$app"
+codesign --force --sign - "$app"
+codesign --verify --deep --strict "$app"
 
 ditto -c -k --keepParent "$app" "dist/$name.zip"
 mkdir -p dist/dmg

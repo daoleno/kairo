@@ -11,9 +11,11 @@ const slow = { timeout: 20000 };
 
 const has = (texts: string[], pred: (t: string) => boolean) => texts.some(pred);
 
-test("a first run: the core, no profile yet", async () => {
+test("a first run: the bundled core running, no profile yet", async () => {
   const app = await open("..", desktop);
-  await app.waitUntil(() => !app.shows("text:Core not installed"), slow);
+  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Running · mihomo")), slow);
+  expect(app.shows("text:Install Core")).toBe(false);
+  expect(has(app.texts(), (t) => t.includes("No profile yet, so traffic goes direct"))).toBe(true);
   expect(app.texts()).toContain("No profile yet. Add a subscription URL or a config file.");
   expect(app.shows("text:Add Profile…")).toBe(true);
 });

@@ -48,11 +48,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: scripts/package-linux.sh
       - run: scripts/package-deb.sh
-      - name: The .deb installs and its dependencies resolve
+      - name: The .deb installs, its dependencies resolve, and it carries the pinned core
         run: |
+          . scripts/mihomo.env
           sudo apt-get install -y ./dist/kairo_*.deb
           dpkg -L kairo | grep -q /usr/bin/kairo
           test -x /usr/bin/kairo
+          /usr/lib/kairo/mihomo -v | tee /dev/stderr | grep -q "Mihomo Meta $MIHOMO_VERSION "
+          test -s /usr/share/doc/kairo/LICENSE.mihomo
+          grep -q "MetaCubeX/mihomo/tree/$MIHOMO_VERSION" /usr/share/doc/kairo/copyright
+          tar -tzf dist/Kairo-*.tar.gz | grep -q '/lib/kairo/mihomo$'
       - uses: actions/upload-artifact@v4
         with:
           name: dist-linux-${{ runner.arch }}
@@ -70,10 +75,17 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - run: scripts/package-macos.sh
-      - name: The app is universal and signed
+      - name: The app and its core are universal and signed
         run: |
-          lipo -archs dist/Kairo.app/Contents/MacOS/Kairo
+          . scripts/mihomo.env
+          for b in Kairo mihomo; do
+            lipo -archs dist/Kairo.app/Contents/MacOS/$b | tee /dev/stderr | grep -q "x86_64 arm64"
+          done
+          dist/Kairo.app/Contents/MacOS/mihomo -v | tee /dev/stderr | grep -q "Mihomo Meta $MIHOMO_VERSION "
+          codesign --verify --deep --strict dist/Kairo.app
           codesign -dv dist/Kairo.app 2>&1 | grep -E "Identifier|Signature"
+          codesign -dv dist/Kairo.app/Contents/MacOS/mihomo 2>&1 | grep -E "Identifier|Signature"
+          test -s dist/Kairo.app/Contents/Resources/LICENSE.mihomo
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos
@@ -93,8 +105,9 @@ jobs:
       - run: cargo build --release
 
   publish:
+    # On a tag: the release. By hand: everything but the release (the files,
+    # the signed update manifest included, are kept as an artifact).
     needs: [verify, linux, macos]
-    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -108,7 +121,28 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+      - name: Update manifest, signed with the key whose public half Kairo has built in
+        env:
+          KAIRO_UPDATE_KEY: ${{ secrets.KAIRO_UPDATE_KEY }}
+        run: |
+          scripts/update-manifest.sh dist "${{ needs.verify.outputs.version }}"
+          key="$RUNNER_TEMP/update.pem"
+          (umask 077 && printf '%s\n' "$KAIRO_UPDATE_KEY" > "$key")
+          openssl pkeyutl -sign -rawin -inkey "$key" -in dist/kairo-update.json -out "$RUNNER_TEMP/update.sig"
+          openssl pkey -in "$key" -pubout -out "$RUNNER_TEMP/update.pub"
+          rm -f "$key"
+          openssl pkeyutl -verify -rawin -pubin -inkey "$RUNNER_TEMP/update.pub" -in dist/kairo-update.json -sigfile "$RUNNER_TEMP/update.sig"
+          built_in=$(sed -n 's/^const UPDATE_PUBLIC_KEY_HEX: &str = "\([0-9a-f]*\)";/\1/p' crates/kairo-core/src/update.rs)
+          signing=$(openssl pkey -pubin -in "$RUNNER_TEMP/update.pub" -outform DER | tail -c 32 | od -An -tx1 -v | tr -d ' \n')
+          test -n "$built_in" && test "$built_in" = "$signing" || { echo "the signing key is not the one Kairo trusts"; exit 1; }
+          od -An -tx1 -v "$RUNNER_TEMP/update.sig" | tr -d ' \n' > dist/kairo-update.json.sig
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type != 'tag'
+        with:
+          name: release-dry-run
+          path: dist/*
       - name: Release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

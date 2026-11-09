@@ -142,6 +142,21 @@ impl Default for Settings {
     }
 }
 
+/// Whether something listens on a local port. A connect, not only a bind: on
+/// macOS a bind to 127.0.0.1 can succeed beside a wildcard listener.
+pub fn port_in_use(port: u16) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
+        || std::net::TcpListener::bind(addr).is_err()
+}
+
+/// `start` if it is free, else the next free port after it (not in `taken`).
+pub fn free_port(start: u16, taken: &[u16]) -> u16 {
+    (start..start.saturating_add(200))
+        .find(|p| !taken.contains(p) && !port_in_use(*p))
+        .unwrap_or(start)
+}
+
 pub fn default_bypass() -> Vec<String> {
     [
         "localhost",
@@ -159,7 +174,10 @@ pub fn default_bypass() -> Vec<String> {
 
 impl Settings {
     /// Reads the settings, or the defaults (with a new secret) when there are none.
+    /// On the first run the ports are the defaults or, when another program
+    /// (another Clash client) holds those, the next free ones.
     pub fn load(paths: &Paths) -> Settings {
+        let first_run = !paths.settings().exists();
         let mut settings = std::fs::read(paths.settings())
             .ok()
             .and_then(|bytes| match serde_json::from_slice::<Settings>(&bytes) {
@@ -170,8 +188,14 @@ impl Settings {
                 }
             })
             .unwrap_or_default();
-        if settings.secret.is_empty() {
-            settings.secret = new_secret();
+        if first_run {
+            settings.mixed_port = free_port(settings.mixed_port, &[]);
+            settings.controller_port = free_port(settings.controller_port, &[settings.mixed_port]);
+        }
+        if settings.secret.is_empty() || first_run {
+            if settings.secret.is_empty() {
+                settings.secret = new_secret();
+            }
             let _ = settings.save(paths);
         }
         settings

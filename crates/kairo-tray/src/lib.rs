@@ -36,7 +36,6 @@ pub struct Choice {
 pub struct Model {
     pub status: String,
     pub running: bool,
-    pub can_start: bool,
     pub mode: Mode,
     pub sysproxy: bool,
     pub sysproxy_supported: bool,
@@ -74,7 +73,6 @@ impl Model {
         Model {
             status,
             running: state.core.is_running(),
-            can_start: !matches!(state.core, CoreStatus::Missing) && state.profiles.active.is_some(),
             mode: s.mode,
             sysproxy: s.system_proxy,
             sysproxy_supported: state.sysproxy_supported,

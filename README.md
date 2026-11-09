@@ -3,7 +3,7 @@
 A native desktop client for the [mihomo](https://github.com/MetaCubeX/mihomo) proxy core (Clash Meta), for
 Linux (GTK 4) and macOS (AppKit), written in Rust on [NSH](https://nsh.dev).
 
-Kairo sets up the core and keeps it running. It manages your subscriptions, lets you pick nodes, and shows live
+Kairo ships with the core and keeps it running: open it and the proxy is up. It manages your subscriptions, lets you pick nodes, and shows live
 traffic, connections, rules and logs. It can also set the system proxy or turn on TUN. The layout is dense and
 calm, with one accent colour, and it follows the system's light or dark appearance.
 
@@ -13,9 +13,13 @@ calm, with one accent colour, and it follows the system's light or dark appearan
 
 ## What it does
 
-- **Core**: downloads the official mihomo build for the machine and verifies it against the release's SHA-256.
-  It checks for updates and can start, stop or restart the core. If the core crashes, Kairo starts it again.
-  A custom core binary also works.
+- **Core**: the official mihomo build is inside every package, pinned and checked against its published
+  SHA-256 when the package is built. It starts with Kairo (all traffic goes direct until you add a profile)
+  and comes back if it crashes. A custom core binary also works.
+- **Updates**: Kairo checks for a new release on launch and every six hours, downloads it in the
+  background and verifies it (an Ed25519-signed manifest, plus `SHA256SUMS`). **Restart to Update** installs
+  it, core included: the app bundle on macOS, the files of a `~/.local` install, or the `.deb` through
+  `pkexec apt-get` (one password prompt).
 - **Profiles**: add a subscription URL or a YAML file. Kairo validates each one with the core before using it.
   Subscriptions update on a schedule (the provider's interval or your own) or by hand. You can see usage and
   expiry, switch profiles with one click, and keep per-profile overrides in a YAML editor. Overrides merge
@@ -53,7 +57,7 @@ Download the latest release from [Releases](https://github.com/daoleno/kairo/rel
 - **Other Linux** (GTK 4.14+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
   to `~/.local`; `./install.sh /usr/local` installs system-wide with sudo.
 
-Check downloads against `SHA256SUMS` in the release.
+Check downloads against `SHA256SUMS` in the release. After that, Kairo updates itself.
 
 ## Build and run
 
@@ -61,26 +65,29 @@ Rust (stable) and the platform's development libraries are needed: GTK 4 on Linu
 on macOS.
 
 ```sh
-cargo run                      # the app (GTK 4 on Linux, AppKit on macOS)
+scripts/fetch-mihomo.sh        # target/mihomo/: the pinned core (scripts/mihomo.env), checksum verified
+cargo run                      # the app (GTK 4 on Linux, AppKit on macOS), with that core
 nsh check                      # cargo check of every crate
-KAIRO_TEST_CORE=/path/to/mihomo scripts/ui-test.sh    # nsh test: all unit, e2e and headless UI tests
-KAIRO_TEST_CORE=/path/to/mihomo scripts/tun-e2e.sh    # TUN end to end, in a network namespace
-scripts/package-linux.sh       # dist/: a tarball with the binary, .desktop file, icons and install.sh
+scripts/ui-test.sh             # nsh test: all unit, e2e and headless UI tests
+scripts/tun-e2e.sh             # TUN end to end, in a network namespace
+scripts/package-linux.sh       # dist/: a tarball with the binary, the core, .desktop file, icons and install.sh
 scripts/package-deb.sh         # dist/: a .deb from that tree
 scripts/package-macos.sh       # dist/: Kairo.app, .dmg and .zip, universal, ad hoc signed (run on a Mac)
 ```
 
 Kairo keeps its data in `~/.local/share/kairo` on Linux and `~/Library/Application Support/Kairo` on macOS.
 `KAIRO_HOME` overrides the location. `KAIRO_NO_SYSPROXY=1` makes Kairo leave the system proxy alone, which is
-useful for development next to a proxy you rely on.
+useful for development next to a proxy you rely on. `KAIRO_NO_UPDATE=1` turns off the update checks.
+On first run Kairo takes ports 7897 and 9097, or the next free ones if another client holds them.
 
 ### Tests
 
-- `cargo test -p kairo-core` runs the unit tests: config merging, subscriptions, usage headers, checksums,
-  settings, and the system proxy formats of each desktop.
+- `cargo test -p kairo-core` runs the unit tests: config merging, subscriptions, usage headers, settings,
+  the system proxy formats of each desktop, the bundled core, and the updater (signatures, checksums,
+  install detection, replacing a `~/.local` install).
 - `tests/e2e.rs` runs against a real core on free ports. It serves a subscription and runs two local proxy
   nodes and an origin, then drives the service as the app does:
-  - add the profile and start the core;
+  - start the bundled core with no profile, then add the profile;
   - pick a node and test delays;
   - send traffic through the core and check it in the connections and traffic streams;
   - check rules, logs and the DNS tool;
@@ -107,7 +114,8 @@ crates/kairo-core    everything that is not UI:
   controller.rs        mihomo's REST API and its streams (/traffic, /memory, /connections, /logs)
   config.rs            the running config: profile + override + Kairo's settings; validation by the core
   profile.rs           subscriptions and files, usage headers, update schedule
-  core_bin.rs          release lookup, download, SHA-256 check, install, update
+  core_bin.rs          the bundled core: Kairo's own copy of it, its version
+  update.rs            Kairo's updates: signed manifest, download, checks, install, relaunch
   sysproxy.rs          system proxy on macOS, GNOME and KDE: set, restore, recover
   tun.rs               TUN privilege: status and the one-time grant
   autostart.rs         launch at login (XDG autostart, LaunchAgent)
@@ -123,17 +131,26 @@ TUN needs the right to create a network device and change routes. Kairo gives th
 alone, once:
 
 - **Linux**: `pkexec setcap cap_net_admin,cap_net_bind_service=+ep <core>`. Polkit asks for the password once,
-  and the core can then run TUN as your user. A core update replaces the binary, which drops the capability,
-  so Kairo asks again. If Kairo runs as root, or as uid 0 inside a user namespace, nothing is needed.
+  and the core can then run TUN as your user. If Kairo runs as root, or as uid 0 inside a user namespace,
+  nothing is needed.
 - **macOS**: the core is made setuid root through the system's administrator prompt.
 
+The grant goes to Kairo's own copy of the core in its data directory, never to a file inside the app or a
+system package. An update that brings a new mihomo version replaces that copy, which drops the grant: Kairo
+then turns TUN off, says so, and asks again the next time you switch it on.
+
 Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a `vX.Y.Z` tag is pushed. The
-notes come from `docs/releases/vX.Y.Z.md`.
+notes come from `docs/releases/vX.Y.Z.md`. The workflow signs the update manifest with the `KAIRO_UPDATE_KEY`
+secret; its public half is built into Kairo (`crates/kairo-core/src/update.rs`).
 
 ## Licence
 
 Kairo is free software under the [GNU General Public License v3.0 or later](LICENSE).
 
-Kairo does not include mihomo. On first run, and when you ask for an update, it downloads the official build from
-[MetaCubeX/mihomo's releases](https://github.com/MetaCubeX/mihomo/releases) and verifies the published checksum.
-mihomo is licensed under the GPL-3.0. You can also point Kairo at a core you built yourself (Settings → Core).
+Kairo ships [mihomo](https://github.com/MetaCubeX/mihomo) (© MetaCubeX), free software under the
+[GNU GPL v3.0](https://github.com/MetaCubeX/mihomo/blob/Meta/LICENSE): the official release build, unmodified
+(on macOS, the Apple silicon and Intel builds joined into one file). The version is pinned in
+[`scripts/mihomo.env`](scripts/mihomo.env); its source is at `https://github.com/MetaCubeX/mihomo/tree/<version>`.
+Each package carries mihomo's licence and a notice with that link (`share/doc/kairo/` on Linux,
+`Kairo.app/Contents/Resources/` on macOS). You can also point Kairo at a core you built yourself
+(Settings → Core).

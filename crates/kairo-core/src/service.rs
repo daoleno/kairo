@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 
 use crate::config;
 use crate::controller::{ApiError, Controller};
-use crate::core_bin::{self, CoreMeta};
+use crate::core_bin;
 use crate::model::*;
 use crate::paths::Paths;
 use crate::profile::{self, Profile, ProfileIndex, Source};
@@ -25,8 +25,6 @@ use crate::tun::{self, Privilege};
 /// The core's state.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum CoreStatus {
-    /// No core binary yet.
-    Missing,
     #[default]
     Stopped,
     Starting,
@@ -43,7 +41,6 @@ impl CoreStatus {
 
     pub fn title(&self) -> &'static str {
         match self {
-            CoreStatus::Missing => "Core not installed",
             CoreStatus::Stopped => "Stopped",
             CoreStatus::Starting => "Starting",
             CoreStatus::Running { .. } => "Running",
@@ -73,10 +70,10 @@ pub struct Task {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct State {
     pub core: CoreStatus,
-    /// The installed core's version.
+    /// The core's version.
     pub core_version: Option<String>,
-    /// A newer release, when one was found.
-    pub core_update: Option<String>,
+    /// Kairo's own update, when there is one.
+    pub update: crate::update::UpdateStatus,
     pub settings: Settings,
     pub profiles: ProfileIndex,
     /// Profiles being downloaded.
@@ -117,6 +114,9 @@ pub struct Proxies {
 
 const LOG_CAPACITY: usize = 3000;
 
+/// The config before the first profile: no nodes, everything direct.
+const NO_PROFILE: &str = "proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n";
+
 enum CoreCmd {
     Start(oneshot::Sender<Result<(), String>>),
     Stop(oneshot::Sender<()>),
@@ -136,6 +136,10 @@ struct Inner {
     notice_seq: Mutex<u64>,
     /// Serializes config applies.
     apply_lock: tokio::sync::Mutex<()>,
+    /// One update check or install at a time.
+    update_lock: tokio::sync::Mutex<()>,
+    /// Ends the app (the launcher's Quit), for "Restart to Update".
+    quit: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 /// A handle to the service (cheap to clone).
@@ -208,6 +212,8 @@ impl Service {
             core_tx,
             notice_seq: Mutex::new(0),
             apply_lock: tokio::sync::Mutex::new(()),
+            update_lock: tokio::sync::Mutex::new(()),
+            quit: Mutex::new(None),
         }));
         let actor = svc.clone();
         rt.spawn(async move { actor.core_actor(core_rx).await });
@@ -325,6 +331,18 @@ impl Service {
         }
     }
 
+    /// Fails when another program holds the core's ports. A controller port in
+    /// use is the dangerous one: Kairo would be talking to someone else's core.
+    fn ports_free(&self) -> Result<(), String> {
+        let s = self.settings();
+        for (port, what) in [(s.controller_port, "controller"), (s.mixed_port, "proxy")] {
+            if crate::settings::port_in_use(port) {
+                return Err(format!("Port {port} (the core's {what} port) is used by another program. Choose another one in Settings."));
+            }
+        }
+        Ok(())
+    }
+
     fn save_settings(&self) {
         let s = self.settings();
         if let Err(e) = s.save(&self.0.paths) {
@@ -342,30 +360,37 @@ impl Service {
     // --- Boot ---------------------------------------------------------------------
 
     async fn boot(self) {
+        // The bundled core, copied in place (first run, or after an app update).
+        let seeded = core_bin::seed(&self.0.paths).await;
+        if let Err(e) = &seeded {
+            log::warn!("core: {e}");
+        }
         let core = self.core_path();
         let version = core_bin::binary_version(&core).await;
         let privilege = tun::status(&core);
         self.modify(|s| {
             s.core_version = version.clone();
             s.tun_privilege = Some(privilege);
-            if version.is_none() {
-                s.core = CoreStatus::Missing;
-            }
         });
-        let settings = self.settings();
-        let has_profile = self.0.state.borrow().profiles.active_profile().is_some();
-        if version.is_some() && has_profile && settings.auto_start_core {
-            if let Err(e) = self.start_core().await {
-                log::warn!("start: {e}");
+        // A new core (an app update) does not have TUN's grant yet: say so
+        // rather than start a TUN that cannot come up.
+        if self.settings().tun && privilege == Privilege::Needed {
+            self.modify(|s| s.settings.tun = false);
+            self.save_settings();
+            self.notify("TUN is off: the updated core needs permission again. Turn TUN on to grant it.", true);
+        }
+        match (version, seeded) {
+            (Some(_), _) => {
+                if self.settings().auto_start_core
+                    && let Err(e) = self.start_core().await
+                {
+                    log::warn!("start: {e}");
+                }
             }
+            (None, Err(e)) => self.set_core(CoreStatus::Failed { message: e.to_string() }),
+            (None, Ok(_)) => self.set_core(CoreStatus::Failed { message: format!("The core at {} does not run", core.display()) }),
         }
-        // Look for a newer core once a day at most (quietly).
-        if let Ok(release) = core_bin::latest(None).await
-            && let Some(installed) = &version
-            && core_bin::is_newer(&release.version, installed)
-        {
-            self.modify(|s| s.core_update = Some(release.version));
-        }
+        crate::update::spawn_checks(self.clone());
     }
 
     /// Updates subscriptions when due.
@@ -480,8 +505,15 @@ impl Service {
     async fn launch(&self, process: &mut Option<CoreProcess>, streams: &mut Vec<JoinHandle<()>>) -> Result<(), String> {
         let core = self.core_path();
         if !core.exists() {
-            self.set_core(CoreStatus::Missing);
-            return Err("The core is not installed".into());
+            let message = format!("The core is missing ({})", core.display());
+            self.set_core(CoreStatus::Failed { message: message.clone() });
+            return Err(message);
+        }
+        // A core left behind by a Kairo that crashed would hold the ports.
+        crate::supervisor::stop_stale(&self.0.paths).await;
+        if let Err(message) = self.ports_free() {
+            self.set_core(CoreStatus::Failed { message: message.clone() });
+            return Err(message);
         }
         self.set_core(CoreStatus::Starting);
         self.modify(|s| s.warning = None);
@@ -546,8 +578,7 @@ impl Service {
             self.sysproxy_off_temporarily();
             p.stop(&self.0.paths).await;
         }
-        let missing = !self.core_path().exists();
-        self.set_core(if missing { CoreStatus::Missing } else { CoreStatus::Stopped });
+        self.set_core(CoreStatus::Stopped);
         self.0.live.send_modify(|l| {
             l.up = 0;
             l.down = 0;
@@ -704,12 +735,15 @@ impl Service {
             let s = self.0.state.borrow();
             (s.profiles.active.clone(), s.settings.clone())
         };
-        let Some(id) = active else {
-            return Err("Add a profile to start the core".into());
-        };
         let paths = &self.0.paths;
-        let text = profile::read_config(paths, &id).map_err(|e| format!("The active profile's file is missing: {e}"))?;
-        let over = profile::read_override(paths, &id);
+        // With no profile yet the core still runs, sending everything direct.
+        let (text, over) = match &active {
+            Some(id) => (
+                profile::read_config(paths, id).map_err(|e| format!("The active profile's file is missing: {e}"))?,
+                profile::read_override(paths, id),
+            ),
+            None => (NO_PROFILE.to_owned(), String::new()),
+        };
         let built = config::build(&text, &over, &settings).map_err(|e| e.to_string())?;
         crate::paths::write_atomic(&paths.candidate_config(), built.as_bytes()).map_err(|e| e.to_string())?;
         let core = self.core_path();
@@ -1337,76 +1371,65 @@ impl Service {
         })
     }
 
-    // --- Core binary --------------------------------------------------------------
+    // --- Kairo's own updates ------------------------------------------------------
 
-    /// Downloads the latest core (checksum verified) and restarts on it.
-    pub fn install_core(&self) -> impl Future<Output = Result<CoreMeta, String>> + 'static {
-        let svc = self.clone();
-        self.run(async move {
-            svc.modify(|s| s.task = Some(Task { label: "Looking for the latest core".into(), progress: None }));
-            let proxy = svc.running().then(|| format!("http://127.0.0.1:{}", svc.settings().mixed_port));
-            let result = async {
-                let release = match core_bin::latest(None).await {
-                    Ok(r) => r,
-                    Err(e) => match &proxy {
-                        Some(p) => core_bin::latest(Some(p)).await.map_err(|e| e.to_string())?,
-                        None => return Err(e.to_string()),
-                    },
-                };
-                let label = format!("Downloading mihomo {}", release.version);
-                let progress_svc = svc.clone();
-                let mut last = 0.0f32;
-                let meta = core_bin::install(&svc.0.paths, &release, proxy.as_deref(), move |done, total| {
-                    let p = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-                    if p - last >= 0.02 || p >= 1.0 {
-                        last = p;
-                        progress_svc.modify(|s| s.task = Some(Task { label: label.clone(), progress: Some(p) }));
-                    }
-                })
-                .await
-                .map_err(|e| e.to_string())?;
-                Ok(meta)
-            }
-            .await;
-            svc.modify(|s| s.task = None);
-            let meta = result?;
-            let core = svc.core_path();
-            let privilege = tun::status(&core);
-            let was_running = svc.running();
-            svc.modify(|s| {
-                s.core_version = Some(meta.version.clone());
-                s.core_update = None;
-                s.tun_privilege = Some(privilege);
-                if s.core == CoreStatus::Missing {
-                    s.core = CoreStatus::Stopped;
-                }
-            });
-            if was_running {
-                svc.restart_core().await?;
-            } else if svc.0.state.borrow().profiles.active.is_some() {
-                svc.start_core().await?;
-            }
-            Ok(meta)
-        })
+    pub(crate) fn set_update(&self, status: crate::update::UpdateStatus) {
+        self.modify(|s| s.update = status);
     }
 
-    /// Checks GitHub for a newer core.
-    pub fn check_core_update(&self) -> impl Future<Output = Result<Option<String>, String>> + 'static {
+    pub(crate) fn update_lock(&self) -> &tokio::sync::Mutex<()> {
+        &self.0.update_lock
+    }
+
+    /// The ways to reach GitHub, best first: through the core when it runs with
+    /// a profile (many networks need it), then directly.
+    pub(crate) fn download_routes(&self) -> Vec<Option<String>> {
+        let s = self.0.state.borrow();
+        let via_core = (s.core.is_running() && s.profiles.active.is_some()).then(|| format!("http://127.0.0.1:{}", s.settings.mixed_port));
+        match via_core {
+            Some(p) => vec![Some(p), None],
+            None => vec![None],
+        }
+    }
+
+    /// What the launcher calls to quit the app (after a clean shutdown).
+    pub fn set_quit_hook(&self, quit: Arc<dyn Fn() + Send + Sync>) {
+        *self.0.quit.lock().expect("quit hook") = Some(quit);
+    }
+
+    /// Looks for a Kairo update now.
+    pub fn check_for_update(&self) -> impl Future<Output = Result<Option<String>, String>> + 'static {
+        let svc = self.clone();
+        self.run(async move { crate::update::check(&svc).await })
+    }
+
+    /// Installs the downloaded update and restarts into it.
+    pub fn restart_to_update(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            let proxy = svc.running().then(|| format!("http://127.0.0.1:{}", svc.settings().mixed_port));
-            let release = match core_bin::latest(None).await {
-                Ok(r) => r,
-                Err(e) => match &proxy {
-                    Some(p) => core_bin::latest(Some(p)).await.map_err(|e| e.to_string())?,
-                    None => return Err(e.to_string()),
-                },
+            let _busy = svc.0.update_lock.lock().await;
+            let previous = svc.snapshot().update;
+            let crate::update::UpdateStatus::Ready { version } = previous.clone() else {
+                return Err("No update is ready".into());
             };
-            let installed = svc.0.state.borrow().core_version.clone();
-            let newer = installed.is_none_or(|v| core_bin::is_newer(&release.version, &v));
-            let update = newer.then(|| release.version.clone());
-            svc.modify(|s| s.core_update = update.clone());
-            Ok(update)
+            svc.set_update(crate::update::UpdateStatus::Installing { version });
+            let exe = match crate::update::install(&svc).await {
+                Ok(exe) => exe,
+                Err(e) => {
+                    svc.set_update(previous);
+                    return Err(e);
+                }
+            };
+            crate::update::relaunch(&exe)?;
+            let quit = svc.0.quit.lock().expect("quit hook").clone();
+            match quit {
+                Some(quit) => quit(),
+                None => {
+                    svc.shutdown();
+                    std::process::exit(0);
+                }
+            }
+            Ok(())
         })
     }
 }

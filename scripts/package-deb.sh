@@ -15,10 +15,32 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 root="$work/root"
-mkdir -p "$root/usr/bin" "$root/usr/share/doc/kairo"
+mkdir -p "$root/usr/bin" "$root/usr/lib/kairo" "$root/usr/share/doc/kairo"
 cp "$tree/bin/kairo" "$root/usr/bin/kairo"
+cp "$tree/lib/kairo/mihomo" "$root/usr/lib/kairo/mihomo"
 cp -R "$tree/share/." "$root/usr/share/"
-cp LICENSE "$root/usr/share/doc/kairo/copyright"
+rm -f "$root/usr/share/doc/kairo/LICENSE"
+. scripts/mihomo.env
+{
+  echo "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/"
+  echo "Upstream-Name: kairo"
+  echo "Source: https://github.com/daoleno/kairo"
+  echo
+  echo "Files: *"
+  echo "Copyright: daoleno"
+  echo "License: GPL-3.0-or-later"
+  echo
+  echo "Files: usr/lib/kairo/mihomo"
+  echo "Copyright: MetaCubeX"
+  echo "License: GPL-3.0"
+  echo "Comment: mihomo $MIHOMO_VERSION, the official build, unmodified."
+  echo " Source: https://github.com/MetaCubeX/mihomo/tree/$MIHOMO_VERSION"
+  echo " Licence text: the GNU GPL version 3, as below; also in"
+  echo " /usr/share/doc/kairo/LICENSE.mihomo (mihomo's own copy)."
+  echo
+  echo "License: GPL-3.0-or-later"
+  sed 's/^$/./; s/^/ /' LICENSE
+} > "$root/usr/share/doc/kairo/copyright"
 size=$(du -sk "$root" | cut -f1)
 
 mkdir -p "$work/control"
@@ -34,10 +56,9 @@ Section: net
 Priority: optional
 Homepage: https://github.com/daoleno/kairo
 Description: Native client for the mihomo proxy core
- Kairo manages the mihomo (Clash Meta) core: subscriptions, node selection
- and delay tests, live traffic, connections, rules and logs, the system proxy
- and TUN mode. The core itself is downloaded on first run and verified
- against its published checksum.
+ Kairo runs the mihomo (Clash Meta) core it ships with: subscriptions, node
+ selection and delay tests, live traffic, connections, rules and logs, the
+ system proxy and TUN mode. It updates itself, core included.
 CONTROL
 (cd "$root" && find . -type f ! -path './DEBIAN/*' -exec md5sum {} + | sed 's| \./| |') > "$work/control/md5sums"
 

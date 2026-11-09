@@ -39,8 +39,6 @@ fn status_card() -> impl IntoElement {
         let s = store.state.get();
         match &s.core {
             CoreStatus::Running { version } => format!("Running · mihomo {version}").into(),
-            CoreStatus::Missing => "The mihomo core is not installed".into(),
-            CoreStatus::Stopped if s.profiles.active.is_none() => "Add a profile to start".into(),
             other => other.title().into(),
         }
     };
@@ -56,6 +54,9 @@ fn status_card() -> impl IntoElement {
             CoreStatus::Failed { message } => message.clone().into(),
             CoreStatus::Running { .. } => {
                 let mut parts = vec![format!("Mixed port {}", s.settings.mixed_port)];
+                if s.profiles.active.is_none() {
+                    parts.push("No profile yet, so traffic goes direct".into());
+                }
                 if s.settings.allow_lan {
                     parts.push("LAN access on".into());
                 }
@@ -64,7 +65,6 @@ fn status_card() -> impl IntoElement {
                 }
                 parts.join(" · ").into()
             }
-            CoreStatus::Missing => "Kairo downloads the official build for this computer and verifies its checksum.".into(),
             _ => match s.profiles.active_profile() {
                 Some(p) => p.name.clone().into(),
                 None => "A subscription URL or a config file from your provider.".into(),
@@ -80,15 +80,9 @@ fn status_card() -> impl IntoElement {
 
     let action = dynamic(move || {
         let core = store.state.with(|s| s.core.clone());
-        let has_profile = store.state.with(|s| s.profiles.active.is_some());
-        let busy = store.state.with(|s| s.task.is_some());
         untracked(move || {
             let svc = store.svc();
             match core {
-                CoreStatus::Missing => ui::btn_icon(Icon::Download, "Install Core", Variant::Primary)
-                    .disabled(busy)
-                    .on_press(move || store.run(svc.install_core()))
-                    .into_element(),
                 CoreStatus::Running { .. } => view()
                     .flex_row()
                     .gap_2()
@@ -101,9 +95,6 @@ fn status_card() -> impl IntoElement {
                     }))
                     .into_element(),
                 CoreStatus::Starting | CoreStatus::Stopping => ui::btn("Starting…", Variant::Secondary).disabled(true).into_element(),
-                _ if !has_profile => ui::btn_icon(Icon::Plus, "Add Profile…", Variant::Primary)
-                    .on_press(move || store.page.set(Page::Profiles))
-                    .into_element(),
                 _ => ui::btn_icon(Icon::Play, "Start", Variant::Primary)
                     .on_press(move || store.run(svc.start_core()))
                     .into_element(),
@@ -418,7 +409,9 @@ fn group_card() -> View {
         .child(dynamic(move || {
             let g = main();
             let mode = store.state.with(|s| s.settings.mode);
+            let running = store.state.with(|s| s.core.is_running());
             untracked(move || match g {
+                None if running => ui::muted("Your profile's proxy groups show here.").into_element(),
                 None => ui::muted("Groups appear when the core is running.").into_element(),
                 Some(g) => {
                     let now = g.now.clone().unwrap_or_default();

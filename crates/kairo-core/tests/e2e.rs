@@ -4,8 +4,9 @@
 //! send traffic through the proxy and see it in the connections and traffic
 //! streams, switch modes, survive a core crash, reject a bad override.
 //!
-//! The core: `KAIRO_TEST_CORE=/path/to/mihomo`, else the latest official build
-//! is downloaded (checksum verified) into the target directory. Nothing here
+//! The core: `KAIRO_TEST_CORE=/path/to/mihomo`, else `target/mihomo/mihomo`
+//! (`scripts/fetch-mihomo.sh`). It is given to the service as the bundled core,
+//! as a packaged Kairo has it, and runs from the copy Kairo makes. Nothing here
 //! touches the machine's system proxy (`KAIRO_NO_SYSPROXY`), and every port is
 //! a free one on 127.0.0.1.
 
@@ -104,17 +105,13 @@ fn loopback_for_test_names(target: &str) -> String {
     }
 }
 
-async fn core_binary(target: &std::path::Path) -> std::path::PathBuf {
+fn core_binary(target: &std::path::Path) -> std::path::PathBuf {
     if let Some(p) = std::env::var_os("KAIRO_TEST_CORE") {
         return p.into();
     }
-    let paths = Paths::new(target.join("kairo-test-core"));
-    paths.ensure().unwrap();
-    if !paths.core_bin().exists() {
-        let release = kairo_core::core_bin::latest(None).await.expect("find the latest core");
-        kairo_core::core_bin::install(&paths, &release, None, |_, _| {}).await.expect("download the core");
-    }
-    paths.core_bin()
+    let p = target.join("mihomo/mihomo");
+    assert!(p.is_file(), "no core: run scripts/fetch-mihomo.sh or set KAIRO_TEST_CORE");
+    p
 }
 
 async fn wait_for<T>(what: &str, limit: Duration, mut f: impl FnMut() -> Option<T>) -> T {
@@ -131,11 +128,14 @@ async fn wait_for<T>(what: &str, limit: Duration, mut f: impl FnMut() -> Option<
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_real_core_end_to_end() {
     // SAFETY: set before any thread of this test reads the environment.
-    unsafe { std::env::set_var("KAIRO_NO_SYSPROXY", "1") };
+    unsafe {
+        std::env::set_var("KAIRO_NO_SYSPROXY", "1");
+        std::env::set_var("KAIRO_NO_UPDATE", "1");
+    }
     let _ = env_logger_init();
     let home = tempfile::tempdir().unwrap();
     let target = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target");
-    let core = core_binary(&target).await;
+    let core = core_binary(&target);
 
     // Local servers.
     let origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -163,14 +163,14 @@ rules:
     );
     tokio::spawn(origin(origin_listener, Arc::new(subscription)));
 
-    // Settings: free ports, the test core, a local delay-test URL.
-    let paths = Paths::new(home.path());
+    // Settings: free ports, a local delay-test URL. The core is the bundled one.
+    let mut paths = Paths::new(home.path());
+    paths.bundled_core = Some(core.clone());
     paths.ensure().unwrap();
     let mut settings = Settings::default();
     settings.mixed_port = free_port();
     settings.controller_port = free_port();
     settings.secret = "e2e-secret".into();
-    settings.core_path = Some(core.to_string_lossy().into_owned());
     settings.test_url = format!("http://{origin_addr}/generate_204");
     settings.test_timeout_ms = 3000;
     settings.save(&paths).unwrap();
@@ -179,9 +179,15 @@ rules:
     let svc = Service::start(paths.clone());
     let state = svc.state();
     wait_for("the core version", Duration::from_secs(15), || state.borrow().core_version.clone()).await;
-    assert!(matches!(state.borrow().core, CoreStatus::Stopped), "no profile yet: {:?}", state.borrow().core);
 
-    // 1. Add the subscription; as the first profile it becomes active and the core starts.
+    // 0. A first run: the bundled core is copied in and runs at once, with no
+    // profile yet (everything direct). No install step.
+    wait_for("the core running with no profile", Duration::from_secs(20), || state.borrow().core.is_running().then_some(())).await;
+    assert_eq!(svc.core_path(), paths.core_bin(), "it runs Kairo's copy");
+    assert_eq!(std::fs::read(paths.core_bin()).unwrap(), std::fs::read(&core).unwrap(), "a copy of the bundled core");
+    assert!(std::fs::read_to_string(paths.runtime_config()).unwrap().contains("MATCH,DIRECT"));
+
+    // 1. Add the subscription; as the first profile it becomes active and the running core loads it.
     let id = svc.add_remote(format!("http://{origin_addr}/sub"), None).await.expect("add the subscription");
     let s = svc.snapshot();
     let p = s.profiles.get(&id).expect("the profile");
@@ -315,7 +321,10 @@ async fn tun_in_a_network_namespace() {
         eprintln!("skipped: set KAIRO_TEST_TUN=1 and run under `unshare -rn`");
         return;
     }
-    unsafe { std::env::set_var("KAIRO_NO_SYSPROXY", "1") };
+    unsafe {
+        std::env::set_var("KAIRO_NO_SYSPROXY", "1");
+        std::env::set_var("KAIRO_NO_UPDATE", "1");
+    }
     let _ = env_logger_init();
     let up = std::process::Command::new("ip").args(["link", "set", "lo", "up"]).status().expect("ip");
     assert!(up.success(), "bring lo up (run under `unshare -rn`)");
@@ -334,15 +343,19 @@ async fn tun_in_a_network_namespace() {
     );
     tokio::spawn(origin(origin_listener, Arc::new(subscription)));
 
-    let paths = Paths::new(home.path());
+    let mut paths = Paths::new(home.path());
+    paths.bundled_core = Some(core.clone());
     paths.ensure().unwrap();
     let mut settings = Settings::default();
     settings.mixed_port = free_port();
     settings.controller_port = free_port();
-    settings.core_path = Some(core.to_string_lossy().into_owned());
     settings.save(&paths).unwrap();
     let svc = Service::start(paths.clone());
     let state = svc.state();
+    wait_for("the bundled core copied in", Duration::from_secs(15), || state.borrow().core_version.clone()).await;
+    // TUN's privilege is about the copy Kairo runs, not the bundled file.
+    assert_eq!(svc.core_path(), paths.core_bin());
+    assert_eq!(state.borrow().tun_privilege, Some(kairo_core::tun::Privilege::Granted), "uid 0 in the namespace");
     svc.add_remote(format!("http://127.0.0.1:{origin_port}/sub"), None).await.expect("add the profile");
     wait_for("the core running", Duration::from_secs(20), || state.borrow().core.is_running().then_some(())).await;
 

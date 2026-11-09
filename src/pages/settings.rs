@@ -3,7 +3,7 @@
 //! together from the bar that appears when one changes.
 
 use kairo_core::tun::Privilege;
-use kairo_core::{Settings, Theme};
+use kairo_core::{Settings, Theme, UpdateStatus};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
@@ -282,7 +282,7 @@ pub fn page() -> impl IntoElement {
                         ],
                     ))
                     // --- Core ---
-                    .child(core_group(text_field(|d| d.core_path.clone(), |d, v| d.core_path = v, "Kairo's own (downloaded)", 300.0)))
+                    .child(core_group(text_field(|d| d.core_path.clone(), |d, v| d.core_path = v, "The bundled core", 300.0)))
                     .child(about_group()),
             ),
         )
@@ -377,59 +377,16 @@ fn tun_group() -> impl IntoElement {
 
 fn core_group(core_path_field: impl IntoElement) -> impl IntoElement {
     let store = store();
-    let checking = signal(false);
     let version = move || -> SharedString {
-        store.state.with(|s| match (&s.core_version, &s.core) {
-            (Some(v), _) => format!("mihomo {v}").into(),
-            (None, kairo_core::CoreStatus::Missing) => "Not installed".into(),
-            _ => "Unknown".into(),
+        store.state.with(|s| match &s.core_version {
+            Some(v) => format!("mihomo {v}").into(),
+            None => "mihomo".into(),
         })
     };
-    let update = move || store.state.with(|s| s.core_update.clone());
-    let busy = move || store.state.with(|s| s.task.is_some()) || checking.get();
     ui::group(
         Some("Core"),
         vec![
-            ui::setting_row(
-                version,
-                Some("Downloaded from MetaCubeX/mihomo's GitHub releases and checked against the published SHA-256."),
-                view()
-                    .flex_row()
-                    .gap_2()
-                    .child(
-                        when(
-                            move || update().is_some(),
-                            move || {
-                                ui::btn_icon(Icon::Download, move || -> SharedString { format!("Update to {}", update().unwrap_or_default()).into() }, Variant::Primary)
-                                    .disabled(busy)
-                                    .on_press(move || store.run(store.svc().install_core()))
-                            },
-                        )
-                        .otherwise(move || {
-                            ui::btn(
-                                move || -> SharedString {
-                                    if store.state.with(|s| s.core_version.is_none()) { "Install".into() } else { "Check for Updates".into() }
-                                },
-                                Variant::Secondary,
-                            )
-                            .disabled(busy)
-                            .on_press(move || {
-                                if store.state.with_untracked(|s| s.core_version.is_none()) {
-                                    store.run(store.svc().install_core());
-                                    return;
-                                }
-                                checking.set(true);
-                                store.run_then(store.svc().check_core_update(), move |r| {
-                                    checking.set(false);
-                                    if let Ok(None) = r {
-                                        store.info("The core is up to date");
-                                    }
-                                });
-                            })
-                        }),
-                    ),
-            )
-            .into_element(),
+            ui::setting_row(version, Some("The official MetaCubeX/mihomo build that ships with Kairo and updates with it."), view()).into_element(),
             ui::setting_row(
                 "Task",
                 None,
@@ -462,6 +419,54 @@ fn core_group(core_path_field: impl IntoElement) -> impl IntoElement {
     )
 }
 
+/// What the updater is doing, in a line.
+fn update_text(u: &UpdateStatus) -> String {
+    match u {
+        UpdateStatus::Idle => "Updates download by themselves".into(),
+        UpdateStatus::Checking => "Checking for updates…".into(),
+        UpdateStatus::UpToDate => "Kairo is up to date".into(),
+        UpdateStatus::Downloading { version, progress: Some(p) } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
+        UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
+        UpdateStatus::Ready { version } => format!("Kairo {version} is ready"),
+        UpdateStatus::Manual { version, .. } => format!("Kairo {version} is out (this copy cannot update itself)"),
+        UpdateStatus::Installing { version } => format!("Installing Kairo {version}…"),
+        UpdateStatus::Failed { message } => format!("Update failed: {message}"),
+    }
+}
+
+/// Check for Updates, Restart to Update, or the release page.
+pub fn update_button() -> impl IntoElement {
+    let store = store();
+    dynamic(move || {
+        let u = store.state.with(|s| s.update.clone());
+        untracked(move || match u {
+            UpdateStatus::Ready { .. } => ui::btn_icon(Icon::Restart, "Restart to Update", Variant::Primary)
+                .on_press(move || store.run(store.svc().restart_to_update()))
+                .into_element(),
+            UpdateStatus::Manual { url, .. } => ui::btn_icon(Icon::External, "Release Page", Variant::Secondary)
+                .on_press(move || {
+                    let url = url.clone();
+                    spawn(async move {
+                        open_url(url).await;
+                    });
+                })
+                .into_element(),
+            UpdateStatus::Checking | UpdateStatus::Downloading { .. } | UpdateStatus::Installing { .. } => {
+                ui::btn("Check for Updates", Variant::Secondary).disabled(true).into_element()
+            }
+            _ => ui::btn("Check for Updates", Variant::Secondary)
+                .on_press(move || {
+                    store.run_then(store.svc().check_for_update(), move |r| {
+                        if let Ok(None) = r {
+                            store.info("Kairo is up to date");
+                        }
+                    })
+                })
+                .into_element(),
+        })
+    })
+}
+
 fn about_group() -> impl IntoElement {
     let store = store();
     let home = store.svc().paths().home.display().to_string();
@@ -471,10 +476,12 @@ fn about_group() -> impl IntoElement {
         vec![
             ui::setting_row(
                 concat!("Kairo ", env!("CARGO_PKG_VERSION")),
-                Some("A native mihomo client, free software under the GPL-3.0. mihomo is © MetaCubeX, GPL-3.0, and is downloaded when you install the core."),
+                Some("A native mihomo client. Free software under the GPL-3.0, like the mihomo core it ships with."),
                 view(),
             )
             .into_element(),
+            ui::setting_row(move || -> SharedString { update_text(&store.state.with(|s| s.update.clone())).into() }, None, update_button())
+                .into_element(),
             ui::setting_row(
                 "Data folder",
                 None,
