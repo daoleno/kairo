@@ -135,17 +135,18 @@ impl Service {
         }
     }
 
-    /// Pins the node the adopted AI group is on now, when that is one of its
-    /// own nodes (not another group, not DIRECT).
+    /// Pins the node the adopted AI group goes through now (its own choice,
+    /// or the Location it follows), when that node is one of its members:
+    /// the exit stays where traffic already goes, and from then on stays
+    /// there when the Location changes.
     fn ai_pin_adopted(&self, group: &str) {
         let name = {
             let p = self.0.proxies.borrow();
-            p.groups.iter().find(|g| g.name == group).and_then(|g| {
-                let now = g.now.clone()?;
-                g.members
+            ai::resolve(&p.groups, group).filter(|n| {
+                p.groups
                     .iter()
-                    .find(|m| m.name == now && !m.is_group)
-                    .map(|m| m.name.clone())
+                    .find(|g| g.name == group)
+                    .is_some_and(|g| g.members.iter().any(|m| m.name == *n && !m.is_group))
             })
         };
         let Some(name) = name else { return };

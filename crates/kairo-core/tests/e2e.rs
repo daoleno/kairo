@@ -732,8 +732,7 @@ async fn tun_in_a_network_namespace() {
 /// Upgrading from a Kairo without the AI layer: a subscription with its own
 /// AI group, set by the person to another node than the Location, keeps going
 /// where it was. The layer takes it over as the pinned exit; it never moves it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_upgrade_keeps_the_subscriptions_own_ai_group_where_it_was() {
+async fn upgrade_case(ai_list: &str, expect: &str, then_move_location: bool) {
     // SAFETY: set before any thread of this test reads the environment.
     unsafe {
         std::env::set_var("KAIRO_NO_SYSPROXY", "1");
@@ -763,7 +762,7 @@ proxies:
   - {{name: node-b, type: http, server: 127.0.0.1, port: {pb_port}}}
 proxy-groups:
   - {{name: Proxy, type: select, proxies: [node-a, node-b, DIRECT]}}
-  - {{name: AI, type: select, proxies: [node-b, node-a, Proxy]}}
+  - {{name: AI, type: select, proxies: [{ai_list}]}}
 rules:
   - DOMAIN-SUFFIX,openai.com,AI
   - MATCH,Proxy
@@ -805,16 +804,40 @@ rules:
         state.borrow().settings.ai.exit.clone()
     })
     .await;
-    assert_eq!(
-        pinned.name, "node-b",
-        "the AI group's own choice is the exit"
-    );
+    assert_eq!(pinned.name, expect, "the exit is where AI already went");
     assert_eq!(state.borrow().ai.group, "AI");
     assert!(state.borrow().ai.adopted);
     // Let the sync and the location checks settle; AI must still be on node-b.
     tokio::time::sleep(Duration::from_secs(4)).await;
-    assert_eq!(svc.ai_node().as_deref(), Some("node-b"));
+    assert_eq!(svc.ai_node().as_deref(), Some(expect));
+    if then_move_location {
+        // The Location moves: the pinned exit does not.
+        let other = if expect == "node-a" {
+            "node-b"
+        } else {
+            "node-a"
+        };
+        svc.set_location(Some(other.to_owned()))
+            .await
+            .expect("set the location");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(svc.ai_node().as_deref(), Some(expect));
+    }
     svc.stop_core().await;
+}
+
+/// The person set the subscription's AI group to a node of their own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_upgrade_keeps_the_subscriptions_own_ai_group_where_it_was() {
+    upgrade_case("node-b, node-a, Proxy", "node-b", false).await;
+}
+
+/// The usual case: the AI group lists the Location group first, so AI
+/// follows the Location. The exit becomes the node it is on now, and a later
+/// change of Location leaves it there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_ai_group_that_followed_the_location_is_pinned_where_it_is() {
+    upgrade_case("Proxy, node-a, node-b", "node-a", true).await;
 }
 
 /// The AI layer against a real core: AI hosts go to their own group on one
@@ -959,15 +982,27 @@ rules:
     );
     assert!(node_count(&pinned.name) > before);
     let activity = svc.activity();
-    wait_for("the tally", Duration::from_secs(5), || {
+    // A tool of its own (curl, a separate process; Kairo's own requests are
+    // not tools and are left out) shows in the tally under its name.
+    let mut tool = tokio::process::Command::new("curl")
+        .args(["-s", "-m", "8", "-o", "/dev/null", "-x"])
+        .arg(format!("http://127.0.0.1:{mixed}"))
+        .arg(format!("http://claude.ai:{}/long", origin_addr.port()))
+        .kill_on_drop(true)
+        .spawn()
+        .expect("curl");
+    wait_for("the tally", Duration::from_secs(8), || {
         activity
             .borrow()
             .flows()
             .iter()
-            .any(|(_, t, f)| **t == Target::Service("claude") && f.open == 1)
+            .any(|(tool, t, f)| {
+                **t == Target::Service("claude") && f.open >= 1 && tool.eq_ignore_ascii_case("curl")
+            })
             .then_some(())
     })
     .await;
+    tool.kill().await.ok();
 
     // Moving the Location does not move AI; moving AI's exit does not cut the stream.
     svc.select("Proxy".into(), other.into())

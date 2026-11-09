@@ -49,7 +49,8 @@ fn flag(code: &str) -> String {
 fn tools_of(tally: &Tally, service: &AiService) -> String {
     let mut by_tool: Vec<(&str, u64, u32)> = Vec::new();
     for (tool, target, f) in tally.flows() {
-        if *target == Target::Service(service.id) {
+        // A connection the core could not name a process for is not a tool.
+        if *target == Target::Service(service.id) && tool != "Unknown" {
             by_tool.push((tool, f.up + f.down, f.open));
         }
     }
@@ -224,6 +225,9 @@ pub fn without_ai(mut apps: Vec<places::AppChoice>) -> Vec<places::AppChoice> {
 /// The place AI goes through now, for the exit row and the alert.
 pub fn exit_place() -> Option<places::Place> {
     let store = store();
+    // Follow both: the node comes from the service, the place from the groups.
+    store.state.with(|_| ());
+    store.proxies.with(|_| ());
     let name = store.svc().ai_node()?;
     store.proxies.with(|p| {
         p.0.groups
