@@ -1,12 +1,13 @@
 // Kairo headless, against a real core. scripts/ui-test.sh starts the fixture
-// (a subscription and proxy nodes on 28080..28087) and points Kairo at a
-// scratch home whose core listens on 27897/29097; the system proxy is never
+// (a subscription and proxy nodes on a block of free ports) and points Kairo at a
+// scratch home whose core listens on free ports too (tests/ports.ts); the system proxy is never
 // touched. The tests share the one Kairo service of the runner, in order:
 // the subscription added first is what the later ones see.
 import { expect, open, test } from "nsh/test";
+import { FIXTURE, MIXED } from "./ports";
 
-const SUB = "http://127.0.0.1:28080/sub";
-const NOTICE = "http://127.0.0.1:28080/notice";
+const SUB = `http://127.0.0.1:${FIXTURE}/sub`;
+const NOTICE = `http://127.0.0.1:${FIXTURE}/notice`;
 const desktop = { platform: "linux", width: 1180, height: 760 } as const;
 const slow = { timeout: 20000 };
 
@@ -191,13 +192,13 @@ test("settings: an edit waits for Apply, Revert puts it back", async () => {
   await app.waitFor("text:Controller port", slow);
   expect(has(app.texts(), (t) => t.startsWith("mihomo v") || t.startsWith("v1."))).toBe(true);
   expect(app.shows("text:Unapplied changes")).toBe(false);
-  expect(app.value("id:mixed-port")).toBe("27897");
+  expect(app.value("id:mixed-port")).toBe(String(MIXED));
   await app.clear("id:mixed-port");
   await app.type("id:mixed-port", "27898");
   await app.waitFor("text:Unapplied changes");
   await app.press("Revert");
   await app.waitUntil(() => !app.shows("text:Unapplied changes"));
-  expect(app.value("id:mixed-port")).toBe("27897");
+  expect(app.value("id:mixed-port")).toBe(String(MIXED));
 });
 
 test("follows the system's dark appearance", async () => {
