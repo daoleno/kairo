@@ -71,13 +71,13 @@ pub fn App() -> impl IntoElement {
 /// The pages ⌘1… open, in the sidebar's order.
 pub const GO: [Page; 8] = [
     Page::Overview,
+    Page::Activity,
     Page::Apps,
     Page::Proxies,
     Page::Profiles,
     Page::Connections,
     Page::Rules,
     Page::Logs,
-    Page::Dns,
 ];
 
 /// Fastest, then the quickest places (the rest are a search away on Home).

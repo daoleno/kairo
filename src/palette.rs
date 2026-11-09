@@ -52,6 +52,17 @@ fn commands(store: Store) -> Vec<Command> {
             s.run(s.svc().set_mode(m))
         }));
     }
+    if has_profile && running {
+        out.push(cmd(
+            "Check AI services",
+            "Which country each sees, and whether its API answers",
+            Icon::Activity,
+            |s| {
+                s.page.set(Page::Overview);
+                s.run(s.svc().check_ai())
+            },
+        ));
+    }
     out.push(cmd(
         "Location: Fastest",
         "Kairo keeps the fastest place",

@@ -258,6 +258,7 @@ fn home() -> impl IntoElement {
             .max_w(px(600.0))
             .self_center()
             .child(hero())
+            .child(crate::pages::ai::board())
             .child(choices())
             .child(traffic())
             .child(plan()),
@@ -886,9 +887,7 @@ fn traffic() -> impl IntoElement {
                 .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down)))
                 .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
                 .child(view().flex_1())
-                .child(
-                    ui::link_btn("Activity").on_press(move || store.page.set(Page::Connections)),
-                ),
+                .child(ui::link_btn("Activity").on_press(move || store.page.set(Page::Activity))),
         )
         .child(graph)
 }

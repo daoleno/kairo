@@ -16,6 +16,7 @@ const SIDEBAR_WIDTH: f32 = 212.0;
 fn page_icon(page: Page) -> Icon {
     match page {
         Page::Overview => Icon::Overview,
+        Page::Activity => Icon::Activity,
         Page::Apps => Icon::Layers,
         Page::Proxies => Icon::Proxies,
         Page::Profiles => Icon::Profiles,
@@ -146,14 +147,13 @@ fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
 
 fn sidebar() -> impl IntoElement {
     let groups: [&[Page]; 3] = [
-        &[Page::Overview, Page::Apps],
+        &[Page::Overview, Page::Activity, Page::Apps],
         &[
             Page::Proxies,
             Page::Profiles,
             Page::Connections,
             Page::Rules,
             Page::Logs,
-            Page::Dns,
         ],
         &[Page::Settings],
     ];
@@ -263,6 +263,7 @@ pub fn shell() -> impl IntoElement {
                     let page = store.page.get();
                     untracked(|| match page {
                         Page::Overview => pages::home::page().into_element(),
+                        Page::Activity => pages::activity::page().into_element(),
                         Page::Apps => pages::apps::page().into_element(),
                         Page::Proxies => pages::proxies::page().into_element(),
                         Page::Profiles => pages::profiles::page().into_element(),

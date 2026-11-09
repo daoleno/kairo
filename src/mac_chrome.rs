@@ -44,6 +44,7 @@ enum Row {
 
 const ROWS: &[Row] = &[
     Row::Item(Page::Overview),
+    Row::Item(Page::Activity),
     Row::Item(Page::Apps),
     Row::Heading("Advanced"),
     Row::Item(Page::Proxies),
@@ -51,7 +52,6 @@ const ROWS: &[Row] = &[
     Row::Item(Page::Connections),
     Row::Item(Page::Rules),
     Row::Item(Page::Logs),
-    Row::Item(Page::Dns),
     Row::Heading(""),
     Row::Item(Page::Settings),
 ];
@@ -59,6 +59,7 @@ const ROWS: &[Row] = &[
 fn symbol(page: Page) -> &'static str {
     match page {
         Page::Overview => "house",
+        Page::Activity => "waveform.path.ecg",
         Page::Apps => "square.grid.2x2",
         Page::Proxies => "globe",
         Page::Profiles => "doc.text",
@@ -68,12 +69,6 @@ fn symbol(page: Page) -> &'static str {
         Page::Dns => "server.rack",
         Page::Settings => "gearshape",
     }
-}
-
-fn row_of(page: Page) -> usize {
-    ROWS.iter()
-        .position(|r| matches!(r, Row::Item(p) if *p == page))
-        .unwrap_or(0)
 }
 
 pub struct SidebarIvars {
@@ -166,10 +161,15 @@ impl Sidebar {
             return;
         };
         self.ivars().quiet.set(true);
-        table.selectRowIndexes_byExtendingSelection(
-            &NSIndexSet::indexSetWithIndex(row_of(page)),
-            false,
-        );
+        match ROWS
+            .iter()
+            .position(|r| matches!(r, Row::Item(p) if *p == page))
+        {
+            Some(row) => table
+                .selectRowIndexes_byExtendingSelection(&NSIndexSet::indexSetWithIndex(row), false),
+            // A page the sidebar does not list (DNS, from the palette).
+            None => table.deselectAll(None),
+        }
         self.ivars().quiet.set(false);
     }
 }

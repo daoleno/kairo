@@ -10,6 +10,13 @@ const NOTICE = "http://127.0.0.1:28080/notice";
 const desktop = { platform: "linux", width: 1180, height: 760 } as const;
 const slow = { timeout: 20000 };
 
+// The pages the sidebar does not list are a search away.
+const goTo = async (app: any, page: string) => {
+  await app.keyboard.press("mod+k");
+  await app.type("text:Search Kairo: pages, actions, locations", page);
+  await app.press(`text:Go to ${page}`);
+};
+
 const has = (texts: string[], pred: (t: string) => boolean) => texts.some(pred);
 
 test("a first run: a welcome that asks only for the link", async () => {
@@ -107,10 +114,12 @@ test("rules: the running configuration's, searchable", async () => {
   const app = await open("..", desktop);
   await app.press("Rules");
   await app.waitUntil(() => has(app.texts(), (t) => /^\d+ rules$/.test(t)), slow);
-  expect(app.texts()).toContain("Match");
-  await app.type("text:Type, payload or target", "REJECT");
+  // The layer for AI tools comes first: its rules show with their group.
+  expect(app.texts()).toContain("claude.ai");
+  await app.type("text:Type, payload or target", "MATCH");
   await app.waitUntil(() => has(app.texts(), (t) => / of \d+$/.test(t)), slow);
-  expect(app.texts()).not.toContain("Match");
+  expect(app.texts()).toContain("Match");
+  expect(app.texts()).not.toContain("claude.ai");
 });
 
 test("logs: the core's lines, live", async () => {
@@ -118,7 +127,7 @@ test("logs: the core's lines, live", async () => {
   await app.press("Logs");
   // Debug shows the core's resolver at work: look something up, come back.
   await app.press("text:Debug");
-  await app.press("DNS");
+  await goTo(app, "DNS");
   await app.type("text:example.com", "kairo-logs.test");
   await app.press("Query");
   await app.press("Logs");
@@ -131,10 +140,38 @@ test("logs: the core's lines, live", async () => {
 
 test("DNS: a lookup through the core's resolver", async () => {
   const app = await open("..", desktop);
-  await app.press("DNS");
+  await goTo(app, "DNS");
   await app.type("text:example.com", "localhost");
   await app.press("Query");
   await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("localhost  A")), slow);
+});
+
+test("AI: a tile for each service on Home, the flow on Activity, the switches in Settings", async () => {
+  const app = await open("..", desktop);
+  await app.press("Home");
+  await app.waitFor("text:AI", slow);
+  for (const name of ["Claude", "ChatGPT", "Gemini", "Cursor", "Copilot"]) {
+    await app.waitFor(`text:${name}`, slow);
+  }
+  // What stays and what goes direct are said plainly.
+  expect(app.shows("text:Stays on this computer")).toBe(true);
+  expect(app.shows("text:Goes direct")).toBe(true);
+  // A tile opens its detail, with the note that the service's terms still apply.
+  await app.press("text:Claude");
+  await app.waitFor("text:Kairo shows what the service sees. Where you are, and the service's own terms, still apply.", slow);
+  expect(app.shows("text:A connection held open")).toBe(true);
+  await app.press("text:Claude");
+  // Nothing in the app promises anything.
+  for (const t of app.texts()) {
+    expect(/never (be )?(flagged|banned)|unlock|clean IP|safe/i.test(t)).toBe(false);
+  }
+  // Activity: nothing yet is an invitation, not an empty chart.
+  await app.press("Activity");
+  await app.waitUntil(() => app.shows("text:No AI traffic yet") || app.shows("text:Which tools talk to which AI services, since Kairo opened."), slow);
+  await app.press("Settings");
+  await app.waitFor("text:AI tools use one exit", slow);
+  expect(app.shows("text:Domestic AI goes direct")).toBe(true);
+  expect(app.shows("text:Downloads follow the Location")).toBe(true);
 });
 
 test("settings: an edit waits for Apply, Revert puts it back", async () => {

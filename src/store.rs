@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use kairo_core::activity::Tally;
 use kairo_core::model::Connections;
 use kairo_core::{Live, Proxies, Service, State};
 use nsh_core::prelude::*;
@@ -12,6 +13,7 @@ use nsh_core::prelude::*;
 pub enum Page {
     #[default]
     Overview,
+    Activity,
     Apps,
     Proxies,
     Profiles,
@@ -23,8 +25,9 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 9] = [
+    pub const ALL: [Page; 10] = [
         Page::Overview,
+        Page::Activity,
         Page::Apps,
         Page::Proxies,
         Page::Profiles,
@@ -35,6 +38,19 @@ impl Page {
         Page::Settings,
     ];
 
+    /// The pages of the sidebars, in order (DNS is a search away: ⌘K).
+    pub const SIDEBAR: [Page; 9] = [
+        Page::Overview,
+        Page::Activity,
+        Page::Apps,
+        Page::Proxies,
+        Page::Profiles,
+        Page::Connections,
+        Page::Rules,
+        Page::Logs,
+        Page::Settings,
+    ];
+
     /// The page named `name` (its title or its old one, any case).
     pub fn named(name: &str) -> Option<Page> {
         let old = match name.to_ascii_lowercase().as_str() {
@@ -42,6 +58,7 @@ impl Page {
             "proxies" => Some(Page::Proxies),
             "profiles" => Some(Page::Profiles),
             "apps" => Some(Page::Apps),
+            "activity" => Some(Page::Activity),
             _ => None,
         };
         old.or_else(|| {
@@ -53,12 +70,13 @@ impl Page {
 
     /// Pages under Advanced (the sidebar folds them away).
     pub fn advanced(self) -> bool {
-        !matches!(self, Page::Overview | Page::Apps)
+        !matches!(self, Page::Overview | Page::Activity | Page::Apps)
     }
 
     pub fn title(self) -> &'static str {
         match self {
             Page::Overview => "Home",
+            Page::Activity => "Activity",
             Page::Apps => "Apps & Sites",
             Page::Proxies => "Groups",
             Page::Profiles => "Subscriptions",
@@ -88,6 +106,7 @@ pub struct Store {
     pub live: Signal<Live>,
     pub connections: Signal<Snap<Connections>>,
     pub proxies: Signal<Snap<Proxies>>,
+    pub activity: Signal<Snap<Tally>>,
     pub log_seq: Signal<u64>,
     pub page: Signal<Page>,
     /// Where the platform's chrome floats over the content.
@@ -102,12 +121,14 @@ impl Store {
         let live_rx = svc.live();
         let conn_rx = svc.connections();
         let prox_rx = svc.proxies();
+        let activity_rx = svc.activity();
         let log_rx = svc.log_seq();
         let store = Store {
             state: signal(state_rx.borrow().clone()),
             live: signal(live_rx.borrow().clone()),
             connections: signal(Snap(conn_rx.borrow().clone())),
             proxies: signal(Snap(prox_rx.borrow().clone())),
+            activity: signal(Snap(activity_rx.borrow().clone())),
             log_seq: signal(*log_rx.borrow()),
             page: signal(*crate::chrome::bridge().page.borrow()),
             toast: signal(None),
@@ -127,6 +148,9 @@ impl Store {
         });
         follow(prox_rx, move |p: &Arc<Proxies>| {
             store.proxies.set(Snap(p.clone()))
+        });
+        follow(activity_rx, move |a: &Arc<Tally>| {
+            store.activity.set(Snap(a.clone()))
         });
         follow(log_rx, move |n: &u64| store.log_seq.set(*n));
         if crate::chrome::native() {

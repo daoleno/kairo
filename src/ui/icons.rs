@@ -40,10 +40,12 @@ pub enum Icon {
     Restart,
     Download,
     Layers,
+    Activity,
 }
 
 fn body(icon: Icon) -> &'static str {
     match icon {
+        Icon::Activity => r#"<path d="M3 12h4l3-7 4 14 3-7h4"/>"#,
         Icon::Overview => {
             r#"<path d="M12 14l3.5-3.5"/><path d="M3.5 18a9 9 0 1 1 17 0"/><circle cx="12" cy="14" r="1.2"/>"#
         }

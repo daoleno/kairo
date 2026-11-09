@@ -348,6 +348,11 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
         config.remove(key);
     }
     set(config, "mixed-port", s.mixed_port);
+    // The Activity view names the tool behind each connection, which the core
+    // looks up only when asked to. A profile that names its own mode wins.
+    if s.ai.enabled && !config.contains_key("find-process-mode") {
+        set(config, "find-process-mode", "always");
+    }
     set(config, "allow-lan", s.allow_lan);
     if s.allow_lan {
         set(config, "bind-address", "*");

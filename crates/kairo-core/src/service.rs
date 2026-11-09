@@ -909,9 +909,20 @@ impl Service {
         let count = list.len();
         drop(by_id);
         let now = unix();
+        // Kairo's own checks go through the proxy too: they are not a tool's.
+        let own = std::env::current_exe().ok();
+        let tools: Vec<Connection> = list
+            .iter()
+            .filter(|c| {
+                own.as_deref().is_none_or(|p| {
+                    c.process_path.is_empty() || std::path::Path::new(&c.process_path) != p
+                })
+            })
+            .cloned()
+            .collect();
         self.0
             .activity
-            .send_modify(|a| Arc::make_mut(a).ingest(&list, now));
+            .send_modify(|a| Arc::make_mut(a).ingest(&tools, now));
         self.0.connections.send_replace(Arc::new(Connections {
             upload_total: resp.upload_total,
             download_total: resp.download_total,

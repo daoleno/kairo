@@ -235,6 +235,8 @@ pub fn page() -> impl IntoElement {
                             .into_element(),
                         ],
                     ))
+                    // --- AI ---
+                    .child(ai_group())
                     // --- Proxy ---
                     .child(ui::group(
                         Some("Proxy"),
@@ -563,6 +565,44 @@ fn about_group() -> impl IntoElement {
                             open_url(url).await;
                         });
                     })),
+            )
+            .into_element(),
+        ],
+    )
+}
+
+/// What Kairo does for AI tools: each switch rebuilds the rules (open
+/// connections keep running).
+fn ai_group() -> impl IntoElement {
+    let store = store();
+    let ai = computed(move || store.state.with(|s| s.settings.ai.clone()));
+    let set = move |f: fn(&mut kairo_core::ai::AiSettings, bool)| {
+        move |on: bool| {
+            let mut next = store.svc().settings().ai;
+            f(&mut next, on);
+            store.run(store.svc().update_ai(next));
+        }
+    };
+    let on = move |f: fn(&kairo_core::ai::AiSettings) -> bool| move || ai.with(f);
+    ui::group(
+        Some("AI"),
+        vec![
+            ui::setting_row(
+                "AI tools use one exit",
+                Some("Claude, ChatGPT, Gemini, Cursor, Copilot and the rest go through the place you pick on Home, and stay there when the Location changes."),
+                ui::toggle(on(|a| a.enabled), "AI tools use one exit", set(|a, v| a.enabled = v)),
+            )
+            .into_element(),
+            ui::setting_row(
+                "Domestic AI goes direct",
+                Some("Kimi, DeepSeek, Doubao and Tongyi skip the proxy."),
+                ui::toggle(on(|a| a.domestic_direct), "Domestic AI goes direct", set(|a, v| a.domestic_direct = v)),
+            )
+            .into_element(),
+            ui::setting_row(
+                "Downloads follow the Location",
+                Some("Hugging Face, PyPI, Ollama, Docker and GitHub downloads go through the Location, not the AI exit."),
+                ui::toggle(on(|a| a.downloads), "Downloads follow the Location", set(|a, v| a.downloads = v)),
             )
             .into_element(),
         ],

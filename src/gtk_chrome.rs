@@ -19,9 +19,9 @@ use nsh_platform_linux::gtk4 as gtk;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-const PAGES: [Page; 9] = Page::ALL;
+const PAGES: [Page; 9] = Page::SIDEBAR;
 /// Where the sidebar's Advanced section starts, and where Settings sits apart.
-const ADVANCED_AT: i32 = 2;
+const ADVANCED_AT: i32 = 3;
 const SETTINGS_AT: i32 = 8;
 
 /// The icon theme's names for a page's glyph, best first (Adwaita and Breeze
@@ -29,6 +29,11 @@ const SETTINGS_AT: i32 = 8;
 fn icons(page: Page) -> &'static [&'static str] {
     match page {
         Page::Overview => &["go-home-symbolic", "user-home-symbolic"],
+        Page::Activity => &[
+            "utilities-system-monitor-symbolic",
+            "network-transmit-receive-symbolic",
+            "emblem-synchronizing-symbolic",
+        ],
         Page::Apps => &[
             "view-app-grid-symbolic",
             "view-grid-symbolic",
@@ -267,9 +272,15 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     glib::spawn_future_local(async move {
         loop {
             let page = *pages.borrow_and_update();
-            let i = PAGES.iter().position(|p| *p == page).unwrap_or(0);
-            if list_page.selected_row().map(|r| r.index() as usize) != Some(i) {
-                list_page.select_row(list_page.row_at_index(i as i32).as_ref());
+            // A page the sidebar does not list (DNS, from the palette) leaves
+            // no row selected.
+            match PAGES.iter().position(|p| *p == page) {
+                Some(i) => {
+                    if list_page.selected_row().map(|r| r.index() as usize) != Some(i) {
+                        list_page.select_row(list_page.row_at_index(i as i32).as_ref());
+                    }
+                }
+                None => list_page.unselect_all(),
             }
             title_page.set_title(page.title());
             // An Advanced page from a menu, a key or the palette: show where it is.

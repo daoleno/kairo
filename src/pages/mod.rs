@@ -1,5 +1,7 @@
 //! The pages of the sidebar.
 
+pub mod activity;
+pub mod ai;
 pub mod apps;
 pub mod connections;
 pub mod dns;
