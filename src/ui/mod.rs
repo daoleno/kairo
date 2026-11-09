@@ -45,16 +45,49 @@ pub fn radius_small() -> Points {
 
 /// The type scale (points). Body text is 13, the native size of desktop UI.
 pub mod size {
-    pub const CAPTION: f32 = 11.0;
-    pub const SMALL: f32 = 12.0;
-    pub const BODY: f32 = 13.0;
-    pub const LARGE: f32 = 15.0;
-    pub const TITLE: f32 = 20.0;
-    pub const DISPLAY: f32 = 26.0;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SCALE: AtomicU32 = AtomicU32::new(0x3f80_0000); // 1.0
+
+    /// The desktop's text size relative to these (macOS: 1; Linux: its UI
+    /// font's), set by the launcher before the root loads.
+    pub fn set_scale(scale: f32) {
+        SCALE.store(scale.clamp(0.75, 3.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn scale() -> f32 {
+        f32::from_bits(SCALE.load(Ordering::Relaxed))
+    }
+
+    fn at(points: f32) -> f32 {
+        (points * scale()).round()
+    }
+
+    pub fn caption() -> f32 {
+        at(11.0)
+    }
+    pub fn small() -> f32 {
+        at(12.0)
+    }
+    pub fn body() -> f32 {
+        at(13.0)
+    }
+    pub fn large() -> f32 {
+        at(15.0)
+    }
+    pub fn title() -> f32 {
+        at(20.0)
+    }
+    pub fn display() -> f32 {
+        at(26.0)
+    }
 }
 
 /// The height of a toolbar / page header.
 pub const HEADER_HEIGHT: f32 = 52.0;
+/// The least height of a row in a group (System Settings' and libadwaita's
+/// rows are about this tall).
+pub const ROW_MIN: f32 = 48.0;
 /// The height of a dense table row.
 pub const ROW_HEIGHT: f32 = 30.0;
 
@@ -62,18 +95,18 @@ pub const ROW_HEIGHT: f32 = 30.0;
 
 /// Body text.
 pub fn body(content: impl IntoReactive<SharedString>) -> Text {
-    text(content).text_size(px(size::BODY))
+    text(content).text_size(px(size::body()))
 }
 
 /// Secondary text in the muted color.
 pub fn muted(content: impl IntoReactive<SharedString>) -> Text {
-    text(content).text_size(px(size::SMALL)).text_color(move || theme().muted_foreground)
+    text(content).text_size(px(size::small())).text_color(move || theme().muted_foreground)
 }
 
 /// A small section label above a group.
 pub fn section_label(content: impl IntoReactive<SharedString>) -> Text {
     text(content)
-        .text_size(px(size::SMALL))
+        .text_size(px(size::small()))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(move || theme().muted_foreground)
         .role(AccessibilityRole::Header)
@@ -81,7 +114,7 @@ pub fn section_label(content: impl IntoReactive<SharedString>) -> Text {
 
 /// A page title.
 pub fn title(content: impl IntoReactive<SharedString>) -> Text {
-    text(content).text_size(px(size::TITLE)).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header)
+    text(content).text_size(px(size::title())).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header)
 }
 
 /// Numbers that line up.
@@ -140,21 +173,21 @@ fn base_button(variant: Variant) -> Button {
 
 /// A text button.
 pub fn btn(label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
-    base_button(variant).child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+    base_button(variant).child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
 }
 
 /// A button with an icon before its label.
 pub fn btn_icon(glyph: Icon, label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
     base_button(variant)
         .child(icon(glyph, 14.0))
-        .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+        .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
 }
 
 /// A button whose icon and label follow state.
 pub fn btn_icon_dyn(glyph: impl Fn() -> Icon + 'static, label: impl IntoReactive<SharedString>, variant: Variant) -> Button {
     base_button(variant)
         .child(svg(move || icons::uri(glyph())).size(px(14.0)).flex_shrink_0())
-        .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM))
+        .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM))
 }
 
 /// An icon-only button; `label` names it for screen readers and tests.
@@ -272,7 +305,7 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .text_color(move || theme().muted_foreground)
                 .hover(|s| s.text_color(move || theme().foreground))
                 .style_when(is, |s| s.bg(move || theme().background).shadow_sm().text_color(move || theme().foreground))
-                .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM).number_of_lines(1))
+                .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM).number_of_lines(1))
         }))
 }
 
@@ -286,7 +319,7 @@ pub fn field(value: Signal<String>, placeholder: &'static str) -> Input {
         .caret_color(|| color(theme().primary))
         .h(px(28.0))
         .px_2()
-        .text_size(px(size::BODY))
+        .text_size(px(size::body()))
         .rounded(radius_control())
         .border_1()
         .border_color(move || theme().input)
@@ -317,7 +350,7 @@ pub fn search_field(value: Signal<String>, placeholder: &'static str) -> View {
                 .caret_color(|| color(theme().primary))
                 .flex_1()
                 .min_w(px(0.0))
-                .text_size(px(size::BODY)),
+                .text_size(px(size::body())),
         )
         .child(when(
             move || value.with(|v| !v.is_empty()),
@@ -361,7 +394,7 @@ pub fn setting_row(
         .gap_4()
         .px_4()
         .py_2p5()
-        .min_h(px(44.0))
+        .min_h(px(ROW_MIN))
         .child(
             view()
                 .flex_1()
@@ -370,6 +403,19 @@ pub fn setting_row(
                 .child(body(label))
                 .child(detail.map(|d| muted(d))),
         )
+        .child(control)
+}
+
+/// A row whose description follows state.
+pub fn setting_row_dyn(label: &'static str, detail: impl Fn() -> SharedString + 'static, control: impl IntoElement) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_4()
+        .px_4()
+        .py_2p5()
+        .min_h(px(ROW_MIN))
+        .child(view().flex_1().min_w(px(0.0)).gap_0p5().child(body(label)).child(muted(detail)))
         .child(control)
 }
 
@@ -395,7 +441,7 @@ pub fn badge(content: impl IntoReactive<SharedString>) -> View {
         .bg(move || theme().muted)
         .border_1()
         .border_color(move || theme().border)
-        .child(text(content).text_size(px(size::CAPTION)).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground))
+        .child(text(content).text_size(px(size::caption())).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground))
 }
 
 /// A small status dot.
@@ -441,7 +487,7 @@ pub fn empty_state(glyph: Icon, heading: &'static str, detail: impl IntoReactive
         .gap_2()
         .p_8()
         .child(icon(glyph, 32.0).text_color(move || theme().muted_foreground).mb_1())
-        .child(text(heading).text_size(px(size::LARGE)).font_weight(FontWeight::SEMIBOLD))
+        .child(text(heading).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD))
         .child(muted(detail).text_center().max_w(px(360.0)))
         .child(action.map(|a| view().mt_2().child(a)))
 }
@@ -470,7 +516,7 @@ pub fn page_header(heading: impl IntoReactive<SharedString>, actions: Vec<AnyEle
         .border_b_1()
         .border_color(move || theme().border)
         .window_drag(true)
-        .child(title(heading).text_size(px(size::LARGE + 2.0)).flex_1().number_of_lines(1))
+        .child(title(heading).text_size(px(size::large() + 2.0)).flex_1().number_of_lines(1))
         .children(actions)
 }
 
@@ -505,6 +551,6 @@ pub fn popup_button<T: Clone + PartialEq + 'static>(
                 nsh_core::element::desktop::popup_menu(items).await;
             });
         })
-        .child(text(title).text_size(px(size::BODY)).number_of_lines(1))
+        .child(text(title).text_size(px(size::body())).number_of_lines(1))
         .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground))
 }

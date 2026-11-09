@@ -113,7 +113,7 @@ pub fn page() -> impl IntoElement {
             .h(px(28.0))
             .px_2()
             .w(px(w))
-            .text_size(px(size::BODY))
+            .text_size(px(size::body()))
             .rounded(ui::radius_control())
             .border_1()
             .border_color(move || theme().input)

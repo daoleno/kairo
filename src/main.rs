@@ -251,6 +251,9 @@ mod platform {
                     appearance: Appearance::System,
                     ..AppOptions::default()
                 });
+                if let Some(settings) = gtk::Settings::default() {
+                    nsh_app_kairo::ui::size::set_scale(crate::gtk_chrome::font_scale(&settings));
+                }
                 if let Some(adw_window) = window.downcast_ref::<libadwaita::ApplicationWindow>() {
                     crate::gtk_chrome::build(adw_window, view.clone(), svc.clone());
                 } else {

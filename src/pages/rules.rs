@@ -184,7 +184,7 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
 }
 
 fn head(label: &'static str, w: Option<f32>) -> Text {
-    let t = text(label).text_size(px(size::SMALL)).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground);
+    let t = text(label).text_size(px(size::small())).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground);
     match w {
         Some(w) => t.w(px(w)),
         None => t.flex_1().min_w(px(0.0)),
@@ -192,7 +192,7 @@ fn head(label: &'static str, w: Option<f32>) -> Text {
 }
 
 fn cell(content: impl IntoReactive<SharedString>, w: Option<f32>) -> Text {
-    let t = text(content).text_size(px(size::BODY)).number_of_lines(1);
+    let t = text(content).text_size(px(size::body())).number_of_lines(1);
     match w {
         Some(w) => t.w(px(w)),
         None => t.flex_1().min_w(px(0.0)),

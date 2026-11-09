@@ -181,7 +181,7 @@ fn result_card(l: Lookup) -> impl IntoElement {
 }
 
 fn col_head(label: &'static str, w: Option<f32>) -> Text {
-    let t = text(label).text_size(px(size::SMALL)).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground);
+    let t = text(label).text_size(px(size::small())).font_weight(FontWeight::MEDIUM).text_color(move || theme().muted_foreground);
     match w {
         Some(w) => t.w(px(w)),
         None => t.flex_1().min_w(px(0.0)),

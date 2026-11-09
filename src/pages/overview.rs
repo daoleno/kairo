@@ -5,34 +5,62 @@ use nsh_base::theme;
 use nsh_core::canvas::LineJoin;
 use nsh_core::prelude::*;
 
+use crate::chrome::Glyph;
 use crate::store::{Page, store};
+use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, icon, size};
 
 pub fn page() -> impl IntoElement {
+    let store = store();
+    let running = move || store.state.with(|s| s.core.is_running());
+    let startable = move || store.state.with(|s| s.task.is_none() && !matches!(s.core, CoreStatus::Starting | CoreStatus::Stopping));
     view()
         .flex_1()
-        .child(ui::page_header("Overview", vec![]))
+        .child(toolbar::toolbar(Page::Overview, String::new, vec![
+            toolbar::button("core.restart", "Restart Core", Glyph::Restart, Icon::Restart, move || store.run(store.svc().restart_core()))
+                .enabled(running),
+            toolbar::button_dyn(
+                "core.power",
+                move || if running() { "Stop Core" } else { "Start Core" },
+                move || if running() { (Glyph::Stop, Icon::Stop) } else { (Glyph::Start, Icon::Play) },
+                move || {
+                    let svc = store.svc();
+                    if store.state.with_untracked(|s| s.core.is_running()) {
+                        spawn(svc.stop_core());
+                    } else {
+                        store.run(svc.start_core());
+                    }
+                },
+            )
+            .enabled(move || running() || startable()),
+        ]))
         .child(
             scroll().flex_1().child(
                 view()
-                    .p_5()
-                    .gap_4()
-                    .max_w(px(1100.0))
-                    .child(status_card())
+                    .px_6()
+                    .pt_5()
+                    .pb_6()
+                    .gap_5()
+                    .w_full()
+                    .max_w(px(980.0))
+                    .self_center()
+                    .child(status())
+                    .child(routing())
                     .child(traffic_card())
                     .child(
                         view()
                             .flex_row()
                             .flex_wrap()
-                            .gap_4()
-                            .child(profile_card().flex_1().min_w(px(280.0)))
-                            .child(group_card().flex_1().min_w(px(280.0))),
+                            .gap_5()
+                            .child(profile_card().flex_1().min_w(px(300.0)))
+                            .child(group_card().flex_1().min_w(px(300.0))),
                     ),
             ),
         )
 }
 
-fn status_card() -> impl IntoElement {
+/// The core's state, as a line above the page's groups.
+fn status() -> impl IntoElement {
     let store = store();
     let core = move || store.state.with(|s| s.core.clone());
     let headline = move || -> SharedString {
@@ -77,104 +105,78 @@ fn status_card() -> impl IntoElement {
         CoreStatus::Failed { .. } => theme().destructive,
         _ => theme().muted_foreground,
     };
-
+    // What the state needs before anything else (the toolbar has the rest).
     let action = dynamic(move || {
         let core = store.state.with(|s| s.core.clone());
-        untracked(move || {
-            let svc = store.svc();
-            match core {
-                CoreStatus::Running { .. } => view()
-                    .flex_row()
-                    .gap_2()
-                    .child(ui::btn_icon(Icon::Restart, "Restart", Variant::Secondary).on_press({
-                        let svc = svc.clone();
-                        move || store.run(svc.restart_core())
-                    }))
-                    .child(ui::btn_icon(Icon::Stop, "Stop", Variant::Secondary).on_press(move || {
-                        spawn(svc.stop_core());
-                    }))
-                    .into_element(),
-                CoreStatus::Starting | CoreStatus::Stopping => ui::btn("Starting…", Variant::Secondary).disabled(true).into_element(),
-                _ => ui::btn_icon(Icon::Play, "Start", Variant::Primary)
-                    .on_press(move || store.run(svc.start_core()))
-                    .into_element(),
-            }
+        let has_profile = store.state.with(|s| s.profiles.active.is_some());
+        untracked(move || match core {
+            // The core runs without a profile (traffic goes direct): adding one
+            // is what the page asks for first.
+            CoreStatus::Running { .. } | CoreStatus::Stopped if !has_profile => Some(
+                ui::btn_icon(Icon::Plus, "Add Profile…", Variant::Primary).on_press(move || store.page.set(Page::Profiles)).into_element(),
+            ),
+            _ => None,
         })
     });
+    view()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .px_1()
+        .child(view().size(px(10.0)).rounded_full().bg(tone).accessible(false))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap_0p5()
+                .child(text(headline).text_size(px(size::large() + 2.0)).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header))
+                .child(ui::muted(detail).number_of_lines(2)),
+        )
+        .child(action)
+}
 
+/// How traffic is routed: the mode, the system proxy and TUN.
+fn routing() -> impl IntoElement {
+    let store = store();
     let set_mode = move |m: Mode| store.run(store.svc().set_mode(m));
     let sysproxy = move || store.state.with(|s| s.settings.system_proxy);
     let tun = move || store.state.with(|s| s.settings.tun);
-    ui::card()
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .p_4()
-                .child(view().size(px(10.0)).rounded_full().bg(tone))
-                .child(
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .gap_0p5()
-                        .child(text(headline).text_size(px(size::LARGE)).font_weight(FontWeight::SEMIBOLD))
-                        .child(ui::muted(detail).number_of_lines(2)),
-                )
-                .child(action),
-        )
-        .child(ui::divider())
-        .child(
-            view()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap_x_6()
-                .gap_y_3()
-                .px_4()
-                .py_3()
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_3()
-                        .child(ui::body("Mode").text_color(move || theme().muted_foreground))
-                        .child(
-                            ui::segmented(
-                                Mode::ALL.iter().map(|m| (*m, m.title())).collect(),
-                                move || store.state.with(|s| s.settings.mode),
-                                set_mode,
-                            )
-                            .w(px(240.0)),
-                        ),
-                )
-                .child(view().flex_1())
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(ui::body("System Proxy"))
-                        .child(ui::toggle(sysproxy, "System Proxy", move |on| store.run(store.svc().set_system_proxy(on)))),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(ui::body("TUN"))
-                        .child(ui::toggle(tun, "TUN", move |on| {
-                            let svc = store.svc();
-                            let needs = store.state.with_untracked(|s| s.tun_privilege != Some(kairo_core::tun::Privilege::Granted));
-                            if on && needs {
-                                store.error("TUN needs permission once: Settings › TUN › Grant");
-                                store.page.set(Page::Settings);
-                            } else {
-                                store.run(svc.set_tun(on));
-                            }
-                        })),
-                ),
-        )
+    let tun_detail = move || -> SharedString {
+        let granted = store.state.with(|s| s.tun_privilege == Some(kairo_core::tun::Privilege::Granted));
+        if granted { "Routes every app, including those that ignore the system proxy".into() } else { "Needs permission once (Settings › TUN)".into() }
+    };
+    ui::group(
+        None,
+        vec![
+            ui::setting_row(
+                "Mode",
+                None,
+                ui::segmented(Mode::ALL.iter().map(|m| (*m, m.title())).collect(), move || store.state.with(|s| s.settings.mode), set_mode),
+            )
+            .into_element(),
+            ui::setting_row(
+                "System Proxy",
+                Some("Apps that follow the system's settings go through Kairo"),
+                ui::toggle(sysproxy, "System Proxy", move |on| store.run(store.svc().set_system_proxy(on))),
+            )
+            .into_element(),
+            ui::setting_row_dyn(
+                "TUN Mode",
+                tun_detail,
+                ui::toggle(tun, "TUN Mode", move |on| {
+                    let svc = store.svc();
+                    let needs = store.state.with_untracked(|s| s.tun_privilege != Some(kairo_core::tun::Privilege::Granted));
+                    if on && needs {
+                        store.error("TUN needs permission once: Settings › TUN › Grant");
+                        store.page.set(Page::Settings);
+                    } else {
+                        store.run(svc.set_tun(on));
+                    }
+                }),
+            )
+            .into_element(),
+        ],
+    )
 }
 
 fn stat(label: &'static str, value: impl Fn() -> SharedString + 'static) -> impl IntoElement {
@@ -182,7 +184,7 @@ fn stat(label: &'static str, value: impl Fn() -> SharedString + 'static) -> impl
         .gap_0p5()
         .min_w(px(96.0))
         .child(ui::muted(label))
-        .child(ui::figure(value, size::BODY).font_weight(FontWeight::MEDIUM))
+        .child(ui::figure(value, size::body()).font_weight(FontWeight::MEDIUM))
 }
 
 fn speed_figure(glyph: Icon, label: &'static str, tone: fn() -> AdaptiveColor, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
@@ -198,7 +200,7 @@ fn speed_figure(glyph: Icon, label: &'static str, tone: fn() -> AdaptiveColor, v
                 .child(ui::muted(label))
                 .child(icon(glyph, 12.0).text_color(move || theme().muted_foreground)),
         )
-        .child(ui::figure(move || -> SharedString { kairo_core::speed(value()).into() }, size::DISPLAY).font_weight(FontWeight::SEMIBOLD))
+        .child(ui::figure(move || -> SharedString { kairo_core::speed(value()).into() }, size::display()).font_weight(FontWeight::SEMIBOLD))
 }
 
 fn traffic_card() -> impl IntoElement {
@@ -314,15 +316,7 @@ pub fn date_of(t: i64) -> String {
 fn profile_card() -> View {
     let store = store();
     let active = move || store.state.with(|s| s.profiles.active_profile().cloned());
-    ui::card().p_4().gap_3().child(
-        view()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .child(ui::section_label("Profile").flex_1())
-            .child(ui::icon_btn(Icon::ChevronRight, "Open Profiles").size(px(22.0)).on_press(move || store.page.set(Page::Profiles))),
-    )
-    .child(dynamic(move || {
+    let body = ui::card().p_4().gap_3().child(dynamic(move || {
         let p = active();
         let updating = store.state.with(|s| p.as_ref().is_some_and(|p| s.updating.contains(&p.id)));
         untracked(move || match p {
@@ -341,7 +335,7 @@ fn profile_card() -> View {
                             .flex_row()
                             .items_center()
                             .gap_2()
-                            .child(text(p.name.clone()).text_size(px(size::LARGE)).font_weight(FontWeight::SEMIBOLD).flex_1().number_of_lines(1))
+                            .child(text(p.name.clone()).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD).flex_1().number_of_lines(1))
                             .child(p.is_remote().then(|| {
                                 ui::icon_btn(Icon::Refresh, "Update Profile").disabled(updating).on_press(move || {
                                     store.run_then(store.svc().update_profile(id.clone()), move |r| {
@@ -379,7 +373,30 @@ fn profile_card() -> View {
                     .into_element()
             }
         })
-    }))
+    }));
+    labelled("Profile", "Open Profiles", Page::Profiles, body)
+}
+
+/// A group's label above it, with a link to its page.
+fn labelled(label: &'static str, open: &'static str, page: Page, body: View) -> View {
+    let store = store();
+    view()
+        .gap_2()
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .px_1()
+                .child(ui::section_label(label).flex_1())
+                .child(
+                    ui::btn("Show All", Variant::Ghost)
+                        .accessibility_label(open)
+                        .h(px(22.0))
+                        .px_2()
+                        .on_press(move || store.page.set(page)),
+                ),
+        )
+        .child(body)
 }
 
 fn group_card() -> View {
@@ -395,17 +412,9 @@ fn group_card() -> View {
                 .cloned()
         })
     };
-    ui::card()
+    let body = ui::card()
         .p_4()
         .gap_3()
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .child(ui::section_label("Proxy").flex_1())
-                .child(ui::icon_btn(Icon::ChevronRight, "Open Proxies").size(px(22.0)).on_press(move || store.page.set(Page::Proxies))),
-        )
         .child(dynamic(move || {
             let g = main();
             let mode = store.state.with(|s| s.settings.mode);
@@ -426,8 +435,8 @@ fn group_card() -> View {
                                 .flex_row()
                                 .items_center()
                                 .gap_2()
-                                .child(text(now.clone()).text_size(px(size::LARGE)).font_weight(FontWeight::SEMIBOLD).flex_1().number_of_lines(1))
-                                .child(text(ui::delay_text(delay)).text_size(px(size::BODY)).tabular_nums().text_color(move || ui::delay_tone(delay)))
+                                .child(text(now.clone()).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD).flex_1().number_of_lines(1))
+                                .child(text(ui::delay_text(delay)).text_size(px(size::body())).tabular_nums().text_color(move || ui::delay_tone(delay)))
                                 .child(
                                     ui::icon_btn(Icon::Bolt, "Test Group")
                                         .disabled(testing)
@@ -442,5 +451,6 @@ fn group_card() -> View {
                         .into_element()
                 }
             })
-        }))
+        }));
+    labelled("Proxy", "Open Proxies", Page::Proxies, body)
 }

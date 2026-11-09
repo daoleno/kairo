@@ -252,7 +252,7 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
                         .flex_row()
                         .items_center()
                         .gap_2()
-                        .child(text(move || -> SharedString { p.with(|p| p.name.clone()).into() }).text_size(px(size::BODY)).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
+                        .child(text(move || -> SharedString { p.with(|p| p.name.clone()).into() }).text_size(px(size::body())).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
                         .child(when(active, || ui::badge("Active"))),
                 )
                 .child(ui::muted(move || -> SharedString {
@@ -282,7 +282,7 @@ fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl 
                     move || p.with(|p| p.last_error.is_some()),
                     move || {
                         text(move || -> SharedString { p.with(|p| p.last_error.clone().unwrap_or_default()).into() })
-                            .text_size(px(size::SMALL))
+                            .text_size(px(size::small()))
                             .text_color(move || theme().destructive)
                             .number_of_lines(2)
                     },
@@ -452,11 +452,11 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
                         .text_color(move || theme().primary)
                         .hover(|s| s.bg(move || theme().accent))
                         .child(icon(Icon::ChevronLeft, 14.0))
-                        .child(text("Profiles").text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM)),
+                        .child(text("Profiles").text_size(px(size::body())).font_weight(FontWeight::MEDIUM)),
                 )
                 .child(
                     ui::title(move || -> SharedString { profile.with(|p| p.as_ref().map(|p| p.name.clone()).unwrap_or_default()).into() })
-                        .text_size(px(size::LARGE + 2.0))
+                        .text_size(px(size::large() + 2.0))
                         .flex_1()
                         .number_of_lines(1),
                 ),
@@ -542,7 +542,7 @@ fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
                             .child(ui::dot(move || if ok() { ui::success() } else { theme().destructive }).mt(px(4.0)))
                             .child(
                                 text(move || -> SharedString { status.with(|s| s.as_ref().map(|s| s.1.clone()).unwrap_or_default()).into() })
-                                    .text_size(px(size::SMALL))
+                                    .text_size(px(size::small()))
                                     .selectable(true)
                                     .flex_1(),
                             )

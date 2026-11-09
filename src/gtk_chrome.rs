@@ -131,19 +131,6 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         style.connect_high_contrast_notify(move |_| sync());
     }
 
-    // The content's text at the desktop's UI font size (Kairo's body is 13 px
-    // at 1.0; Cantarell 11 is 14.7 px), with the desktop's text scaling.
-    if let Some(settings) = gtk::Settings::default() {
-        let apply = {
-            let view = view.clone();
-            move |s: &gtk::Settings| view.set_font_scale(Some(font_scale(s)))
-        };
-        apply(&settings);
-        let a = apply.clone();
-        settings.connect_gtk_font_name_notify(move |s| a(s));
-        settings.connect_gtk_xft_dpi_notify(move |s| apply(s));
-    }
-
     // The page: from the sidebar, the NSH content (keys, links) and menus.
     let mut pages = chrome::bridge().page.subscribe();
     let list_page = list.clone();
@@ -450,15 +437,14 @@ fn update_tool(actions: &gio::SimpleActionGroup, tool: &Tool, w: &gtk::Widget) {
     }
 }
 
-/// The NSH text scale that makes Kairo's 13 px body the desktop's UI font.
-fn font_scale(settings: &gtk::Settings) -> f32 {
+/// The text scale that makes Kairo's 13 px body the desktop's UI font
+/// (NSH applies the desktop's text scaling on top).
+pub fn font_scale(settings: &gtk::Settings) -> f32 {
     let points = settings
         .gtk_font_name()
         .map(|n| gtk::pango::FontDescription::from_string(&n))
         .map(|d| d.size() as f32 / gtk::pango::SCALE as f32)
         .filter(|p| *p > 0.0)
         .unwrap_or(11.0);
-    let dpi = settings.gtk_xft_dpi();
-    let system = if dpi > 0 { dpi as f32 / 1024.0 / 96.0 } else { 1.0 };
-    (points * 96.0 / 72.0 / 13.0 * system).clamp(0.8, 3.0)
+    (points * 96.0 / 72.0 / 13.0).clamp(0.8, 2.0)
 }

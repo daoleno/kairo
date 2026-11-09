@@ -112,8 +112,8 @@ fn list_row(label: SharedString, detail: impl IntoReactive<SharedString>, is: im
         .cursor_pointer()
         .hover(|s| s.bg(move || theme().accent))
         .style_when(is, |s| s.bg(move || ui::selection()))
-        .child(text(label).text_size(px(size::BODY)).font_weight(FontWeight::MEDIUM).number_of_lines(1))
-        .child(text(detail).text_size(px(size::SMALL)).text_color(move || theme().muted_foreground).number_of_lines(1))
+        .child(text(label).text_size(px(size::body())).font_weight(FontWeight::MEDIUM).number_of_lines(1))
+        .child(text(detail).text_size(px(size::small())).text_color(move || theme().muted_foreground).number_of_lines(1))
 }
 
 fn group_list(current: Memo<Option<Selected>>, selected: Signal<Option<Selected>>) -> impl IntoElement {
@@ -231,7 +231,7 @@ fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl
                         .flex_1()
                         .min_w(px(0.0))
                         .gap_0p5()
-                        .child(text(header_name).text_size(px(size::LARGE)).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
+                        .child(text(header_name).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD).number_of_lines(1))
                         .child(ui::muted(move || -> SharedString {
                             group.with(|g| match g {
                                 Some(g) => {
@@ -285,7 +285,7 @@ fn node_list(group_name: String, group: Memo<Option<Group>>, nodes: Memo<Vec<Nod
             )
             .child(
                 text(move || -> SharedString { name().into() })
-                    .text_size(px(size::BODY))
+                    .text_size(px(size::body()))
                     .flex_1()
                     .min_w(px(0.0))
                     .number_of_lines(1)
@@ -294,14 +294,14 @@ fn node_list(group_name: String, group: Memo<Option<Group>>, nodes: Memo<Vec<Nod
             )
             .child(
                 text(move || -> SharedString { node.with(|n| n.as_ref().map(|n| type_label(n)).unwrap_or_default()).into() })
-                    .text_size(px(size::SMALL))
+                    .text_size(px(size::small()))
                     .text_color(move || theme().muted_foreground)
                     .w(px(110.0))
                     .number_of_lines(1),
             )
             .child(
                 text(move || -> SharedString { if testing() { "…".into() } else { ui::delay_text(delay()) } })
-                    .text_size(px(size::BODY))
+                    .text_size(px(size::body()))
                     .tabular_nums()
                     .text_right()
                     .w(px(72.0))
@@ -372,7 +372,7 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                     view()
                         .flex_1()
                         .gap_0p5()
-                        .child(text(name.clone()).text_size(px(size::LARGE)).font_weight(FontWeight::SEMIBOLD))
+                        .child(text(name.clone()).text_size(px(size::large())).font_weight(FontWeight::SEMIBOLD))
                         .child(ui::muted(move || -> SharedString {
                             provider.with(|p| match p {
                                 Some(p) => format!(

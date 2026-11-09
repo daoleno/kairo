@@ -56,8 +56,8 @@ fn nav_item(page: Page) -> impl IntoElement {
         .hover(|s| s.bg(move || theme().sidebar_accent.opacity(0.6)))
         .style_when(selected, |s| s.bg(move || theme().sidebar_accent))
         .child(icon(page_icon(page), 16.0).text_color(move || if selected() { theme().sidebar_primary } else { theme().muted_foreground }))
-        .child(text(page.title()).text_size(px(size::BODY)).flex_1().font_weight(FontWeight::MEDIUM))
-        .child(text(move || count().unwrap_or_default()).text_size(px(size::SMALL)).tabular_nums().text_color(move || theme().muted_foreground))
+        .child(text(page.title()).text_size(px(size::body())).flex_1().font_weight(FontWeight::MEDIUM))
+        .child(text(move || count().unwrap_or_default()).text_size(px(size::small())).tabular_nums().text_color(move || theme().muted_foreground))
 }
 
 fn core_footer() -> impl IntoElement {
@@ -82,8 +82,8 @@ fn core_footer() -> impl IntoElement {
                 .items_center()
                 .gap_2()
                 .child(ui::dot(tone))
-                .child(text(move || status().title()).text_size(px(size::SMALL)).font_weight(FontWeight::MEDIUM).flex_1())
-                .child(text(move || store.state.with(|s| s.settings.mode.title())).text_size(px(size::SMALL)).text_color(move || theme().muted_foreground)),
+                .child(text(move || status().title()).text_size(px(size::small())).font_weight(FontWeight::MEDIUM).flex_1())
+                .child(text(move || store.state.with(|s| s.settings.mode.title())).text_size(px(size::small())).text_color(move || theme().muted_foreground)),
         )
         .child(
             view()
@@ -106,7 +106,7 @@ fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
         .items_center()
         .gap_1()
         .child(icon(glyph, 12.0).text_color(move || theme().muted_foreground))
-        .child(text(move || kairo_core::speed(value())).text_size(px(size::SMALL)).tabular_nums().number_of_lines(1))
+        .child(text(move || kairo_core::speed(value())).text_size(px(size::small())).tabular_nums().number_of_lines(1))
 }
 
 fn sidebar() -> impl IntoElement {
@@ -162,7 +162,7 @@ fn toast() -> impl IntoElement {
                         .border_color(move || theme().border)
                         .shadow_lg()
                         .child(ui::dot(move || if error() { theme().destructive } else { theme().primary }))
-                        .child(text(message).text_size(px(size::BODY)).flex_shrink(1.0))
+                        .child(text(message).text_size(px(size::body())).flex_shrink(1.0))
                         .child(
                             ui::icon_btn(Icon::Close, "Dismiss")
                                 .size(px(20.0))

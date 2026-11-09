@@ -262,10 +262,10 @@ pub fn toolbar(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<S
                 .flex_row()
                 .items_baseline()
                 .gap_2()
-                .child(title(page.title()).text_size(px(size::LARGE + 2.0)).number_of_lines(1))
+                .child(title(page.title()).text_size(px(size::large() + 2.0)).number_of_lines(1))
                 .child(
                     text(move || -> SharedString { subtitle().into() })
-                        .text_size(px(size::SMALL))
+                        .text_size(px(size::small()))
                         .tabular_nums()
                         .number_of_lines(1)
                         .text_color(move || theme().muted_foreground),

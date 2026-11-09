@@ -103,7 +103,7 @@ pub fn page() -> impl IntoElement {
                         .hover(|s| s.bg(move || theme().accent))
                         .child(
                             text(move || -> SharedString { entry.with(|e| e.as_ref().map(|e| e.time.clone()).unwrap_or_default()).into() })
-                                .text_size(px(size::SMALL))
+                                .text_size(px(size::small()))
                                 .tabular_nums()
                                 .text_color(move || theme().muted_foreground)
                                 .w(px(60.0))
@@ -116,7 +116,7 @@ pub fn page() -> impl IntoElement {
                                     other => other.to_uppercase().into(),
                                 }
                             })
-                            .text_size(px(size::CAPTION))
+                            .text_size(px(size::caption()))
                             .font_weight(FontWeight::SEMIBOLD)
                             .w(px(44.0))
                             .pt(px(2.0))
@@ -129,7 +129,7 @@ pub fn page() -> impl IntoElement {
                         )
                         .child(
                             text(move || -> SharedString { entry.with(|e| e.as_ref().map(|e| e.payload.clone()).unwrap_or_default()).into() })
-                                .text_size(px(size::BODY))
+                                .text_size(px(size::body()))
                                 .flex_1()
                                 .min_w(px(0.0))
                                 .number_of_lines(3)

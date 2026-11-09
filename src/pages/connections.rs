@@ -118,7 +118,7 @@ pub fn page() -> impl IntoElement {
 fn head(label: &'static str, w: Option<f32>, right: bool, sort: Option<(Signal<Order>, Order)>) -> impl IntoElement {
     let active = move || sort.is_some_and(|(s, o)| s.get() == o);
     let t = text(label)
-        .text_size(px(size::SMALL))
+        .text_size(px(size::small()))
         .font_weight(FontWeight::MEDIUM)
         .text_color(move || if active() { theme().foreground } else { theme().muted_foreground })
         .number_of_lines(1);
@@ -160,7 +160,7 @@ fn header_row(order: Signal<Order>, compact: Memo<bool>) -> impl IntoElement {
 
 fn cell(content: impl IntoReactive<SharedString>, w: Option<f32>, right: bool, muted: bool) -> Text {
     let t = text(content)
-        .text_size(px(size::BODY))
+        .text_size(px(size::body()))
         .number_of_lines(1)
         .when(right, |t| t.text_right().tabular_nums())
         .when(muted, |t| t.text_color(move || theme().muted_foreground));
@@ -246,7 +246,7 @@ fn detail_row(label: &'static str, value: String) -> impl IntoElement {
     view()
         .gap_0p5()
         .child(ui::muted(label))
-        .child(text(if value.is_empty() { "—".to_owned() } else { value }).text_size(px(size::BODY)).selectable(true))
+        .child(text(if value.is_empty() { "—".to_owned() } else { value }).text_size(px(size::body())).selectable(true))
 }
 
 fn inspector(selected: Signal<Option<String>>, source: impl Fn() -> Snap<kairo_core::model::Connections> + Copy + 'static) -> impl IntoElement {
