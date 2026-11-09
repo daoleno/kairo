@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kairo — a native client for mihomo</title>
-<meta name="description" content="A clean, native mihomo client for macOS and Linux.">
-<meta property="og:title" content="Kairo — a native client for mihomo">
-<meta property="og:description" content="A clean, native mihomo client for macOS and Linux.">
+<title>Kairo — your AI tools, one way out</title>
+<meta name="description" content="A native proxy client for AI work on macOS and Linux. Your AI tools go out through one exit that stays put, and you see what each service sees.">
+<meta property="og:title" content="Kairo — your AI tools, one way out">
+<meta property="og:description" content="A native proxy client for AI work on macOS and Linux. One exit that stays put, and what each AI service sees.">
 <meta property="og:image" content="https://daoleno.github.io/kairo/shots/home-light.webp">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -160,8 +160,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 
 <main>
   <div class="wrap hero">
-    <h1>mihomo, made native.</h1>
-    <p class="lede">A clean, native mihomo client for macOS and Linux.</p>
+    <h1>Your AI tools, one way out.</h1>
+    <p class="lede">Claude, ChatGPT, Gemini and Cursor go through the same exit, and stay there. Kairo shows what each service sees. A native mihomo client for macOS and Linux.</p>
     <div class="actions">
       <a class="btn primary" id="primary" href="https://github.com/daoleno/kairo/releases/latest">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7.5 8 11.5l4-4M3 14h10"/></svg>
@@ -179,10 +179,10 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     </div>
     <figure class="hero-shot">
       <div class="window">
-        <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo's Home: a large switch, Connected through Hong Kong 04, and the Location, Route and Apps &amp; Sites rows.">
-        <img class="shot-dark" src="shots/home-dark.webp" width="1180" height="760" alt="Kairo's Home in dark mode." loading="lazy">
+        <img class="shot-light" src="shots/home-light.webp" width="1100" height="780" alt="Kairo's Home: a tile for each AI service with the country it sees and the tools using it, then the Location, AI exit, Route and Apps &amp; Sites rows.">
+        <img class="shot-dark" src="shots/home-dark.webp" width="1100" height="780" alt="Kairo's Home in dark mode." loading="lazy">
       </div>
-      <figcaption><b>Home</b></figcaption>
+      <figcaption><b>Home</b> <span style="color:var(--muted)">· one tile per AI service: what Kairo measured, nothing more</span></figcaption>
     </figure>
   </div>
 
@@ -190,59 +190,41 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     <div class="gallery">
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/location-light.webp" width="1180" height="760" alt="The Location popover: search, Fastest, and places grouped by region with their delays." loading="lazy">
-          <img class="shot-dark" src="shots/location-dark.webp" width="1180" height="760" alt="Locations in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/activity-light.webp" width="1100" height="330" alt="Activity: Claude, Codex and Cursor on the left, the AI exit in the middle, ChatGPT, Claude and Cursor on the right, joined by lines as thick as the traffic." loading="lazy">
+          <img class="shot-dark" src="shots/activity-dark.webp" width="1100" height="330" alt="Activity in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Locations</b></figcaption>
+        <figcaption><b>Activity</b> <span>· which tool talks to which service, and the way it goes</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/apps-light.webp" width="1180" height="760" alt="Apps &amp; Sites: the subscription's per-app groups, each with one choice." loading="lazy">
-          <img class="shot-dark" src="shots/apps-dark.webp" width="1180" height="760" alt="Apps &amp; Sites in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/detail-light.webp" width="1100" height="1040" alt="The Claude tile opened: reachable, the API answers in 498 ms, the country it sees, and a connection held open for 90 seconds." loading="lazy">
+          <img class="shot-dark" src="shots/detail-dark.webp" width="1100" height="1040" alt="The service detail in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Apps &amp; Sites</b></figcaption>
+        <figcaption><b>What was measured</b> <span>· reachable, API, country, a connection held open</span></figcaption>
+      </figure>
+      <figure>
+        <div class="window">
+          <img class="shot-light" src="shots/location-light.webp" width="1180" height="760" alt="The Location popover: search, Fastest, and places grouped by region with their delays." loading="lazy">
+          <img class="shot-dark" src="shots/location-dark.webp" width="1180" height="760" alt="Locations in dark mode." loading="lazy">
+        </div>
+        <figcaption><b>Locations</b> <span>· the AI exit has its own row and stays when this changes</span></figcaption>
       </figure>
       <figure>
         <div class="window">
           <img class="shot-light" src="shots/groups-light.webp" width="1180" height="760" alt="Groups: the subscription's groups, and the selected group's members with their delays." loading="lazy">
           <img class="shot-dark" src="shots/groups-dark.webp" width="1180" height="760" alt="Groups in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Advanced</b></figcaption>
-      </figure>
-      <figure>
-        <div class="window">
-          <img class="shot-light" src="shots/connections-light.webp" width="1180" height="760" alt="Connections: a live, searchable table." loading="lazy">
-          <img class="shot-dark" src="shots/connections-dark.webp" width="1180" height="760" alt="Connections in dark mode." loading="lazy">
-        </div>
-        <figcaption><b>Connections</b></figcaption>
+        <figcaption><b>Advanced</b> <span>· every group, rule, connection and log, as mihomo has them</span></figcaption>
       </figure>
     </div>
 
     <div class="facts">
-      <div><b>Native</b><span>AppKit and Liquid Glass on the Mac, GTK 4 on Linux.</span></div>
+      <div><b>One exit, pinned</b><span>AI tools stay on it when the Location changes. Open connections are never cut.</span></div>
+      <div><b>Measured, not promised</b><span>Reachable, API answer, the country a service sees, a connection held for 90 seconds.</span></div>
+      <div><b>Direct where it should be</b><span>Domestic AI goes straight out. Local models never leave your computer.</span></div>
       <div><b>mihomo built in</b><span>The official core ships inside and updates with the app.</span></div>
-      <div><b>All of mihomo</b><span>Rules, groups, connections, logs, DNS and TUN.</span></div>
-      <div><b>In the menu bar</b><span>Connect and switch location without opening the window.</span></div>
     </div>
-  </section>
-
-  <section class="wrap" id="platforms">
-    <div class="platforms">
-      <figure>
-        <div class="window">
-          <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo on GNOME." loading="lazy">
-          <img class="shot-dark" src="shots/home-dark.webp" width="1180" height="760" alt="Kairo on GNOME in dark mode." loading="lazy">
-        </div>
-        <figcaption><b>GNOME</b></figcaption>
-      </figure>
-      <figure>
-        <div class="window">
-          <img class="shot-light" src="shots/kde-home-light.webp" width="1180" height="760" alt="Kairo on KDE Plasma with Breeze." loading="lazy">
-          <img class="shot-dark" src="shots/kde-home-dark.webp" width="1180" height="760" alt="Kairo on KDE Plasma with Breeze Dark." loading="lazy">
-        </div>
-        <figcaption><b>KDE Plasma</b></figcaption>
-      </figure>
-    </div>
+    <p class="note">Kairo shows what a service sees. Where you are, and the service's own terms, still apply.</p>
   </section>
 
   <section class="wrap" id="download">
