@@ -64,6 +64,10 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         let separator = (i == 3 || i == 7).then(|| gtk::Separator::new(gtk::Orientation::Horizontal));
         row.set_header(separator.as_ref());
     });
+    // The page the app opens on, before the list reports selections.
+    let first = *chrome::bridge().page.borrow();
+    let first_row = PAGES.iter().position(|p| *p == first).unwrap_or(0);
+    list.select_row(list.row_at_index(first_row as i32).as_ref());
     list.connect_row_selected(|_, row| {
         if let Some(page) = row.and_then(|r| PAGES.get(r.index() as usize)) {
             chrome::select(*page);
