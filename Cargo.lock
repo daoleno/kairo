@@ -2762,6 +2762,7 @@ dependencies = [
 name = "nsh-app-kairo"
 version = "0.1.4"
 dependencies = [
+ "block2",
  "dispatch2",
  "env_logger",
  "kairo-core",

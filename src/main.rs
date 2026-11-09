@@ -15,10 +15,19 @@ use kairo_core::paths::Paths;
 
 #[cfg(target_os = "macos")]
 mod mac_chrome;
+#[cfg(target_os = "macos")]
+mod mac_theme;
 #[cfg(target_os = "linux")]
 mod gtk_chrome;
 
 fn root() -> nsh_engine_root::Root {
+    #[cfg(target_os = "macos")]
+    if nsh_app_kairo::chrome::native() {
+        let theme = mac_theme::theme_json(nsh_app_kairo::THEME);
+        if let Ok(tokens) = nsh_base::tokens_of(Some(&theme)) {
+            return nsh_engine_root::Root::of::<nsh_app_kairo::App>().tokens(tokens);
+        }
+    }
     nsh_engine_root::Root::of::<nsh_app_kairo::App>().tokens(nsh_app_kairo::tokens())
 }
 
