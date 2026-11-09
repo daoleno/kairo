@@ -1,8 +1,8 @@
 {
   "name": "Kairo",
   "id": "dev.kairo.app",
-  "version": "0.1.3",
-  "build": 3,
+  "version": "0.1.4",
+  "build": 4,
   "rust": ".",
   "root": "App",
   "theme": "theme.json",

@@ -139,9 +139,18 @@ The grant goes to Kairo's own copy of the core in its data directory, never to a
 system package. An update that brings a new mihomo version replaces that copy, which drops the grant: Kairo
 then turns TUN off, says so, and asks again the next time you switch it on.
 
-Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a `vX.Y.Z` tag is pushed. The
-notes come from `docs/releases/vX.Y.Z.md`. The workflow signs the update manifest with the `KAIRO_UPDATE_KEY`
-secret; its public half is built into Kairo (`crates/kairo-core/src/update.rs`).
+## Releasing (maintainers)
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a `vX.Y.Z` tag is pushed that
+matches `Cargo.toml`. The notes come from `docs/releases/vX.Y.Z.md`. Running the workflow by hand builds
+everything without publishing.
+
+The workflow signs the update manifest (`kairo-update.json`) with the `KAIRO_UPDATE_KEY` secret, an Ed25519
+key whose public half is built into Kairo (`crates/kairo-core/src/update.rs`). A recovery copy of the private
+key is kept offline by the maintainer. Without it, a lost secret would leave every installed Kairo unable to
+update.
+
+To ship a newer mihomo, change `scripts/mihomo.env` (version and checksums) and release Kairo.
 
 ## Licence
 
