@@ -25,21 +25,25 @@ fn local_port(name: &str) -> Option<u16> {
     local.rsplit_once(':')?.1.parse().ok()
 }
 
-/// The process (its command name) of each local port in `lsof -nP +c 0
+/// The process (its id and command name) of each local port in `lsof -nP +c 0
 /// -iTCP -Fpcn` output. Sockets of the core itself appear too, under the
 /// proxy's own port: they are harmless, no connection starts there.
-pub fn parse(text: &str) -> HashMap<u16, String> {
+pub fn parse(text: &str) -> HashMap<u16, (u32, String)> {
     let mut out = HashMap::new();
+    let mut pid = 0u32;
     let mut command: Option<&str> = None;
     for line in text.lines() {
         let Some(rest) = line.get(1..) else { continue };
         match line.as_bytes()[0] {
             // A new process: forget the previous one's name until its own.
-            b'p' => command = None,
+            b'p' => {
+                command = None;
+                pid = rest.parse().unwrap_or(0);
+            }
             b'c' => command = Some(rest),
             b'n' => {
                 if let (Some(c), Some(port)) = (command, local_port(rest)) {
-                    out.entry(port).or_insert_with(|| c.to_owned());
+                    out.entry(port).or_insert_with(|| (pid, c.to_owned()));
                 }
             }
             _ => {}
@@ -50,7 +54,7 @@ pub fn parse(text: &str) -> HashMap<u16, String> {
 
 /// Runs `lsof` and returns the owner of every established local socket.
 /// Blocking, so call it off the async threads.
-pub fn lookup() -> HashMap<u16, String> {
+pub fn lookup() -> HashMap<u16, (u32, String)> {
     let lsof = ["/usr/sbin/lsof", "/usr/bin/lsof"]
         .into_iter()
         .find(|p| std::path::Path::new(p).exists());
@@ -69,14 +73,15 @@ pub fn lookup() -> HashMap<u16, String> {
 #[derive(Debug, Default)]
 pub struct Names {
     /// Owner by local port, as of the last look.
-    ports: HashMap<u16, String>,
+    ports: HashMap<u16, (u32, String)>,
     /// When the last look ran (unix seconds).
     at: i64,
 }
 
 impl Names {
-    pub fn get(&self, port: u16) -> Option<&str> {
-        self.ports.get(&port).map(String::as_str)
+    /// The owner of a local port: its process id and command name.
+    pub fn get(&self, port: u16) -> Option<(u32, &str)> {
+        self.ports.get(&port).map(|(p, n)| (*p, n.as_str()))
     }
 
     /// Whether a new look is due: something is unnamed that the last look
@@ -85,7 +90,7 @@ impl Names {
         now > self.at && unnamed.into_iter().any(|p| !self.ports.contains_key(&p))
     }
 
-    pub fn replace(&mut self, ports: HashMap<u16, String>, now: i64) {
+    pub fn replace(&mut self, ports: HashMap<u16, (u32, String)>, now: i64) {
         self.ports = ports;
         self.at = now;
     }
@@ -100,17 +105,12 @@ mod tests {
     #[test]
     fn reads_the_owner_of_each_local_port() {
         let m = parse(SAMPLE);
-        assert_eq!(
-            m.get(&52235).map(String::as_str),
-            Some("Cursor Helper (Renderer)")
-        );
-        assert_eq!(
-            m.get(&52300).map(String::as_str),
-            Some("Cursor Helper (Renderer)")
-        );
-        assert_eq!(m.get(&52411).map(String::as_str), Some("curl"));
+        let own = |p: u16| m.get(&p).map(|(i, n)| (*i, n.as_str()));
+        assert_eq!(own(52235), Some((615, "Cursor Helper (Renderer)")));
+        assert_eq!(own(52300), Some((615, "Cursor Helper (Renderer)")));
+        assert_eq!(own(52411), Some((812, "curl")));
         // The core's own end sits under its own port, and a listener has none.
-        assert_eq!(m.get(&27898).map(String::as_str), Some("mihomo"));
+        assert_eq!(own(27898), Some((700, "mihomo")));
         assert_eq!(m.len(), 4);
     }
 
@@ -119,7 +119,10 @@ mod tests {
         let m =
             parse("p1\nn127.0.0.1:1000->1.1.1.1:443\np2\ncgood\nn127.0.0.1:2000->1.1.1.1:443\n");
         assert!(!m.contains_key(&1000));
-        assert_eq!(m.get(&2000).map(String::as_str), Some("good"));
+        assert_eq!(
+            m.get(&2000).map(|(i, n)| (*i, n.as_str())),
+            Some((2, "good"))
+        );
     }
 
     #[test]
@@ -146,7 +149,8 @@ mod tests {
         let _s = l.accept().unwrap();
         let port = c.local_addr().unwrap().port();
         let m = lookup();
-        let me = m.get(&port).expect("lsof sees this socket");
-        assert!(!me.is_empty());
+        let (pid, name) = m.get(&port).expect("lsof sees this socket");
+        assert_eq!(*pid, std::process::id());
+        assert!(!name.is_empty());
     }
 }

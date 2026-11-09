@@ -909,39 +909,70 @@ impl Service {
                 .rsplit_once(':')
                 .and_then(|(_, p)| p.parse::<u16>().ok())
         };
-        let mut unnamed = Vec::new();
-        {
+        // Gives each unnamed connection the owner `lsof` last found for its
+        // port; returns the ports still unknown.
+        let apply = |list: &mut [Connection]| -> Vec<u16> {
             let names = self.0.proc_names.lock().expect("proc names");
+            let mut unnamed = Vec::new();
             for c in list.iter_mut().filter(|c| c.process.is_empty()) {
                 let Some(p) = port(c) else { continue };
                 match names.get(p) {
-                    Some(n) => c.process = n.to_owned(),
+                    Some((pid, n)) => {
+                        c.process = n.to_owned();
+                        // Kairo's own checks: with no path from the core, say
+                        // whose they are so the tally can leave them out.
+                        if pid == std::process::id()
+                            && let Ok(exe) = std::env::current_exe()
+                        {
+                            c.process_path = exe.to_string_lossy().into_owned();
+                        }
+                    }
                     None => unnamed.push(p),
                 }
             }
-            if !names.due(now, unnamed.iter().copied()) {
-                return;
-            }
-        }
-        if self
-            .0
-            .proc_busy
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
+            unnamed
+        };
+        let unnamed = apply(list);
+        let due = {
+            let names = self.0.proc_names.lock().expect("proc names");
+            names.due(now, unnamed.iter().copied())
+        };
+        if !due
+            || self
+                .0
+                .proc_busy
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
             return;
         }
-        let svc = self.clone();
-        tokio::task::spawn_blocking(move || {
-            let found = crate::procname::lookup();
-            svc.0
-                .proc_names
-                .lock()
-                .expect("proc names")
-                .replace(found, unix());
-            svc.0
-                .proc_busy
-                .store(false, std::sync::atomic::Ordering::SeqCst);
-        });
+        let look = {
+            let svc = self.clone();
+            move || {
+                let found = crate::procname::lookup();
+                svc.0
+                    .proc_names
+                    .lock()
+                    .expect("proc names")
+                    .replace(found, unix());
+                svc.0
+                    .proc_busy
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        };
+        // A request that lasts a second is over before the next snapshot: ask
+        // now, so this snapshot's connections are named while they still
+        // exist. Where the runtime cannot spare the thread, ask in the
+        // background (the next snapshot has it).
+        match tokio::runtime::Handle::try_current() {
+            Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(look);
+                apply(list);
+            }
+            Ok(h) => {
+                h.spawn_blocking(look);
+            }
+            Err(_) => look(),
+        }
     }
 
     fn take_connections(&self, resp: ConnectionsResponse) {

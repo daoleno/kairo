@@ -216,6 +216,47 @@ async fn a_core_that_names_no_process_is_helped_by_lsof() {
         "{:?}",
         activity.borrow().flows()
     );
+    // This process's own connection through the proxy (as Kairo's checks
+    // are) is named too, but it is not a tool's: it stays out of the tally.
+    let mut mine = TcpStream::connect(("127.0.0.1", mixed)).await.unwrap();
+    let ask = format!(
+        "CONNECT claude.ai:{p} HTTP/1.1\r\nHost: claude.ai:{p}\r\n\r\n",
+        p = origin_addr.port()
+    );
+    mine.write_all(ask.as_bytes()).await.unwrap();
+    let mut answer = [0u8; 64];
+    let _ = mine.read(&mut answer).await.unwrap();
+    let me = std::env::current_exe()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let started = std::time::Instant::now();
+    loop {
+        let seen = conns.borrow().list.iter().any(|c| {
+            c.host.contains("claude.ai") && !c.process.is_empty() && me.starts_with(&c.process)
+        });
+        if seen {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "this process's connection was never named {me:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(
+        !activity
+            .borrow()
+            .flows()
+            .iter()
+            .any(|(tool, _, _)| me.starts_with(*tool) || tool.contains("procname")),
+        "Kairo's own connection counted as a tool: {:?}",
+        activity.borrow().flows()
+    );
+    drop(mine);
     tool.kill().await.ok();
     svc.stop_core().await;
 }
