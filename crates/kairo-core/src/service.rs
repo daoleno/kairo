@@ -416,9 +416,13 @@ impl Service {
                 .flatten();
             // A program that can be seen and is not this Kairo's core will not
             // let go: move at once. Otherwise (this Kairo's core on its way
-            // out, or a holder that cannot be seen) give it a moment.
+            // out, or a holder that cannot be seen) give it a moment. A core
+            // on its way out has no command line any more (its memory goes
+            // before its sockets do): that is a holder that cannot be seen.
             let other_program = holder.as_ref().is_some_and(|h| {
-                h.pid.is_some() && !crate::ports::is_ours(h, &self.0.paths.runtime_dir())
+                h.pid.is_some()
+                    && h.command.as_deref().is_some_and(|c| !c.is_empty())
+                    && !crate::ports::is_ours(h, &self.0.paths.runtime_dir())
             });
             if !other_program {
                 if crate::ports::wait_free(port, Duration::from_millis(2500)).await {
