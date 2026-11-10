@@ -571,15 +571,21 @@ fn footer() -> impl IntoElement {
 }
 
 fn detail_row(label: &'static str, value: String) -> impl IntoElement {
-    view().gap_0p5().child(ui::muted(label)).child(
+    let has_flag = kairo_core::places::find_flag(&value).1.is_some();
+    view().gap_0p5().child(ui::muted(label)).child(if has_flag {
+        // A node's flag is a picture (not every platform draws the emoji).
+        let shown: SharedString = value.into();
+        ui::flagged(move || shown.clone(), size::body()).into_element()
+    } else {
         text(if value.is_empty() {
             "—".to_owned()
         } else {
             value
         })
         .text_size(px(size::body()))
-        .selectable(true),
-    )
+        .selectable(true)
+        .into_element()
+    })
 }
 
 fn inspector(

@@ -248,6 +248,22 @@ pub fn split_flag(name: &str) -> (Option<String>, &str) {
     }
 }
 
+/// The first flag anywhere in `text` (two regional indicators): the text before it, the
+/// flag, the text after it.
+pub fn find_flag(text: &str) -> (&str, Option<String>, &str) {
+    let ri = |c: char| ('\u{1F1E6}'..='\u{1F1FF}').contains(&c);
+    let mut it = text.char_indices().peekable();
+    while let Some((i, a)) = it.next() {
+        if let (true, Some(&(j, b))) = (ri(a), it.peek())
+            && ri(b)
+        {
+            let end = j + b.len_utf8();
+            return (&text[..i], Some(text[i..end].to_owned()), &text[end..]);
+        }
+    }
+    (text, None, "")
+}
+
 /// The ISO code of a flag.
 pub fn flag_code(flag: &str) -> Option<String> {
     let code: String = flag
@@ -443,6 +459,18 @@ pub fn app_choices(groups: &[Group], main: &str) -> Vec<AppChoice> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_flag_is_found_anywhere_in_a_line() {
+        assert_eq!(
+            find_flag("Select · 🇺🇸 Los Angeles 01"),
+            ("Select · ", Some("🇺🇸".to_owned()), " Los Angeles 01")
+        );
+        assert_eq!(find_flag("🇯🇵 Tokyo"), ("", Some("🇯🇵".to_owned()), " Tokyo"));
+        assert_eq!(find_flag("Tokyo 01"), ("Tokyo 01", None, ""));
+        // One regional indicator alone is not a flag.
+        assert_eq!(find_flag("a 🇯 b"), ("a 🇯 b", None, ""));
+    }
 
     fn node(name: &str, delay: Option<u32>) -> Node {
         Node {

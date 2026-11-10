@@ -527,6 +527,23 @@ pub fn flag(flag: impl Into<String>, size: f32) -> AnyElement {
 
 /// A label that may start with a flag emoji ("🇯🇵 Tokyo 01"): the flag as its picture, then the text.
 pub fn flagged(label: impl Fn() -> SharedString + 'static, size: f32) -> View {
+    flagged_with(label, size, false)
+}
+
+/// A line of small muted text that may carry a flag anywhere in it ("Select · 🇺🇸 Los Angeles 01").
+pub fn flagged_muted(label: impl Fn() -> SharedString + 'static) -> View {
+    flagged_with(label, size::small(), true)
+}
+
+fn flagged_with(label: impl Fn() -> SharedString + 'static, size: f32, muted: bool) -> View {
+    let words = move |s: String| {
+        let t = text(s).text_size(px(size)).number_of_lines(1);
+        if muted {
+            t.text_color(move || theme().muted_foreground)
+        } else {
+            t
+        }
+    };
     view()
         .flex_row()
         .items_center()
@@ -534,17 +551,22 @@ pub fn flagged(label: impl Fn() -> SharedString + 'static, size: f32) -> View {
         .min_w(px(0.0))
         .child(dynamic(move || {
             let full = label();
-            let (flag_emoji, rest) = kairo_core::places::split_flag(&full);
-            let rest = rest.trim().to_owned();
-            let picture = flag_emoji.filter(|f| flag_uri(f).is_some());
+            let (before, flag_emoji, after) = kairo_core::places::find_flag(&full);
+            let (before, after) = (before.trim().to_owned(), after.trim().to_owned());
+            // A flag with no picture stays what it was: text.
+            let (flag_emoji, before, after) = match flag_emoji {
+                Some(f) if flag_uri(&f).is_none() => (None, full.trim().to_owned(), String::new()),
+                other => (other, before, after),
+            };
             untracked(move || {
                 view()
                     .flex_row()
                     .items_center()
                     .gap_1p5()
                     .min_w(px(0.0))
-                    .child(picture.map(|f| flag(f, size + 1.0)))
-                    .child(text(rest).text_size(px(size)).number_of_lines(1))
+                    .children((!before.is_empty()).then(|| words(before)))
+                    .child(flag_emoji.map(|f| flag(f, size + 1.0)))
+                    .children((!after.is_empty()).then(|| words(after)))
                     .into_element()
             })
         }))

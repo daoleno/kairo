@@ -146,12 +146,10 @@ fn list_row(
                 .font_weight(FontWeight::MEDIUM)
                 .number_of_lines(1),
         )
-        .child(
-            text(detail)
-                .text_size(px(size::small()))
-                .text_color(move || theme().muted_foreground)
-                .number_of_lines(1),
-        )
+        .child({
+            let detail = detail.into_reactive();
+            ui::flagged_muted(move || detail.get())
+        })
 }
 
 fn group_list(
