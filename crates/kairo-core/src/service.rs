@@ -769,6 +769,19 @@ impl Service {
             s.warning = None;
             s.note = note;
         });
+        // Android: the VPN comes up first (it may ask the user); the core is
+        // started with its tun device.
+        #[cfg(target_os = "android")]
+        if let Err(e) = tokio::task::spawn_blocking(crate::android::establish)
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r)
+        {
+            self.set_core(CoreStatus::Failed {
+                message: e.clone(),
+            });
+            return Err(e);
+        }
         // A fresh config from the active profile and the current settings.
         if let Err(e) = self.write_config(false).await {
             self.set_core(CoreStatus::Failed { message: e.clone() });
@@ -849,6 +862,8 @@ impl Service {
             self.sysproxy_off_temporarily();
             p.stop(&self.0.paths).await;
         }
+        #[cfg(target_os = "android")]
+        crate::android::teardown();
         self.set_core(CoreStatus::Stopped);
         self.0.live.send_modify(|l| {
             l.up = 0;

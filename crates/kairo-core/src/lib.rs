@@ -2,6 +2,8 @@
 //! profiles and settings, talks to the core's controller, and owns the system
 //! proxy and TUN. The NSH app and the tray are views over [`service::Service`].
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod activity;
 pub mod ai;
 pub mod ai_check;

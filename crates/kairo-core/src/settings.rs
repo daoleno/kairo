@@ -148,7 +148,8 @@ impl Default for Settings {
             // Connecting sets it: what a person means by "connected".
             system_proxy: true,
             bypass: default_bypass(),
-            tun: false,
+            // Android has no other way to take apps in than the VPN.
+            tun: cfg!(target_os = "android"),
             tun_stack: "mixed".into(),
             theme: Theme::System,
             launch_at_login: false,
