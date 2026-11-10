@@ -367,13 +367,12 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 }),
         );
     }
-    view()
-        .flex_row()
-        .flex_shrink_0()
-        .p(px(3.0))
-        .gap(px(2.0))
-        .rounded_full()
-        .bg(move || track())
+    // On a phone the track never outgrows its parent: with the largest system font the
+    // segments give way (their text ends in an ellipsis) instead of running off the screen.
+    let phone = phone();
+    let track_view = view().flex_row().p(px(3.0)).gap(px(2.0)).rounded_full().bg(move || track());
+    let track_view = if phone { track_view.w_full().min_w(px(0.0)) } else { track_view.flex_shrink_0() };
+    track_view
         .children(options.into_iter().map(move |(value, label)| {
             let is = move || selected() == value;
             button()
@@ -381,12 +380,12 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .role(AccessibilityRole::Tab)
                 .on_press(move || on_select(value))
                 .flex_grow(1.0)
-                .flex_shrink_0()
-                .min_w(px(56.0))
+                .flex_shrink(if phone { 1.0 } else { 0.0 })
+                .min_w(px(if phone { 0.0 } else { 56.0 }))
                 .items_center()
                 .justify_center()
                 .min_h(px(touch_h(26.0)))
-                .px_3p5()
+                .px(px(if phone { 6.0 } else { 14.0 }))
                 .rounded_full()
                 .cursor_pointer()
                 .text_color(move || theme().muted_foreground)
@@ -398,7 +397,7 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 })
                 .child(
                     text(label)
-                        .text_size(px(size::body()))
+                        .text_size(px(if phone { size::small() } else { size::body() }))
                         .font_weight(FontWeight::MEDIUM)
                         .number_of_lines(1),
                 )

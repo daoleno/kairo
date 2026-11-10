@@ -236,7 +236,7 @@ pub fn card_with(
                     })
                     .text_size(px(size::large() + 2.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .number_of_lines(1)
+                    .number_of_lines(if ui::phone() { 2 } else { 1 })
                     .flex_1(),
                 )
                 .child(when(
@@ -256,7 +256,7 @@ pub fn card_with(
                 store.proxies.with(|_| ());
                 subtitle(exit).into()
             })
-            .number_of_lines(1),
+            .number_of_lines(if ui::phone() { 2 } else { 1 }),
         )
 }
 
