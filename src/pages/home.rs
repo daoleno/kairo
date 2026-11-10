@@ -613,13 +613,14 @@ fn exits() -> impl IntoElement {
                     view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .child(crate::pages::exits::card(
+                        .child(crate::pages::exits::card_with(
                             e,
                             || false,
                             move || {
                                 crate::pages::exits::select(e);
                                 store.page.set(Page::Exits)
                             },
+                            true,
                         ))
                 })),
         )

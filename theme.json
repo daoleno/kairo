@@ -35,7 +35,14 @@
       "track": "#d9d9de",
       "selection": "#fbe8e2",
       "graph-up": "#a1a1a8",
-      "subtle": "#fafafb"
+      "subtle": "#fafafb",
+      "chart-ai": "#e0552f",
+      "chart-rest": "#2a78d6",
+      "chart-downloads": "#1baf7a",
+      "chart-direct": "#b9bcc8",
+      "chart-neutral": "#8a91a6",
+      "chart-grid": "#e1e0d9",
+      "chart-bad": "#d03b3b"
     },
     "dark": {
       "background": "#1c1c1e",
@@ -67,7 +74,14 @@
       "track": "#3a3a3f",
       "selection": "#3a2620",
       "graph-up": "#6e6e75",
-      "subtle": "#202023"
+      "subtle": "#202023",
+      "chart-ai": "#f2582a",
+      "chart-rest": "#3987e5",
+      "chart-downloads": "#199e70",
+      "chart-direct": "#5b5f70",
+      "chart-neutral": "#7d849a",
+      "chart-grid": "#2c2c30",
+      "chart-bad": "#ff5147"
     }
   }
 }

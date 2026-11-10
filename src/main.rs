@@ -257,13 +257,21 @@ mod platform {
                     window.present();
                     return;
                 }
+                // KAIRO_WINDOW=WxH: a window of another size (screenshots of long pages).
+                let (win_w, win_h) = std::env::var("KAIRO_WINDOW")
+                    .ok()
+                    .and_then(|v| {
+                        let (w, h) = v.split_once('x')?;
+                        Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?))
+                    })
+                    .unwrap_or((1180, 760));
                 let window: gtk::ApplicationWindow = if native {
                     libadwaita::ApplicationWindow::builder()
                         .application(app)
                         .title("Kairo")
                         .icon_name(APP_ID)
-                        .default_width(1180)
-                        .default_height(760)
+                        .default_width(win_w)
+                        .default_height(win_h)
                         .build()
                         .upcast()
                 } else {
@@ -271,8 +279,8 @@ mod platform {
                         .application(app)
                         .title("Kairo")
                         .icon_name(APP_ID)
-                        .default_width(1180)
-                        .default_height(760)
+                        .default_width(win_w)
+                        .default_height(win_h)
                         .build()
                 };
                 window.set_size_request(860, 560);

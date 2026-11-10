@@ -25,6 +25,7 @@ fn page_icon(page: Page) -> Icon {
         Page::Rules => Icon::Rules,
         Page::Logs => Icon::Logs,
         Page::Dns => Icon::Dns,
+        Page::AiService => Icon::Connections,
     }
 }
 
@@ -251,6 +252,7 @@ pub fn shell() -> impl IntoElement {
                         Page::Rules => pages::rules::page().into_element(),
                         Page::Logs => pages::logs::page().into_element(),
                         Page::Dns => pages::dns::page().into_element(),
+                        Page::AiService => pages::stats::ai_service().into_element(),
                         Page::Settings => pages::settings::page().into_element(),
                     })
                 })),

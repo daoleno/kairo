@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use kairo_core::activity::Tally;
 use kairo_core::model::Connections;
+use kairo_core::stats::Store as Stats;
 use kairo_core::{Live, Proxies, Service, State};
 use nsh_core::prelude::*;
 
@@ -27,10 +28,13 @@ pub enum Page {
     Logs,
     /// Inspect: DNS lookups.
     Dns,
+    /// One AI service: reachability and API time over the week. Opened from
+    /// Home or Activity; shown under Activity.
+    AiService,
 }
 
 impl Page {
-    pub const ALL: [Page; 10] = [
+    pub const ALL: [Page; 11] = [
         Page::Overview,
         Page::Exits,
         Page::Activity,
@@ -41,6 +45,7 @@ impl Page {
         Page::Rules,
         Page::Logs,
         Page::Dns,
+        Page::AiService,
     ];
 
     /// The pages of the sidebars, in order (Settings last, apart).
@@ -62,6 +67,7 @@ impl Page {
             "apps" => Some(Page::Apps),
             "connections" => Some(Page::Activity),
             "groups" => Some(Page::Proxies),
+            "aiservice" | "ai-service" => Some(Page::AiService),
             "diagnostics" => Some(Page::Logs),
             _ => None,
         };
@@ -79,7 +85,13 @@ impl Page {
 
     /// The sidebar row that stands for this page.
     pub fn sidebar(self) -> Page {
-        if self.inspect() { Page::Settings } else { self }
+        if self.inspect() {
+            Page::Settings
+        } else if self == Page::AiService {
+            Page::Activity
+        } else {
+            self
+        }
     }
 
     pub fn title(self) -> &'static str {
@@ -94,6 +106,7 @@ impl Page {
             Page::Rules => "Rules",
             Page::Logs => "Diagnostics",
             Page::Dns => "DNS",
+            Page::AiService => "AI Service",
         }
     }
 }
@@ -116,6 +129,10 @@ pub struct Store {
     pub connections: Signal<Snap<Connections>>,
     pub proxies: Signal<Snap<Proxies>>,
     pub activity: Signal<Snap<Tally>>,
+    /// What is recorded for the charts.
+    pub stats: Signal<Snap<Stats>>,
+    /// The AI service the detail page shows (an `ai::SERVICES` id).
+    pub ai_service: Signal<&'static str>,
     pub log_seq: Signal<u64>,
     pub page: Signal<Page>,
     /// Activity shows the raw connection list (otherwise: by app).
@@ -133,6 +150,7 @@ impl Store {
         let conn_rx = svc.connections();
         let prox_rx = svc.proxies();
         let activity_rx = svc.activity();
+        let stats_rx = svc.stats();
         let log_rx = svc.log_seq();
         let store = Store {
             state: signal(state_rx.borrow().clone()),
@@ -140,6 +158,8 @@ impl Store {
             connections: signal(Snap(conn_rx.borrow().clone())),
             proxies: signal(Snap(prox_rx.borrow().clone())),
             activity: signal(Snap(activity_rx.borrow().clone())),
+            stats: signal(Snap(stats_rx.borrow().clone())),
+            ai_service: signal("claude"),
             log_seq: signal(*log_rx.borrow()),
             page: signal(*crate::chrome::bridge().page.borrow()),
             all_connections: signal(false),
@@ -163,6 +183,9 @@ impl Store {
         });
         follow(activity_rx, move |a: &Arc<Tally>| {
             store.activity.set(Snap(a.clone()))
+        });
+        follow(stats_rx, move |s: &Arc<Stats>| {
+            store.stats.set(Snap(s.clone()))
         });
         follow(log_rx, move |n: &u64| store.log_seq.set(*n));
         if crate::chrome::native() {

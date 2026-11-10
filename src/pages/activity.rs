@@ -265,6 +265,8 @@ fn by_app(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElement {
         view()
             .px_6()
             .pb_6()
+            .child(view().pb_3().child(crate::pages::stats::overview()))
+            .child(ui::section_label("By app").px_1().pb_1())
             .child(
                 ui::card_soft()
                     .child(

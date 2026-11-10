@@ -40,8 +40,7 @@ impl Recorder {
     }
 }
 
-/// `"ai"`, `"rest"` and `"downloads"`, in the order of the exits.
-pub const EXITS: [&str; 3] = ["ai", "rest", "downloads"];
+use crate::stats::EXITS;
 
 impl Service {
     /// What is recorded; a new copy comes about a minute after things change.

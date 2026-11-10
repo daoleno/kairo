@@ -164,6 +164,16 @@ pub fn card(
     selected: impl Fn() -> bool + Copy + 'static,
     press: impl Fn() + 'static,
 ) -> impl IntoElement {
+    card_with(exit, selected, press, false)
+}
+
+/// The card, with a small line of how the exit has been doing (Home's).
+pub fn card_with(
+    exit: Exit,
+    selected: impl Fn() -> bool + Copy + 'static,
+    press: impl Fn() + 'static,
+    spark: bool,
+) -> impl IntoElement {
     let store = store();
     let place = computed(move || {
         // Follow what the place is made of.
@@ -226,8 +236,19 @@ pub fn card(
                     })
                     .text_size(px(size::large() + 2.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .number_of_lines(1),
-                ),
+                    .number_of_lines(1)
+                    .flex_1(),
+                )
+                .child(when(
+                    move || spark,
+                    move || {
+                        crate::pages::stats::home_spark(match exit {
+                            Exit::Ai => 0,
+                            Exit::Rest => 1,
+                            Exit::Downloads => 2,
+                        })
+                    },
+                )),
         )
         .child(
             ui::muted(move || -> SharedString {
@@ -295,10 +316,33 @@ pub fn page() -> impl IntoElement {
                                 let e = which.get();
                                 untracked(move || picker(e).into_element())
                             }))
-                            .child(when(move || which.get() == Exit::Downloads, mirror_card)),
+                            .child(when(move || which.get() == Exit::Downloads, mirror_card))
+                            .child(dynamic(move || {
+                                let e = which.get();
+                                untracked(move || quality_card(e).into_element())
+                            })),
                     ),
             ),
         )
+}
+
+/// How the selected exit has been doing: response time, failed tests, switches.
+fn quality_card(exit: Exit) -> impl IntoElement {
+    let idx = match exit {
+        Exit::Ai => 0,
+        Exit::Rest => 1,
+        Exit::Downloads => 2,
+    };
+    ui::card()
+        .rounded(px(22.0))
+        .child(
+            view()
+                .px_4()
+                .py_3()
+                .child(ui::body("Quality").font_weight(FontWeight::SEMIBOLD)),
+        )
+        .child(ui::divider())
+        .child(crate::pages::stats::quality(idx))
 }
 
 // --- The mirror ------------------------------------------------------------------------

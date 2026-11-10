@@ -71,6 +71,9 @@ test("exits: a place of one's own for everything else, then Fastest again", asyn
   await app.waitUntil(() => has(app.texts(), (t) => t === "Chosen · Tokyo 02"), slow);
   await app.press("text:Fastest");
   await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Fastest · ")), slow);
+  // Quality is under the servers; with nothing recorded yet it says so.
+  expect(app.shows("text:Quality")).toBe(true);
+  await app.waitFor("text:Collecting data", slow);
 });
 
 test("mode: Smart, Everything, Direct, one press each, and Kairo stays connected", async () => {
@@ -197,6 +200,12 @@ test("AI: its exit beside the others, the flow on Activity, the switches in Sett
   for (const h of ["App", "Talks to", "Goes through", "Total"]) {
     expect(app.texts()).toContain(h);
   }
+  // Statistics: a fresh home has an hour to wait, and says so instead of drawing an empty chart.
+  expect(app.shows("text:Today")).toBe(true);
+  await app.waitFor("text:Collecting data", slow);
+  expect(app.shows("text:Clear History…")).toBe(false);
+  await app.press("text:7 days");
+  await app.waitFor("text:Collecting data", slow);
   noPromises();
   await app.press("Settings");
   await app.waitFor("text:AI tools use one exit", slow);

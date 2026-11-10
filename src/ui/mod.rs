@@ -1,6 +1,7 @@
 //! Kairo's styled component layer over `nsh_base`: tokens, the type scale and
 //! the controls every page composes. Pages never restyle base components.
 
+pub mod charts;
 pub mod icons;
 pub mod toolbar;
 
@@ -34,6 +35,29 @@ pub fn graph_up() -> AdaptiveColor {
 }
 pub fn subtle() -> AdaptiveColor {
     token("subtle", theme().muted)
+}
+
+// Chart series: Ember only for AI (the focal series), the others stay quiet.
+pub fn chart_ai() -> AdaptiveColor {
+    token("chart-ai", theme().primary)
+}
+pub fn chart_rest() -> AdaptiveColor {
+    token("chart-rest", theme().muted_foreground)
+}
+pub fn chart_downloads() -> AdaptiveColor {
+    token("chart-downloads", theme().muted_foreground)
+}
+pub fn chart_direct() -> AdaptiveColor {
+    token("chart-direct", theme().muted)
+}
+pub fn chart_neutral() -> AdaptiveColor {
+    token("chart-neutral", theme().muted_foreground)
+}
+pub fn chart_grid() -> AdaptiveColor {
+    token("chart-grid", theme().border)
+}
+pub fn chart_bad() -> AdaptiveColor {
+    token("chart-bad", theme().destructive)
 }
 
 pub fn radius_control() -> Points {

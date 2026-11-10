@@ -28,6 +28,9 @@ const MAX_USAGE: usize = 2000;
 /// The file's format.
 const VERSION: u32 = 1;
 
+/// The exits whose servers are tested, by the name the records use.
+pub const EXITS: [&str; 3] = ["ai", "rest", "downloads"];
+
 /// The exits traffic is counted under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Slot {

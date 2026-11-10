@@ -64,6 +64,7 @@ fn symbol(page: Page) -> &'static str {
         Page::Rules => "line.3.horizontal.decrease",
         Page::Logs => "text.alignleft",
         Page::Dns => "server.rack",
+        Page::AiService => "arrow.up.arrow.down",
     }
 }
 

@@ -323,7 +323,12 @@ const PROVIDER_CHOICE: u32 = u32::MAX;
 pub fn page() -> impl IntoElement {
     let store = store();
     let dialog = signal(None::<Dialog>);
-    let expanded = signal(None::<String>);
+    // KAIRO_EXPAND=1 opens the active subscription's usage (screenshots).
+    let expanded = signal(
+        std::env::var_os("KAIRO_EXPAND")
+            .filter(|v| !v.is_empty())
+            .and_then(|_| store.state.with_untracked(|s| s.profiles.active.clone())),
+    );
     let profiles = computed(move || store.state.with(|s| s.profiles.profiles.clone()));
     let failing = computed(move || {
         store.state.with(|s| {
@@ -732,7 +737,23 @@ fn remove(id: String, name: String) {
 /// "Subscription usage": what the provider's header says. The history and the
 /// pace come later, from what Kairo records.
 fn usage_section(p: ReadSignal<Profile>) -> impl IntoElement {
-    let tiles = computed(move || p.with(|p| p.usage.map(|u| usage_tiles(&u, now(), offset()))));
+    let store = store();
+    let tiles = computed(move || {
+        let (id, usage) = p.with(|p| (p.id.clone(), p.usage));
+        let mut tiles = usage.map(|u| usage_tiles(&u, now(), offset()))?;
+        // The pace comes from what Kairo has recorded (a day of readings).
+        let pace = store
+            .stats
+            .with(|st| kairo_core::stats::project(&st.0.usage_of(&id), now()).and_then(|p| p.pace));
+        if let Some(pace) = pace {
+            tiles[2] = tile(
+                "Recent pace",
+                format!("{}/day", size_text(pace as u64)),
+                "over the last days",
+            );
+        }
+        Some(tiles)
+    });
     let one = move |i: usize| {
         let get = move |f: fn(&Tile) -> &String| -> SharedString {
             tiles
@@ -769,6 +790,10 @@ fn usage_section(p: ReadSignal<Profile>) -> impl IntoElement {
                 .child(one(3)),
         )
         .child(ui::muted("As your provider reported at the last update."))
+        .child(dynamic(move || {
+            let id = p.with(|p| p.id.clone());
+            untracked(move || crate::pages::stats::usage(&id).into_element())
+        }))
 }
 
 // --- The dialog ----------------------------------------------------------------------

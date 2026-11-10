@@ -13,3 +13,4 @@ pub mod profiles;
 pub mod proxies;
 pub mod rules;
 pub mod settings;
+pub mod stats;

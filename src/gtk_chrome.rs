@@ -53,6 +53,7 @@ fn icons(page: Page) -> &'static [&'static str] {
         Page::Rules => &["view-filter-symbolic", "view-list-symbolic"],
         Page::Logs => &["utilities-terminal-symbolic"],
         Page::Dns => &["network-server-symbolic"],
+        Page::AiService => &["utilities-system-monitor-symbolic"],
     }
 }
 
