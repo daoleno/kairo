@@ -368,7 +368,11 @@ pub fn list_connections() -> Vec<Conn> {
 
 /// Looks for bypasses now. Blocking (two short commands at most); the
 /// socket table is read only when some process looks like an AI tool.
+/// `KAIRO_NO_BYPASS=1` looks for nothing (screenshots, tests on a busy machine).
 pub fn scan(mixed_port: u16, exclude: &[u32], now: i64) -> Vec<Bypass> {
+    if std::env::var_os("KAIRO_NO_BYPASS").is_some_and(|v| !v.is_empty()) {
+        return Vec::new();
+    }
     let home = std::env::var("HOME").ok();
     let procs = list_processes();
     let candidates: Vec<Proc> = procs
