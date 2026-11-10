@@ -15,13 +15,14 @@
 //!    tap installs it and starts the new Kairo.
 //!
 //! How it installs depends on how Kairo was installed ([`Install`]): the macOS
-//! app bundle is swapped for the new one; a tarball install (`install.sh`,
+//! app bundle is swapped for the new one; on Windows the program's folder (installed per user, or
+//! unzipped where the user can write) has its files renamed aside and replaced; a tarball install (`install.sh`,
 //! `~/.local`) has its files replaced in place; the .deb goes through
 //! `pkexec apt-get install` (one password prompt). Anything else gets a link to
 //! the release.
 //!
 //! `KAIRO_UPDATE_URL` points the updater at another place that serves the same
-//! files (tests). The key cannot be changed. `KAIRO_NO_UPDATE=1` turns the
+//! files (tests). The key cannot be changed at run time. `KAIRO_NO_UPDATE=1` turns the
 //! background checks off (tests, isolated runs).
 
 use std::path::{Path, PathBuf};
@@ -38,7 +39,18 @@ use crate::service::Service;
 
 /// The release workflow's signing key (public half; the private half is the
 /// `KAIRO_UPDATE_KEY` Actions secret).
-const PUBLIC_KEY: [u8; 32] = hex_literal(UPDATE_PUBLIC_KEY_HEX);
+const PUBLIC_KEY: [u8; 32] = hex_literal(trusted_key_hex());
+
+/// The key the build trusts: the release key, unless the build itself says
+/// otherwise (`KAIRO_TEST_UPDATE_KEY_HEX` when compiling, for the builds that
+/// test the updater against a manifest signed with a throwaway key). Nothing
+/// at run time can change it.
+const fn trusted_key_hex() -> &'static str {
+    match option_env!("KAIRO_TEST_UPDATE_KEY_HEX") {
+        Some(test) => test,
+        None => UPDATE_PUBLIC_KEY_HEX,
+    }
+}
 // One line: the release workflow reads it with sed.
 #[rustfmt::skip]
 const UPDATE_PUBLIC_KEY_HEX: &str = "336a3afab474faf88ed05e20cfe862fde8e0ad0f65abbc0e9fc88a222add86bf";
@@ -131,6 +143,8 @@ pub enum Install {
     MacApp { bundle: PathBuf },
     /// `<prefix>/bin/kairo` and `<prefix>/lib/kairo/mihomo`, writable by the user.
     Prefix { prefix: PathBuf },
+    /// `kairo.exe` next to `mihomo.exe` in a folder the user can write (Windows).
+    WindowsDir { dir: PathBuf },
     /// `/usr/bin/kairo` from the .deb.
     Deb,
     /// Anything else (a development build, a system-wide copy made with sudo).
@@ -143,6 +157,9 @@ impl Install {
             return Install::Other;
         };
         let exe = exe.canonicalize().unwrap_or(exe);
+        if cfg!(windows) {
+            return Self::detect_windows(&exe);
+        }
         Self::detect_for(&exe, Path::new("/var/lib/dpkg/info/kairo.list"))
     }
 
@@ -182,6 +199,21 @@ impl Install {
         Install::Other
     }
 
+    /// A Windows install: the folder of `kairo.exe` holds the core and can be
+    /// written to by the user (per-user install, or a portable unzip).
+    pub fn detect_windows(exe: &Path) -> Install {
+        let Some(dir) = exe.parent() else {
+            return Install::Other;
+        };
+        if dir.join("mihomo.exe").is_file() && writable(dir) {
+            Install::WindowsDir {
+                dir: dir.to_owned(),
+            }
+        } else {
+            Install::Other
+        }
+    }
+
     /// The manifest's key for this installation's package.
     pub fn package_key(&self) -> Option<String> {
         let arch = std::env::consts::ARCH;
@@ -189,6 +221,7 @@ impl Install {
             Install::MacApp { .. } => Some("macos-universal-zip".into()),
             Install::Prefix { .. } => Some(format!("linux-{arch}-tar")),
             Install::Deb => Some(format!("linux-{arch}-deb")),
+            Install::WindowsDir { .. } => Some(format!("windows-{arch}-zip")),
             Install::Other => None,
         }
     }
@@ -204,8 +237,11 @@ fn writable(dir: &Path) -> bool {
     }
     #[cfg(not(unix))]
     {
-        let _ = dir;
-        false
+        // Try it: a folder under Program Files refuses a standard user.
+        let probe = dir.join(format!(".kairo-write-test-{}", std::process::id()));
+        let ok = std::fs::write(&probe, b"").is_ok();
+        let _ = std::fs::remove_file(&probe);
+        ok
     }
 }
 
@@ -739,6 +775,7 @@ pub async fn install(svc: &Service) -> Result<PathBuf, String> {
         Install::MacApp { bundle } => install_mac(&bundle, &file, &work),
         Install::Prefix { prefix } => install_prefix(&prefix, &bytes, &work),
         Install::Deb => install_deb(&file),
+        Install::WindowsDir { dir } => install_windows(&dir, &bytes, &work),
         Install::Other => Err("This copy of Kairo cannot update itself".into()),
     })
     .await
@@ -869,6 +906,122 @@ fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::rename(&tmp, to).map_err(|e| format!("{}: {e}", to.display()))
 }
 
+/// Unpacks the zip and replaces the program's files with renames: Windows will
+/// not overwrite a running executable, but it will rename one, and the new file
+/// takes its name. The old files stay as `<name>.old` until the next start
+/// ([`remove_leftovers`]). If anything fails, what was moved aside comes back.
+pub fn install_windows(dir: &Path, zip_bytes: &[u8], work: &Path) -> Result<PathBuf, String> {
+    use std::io::{Cursor, Read};
+    std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
+        .map_err(|e| format!("Could not read the update: {e}"))?;
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("Could not read the update: {e}"))?;
+        // Names that climb out of the folder are refused.
+        let Some(rel) = file.enclosed_name() else {
+            return Err("The update has a file outside its folder".into());
+        };
+        let target = work.join(rel);
+        if file.is_dir() {
+            std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
+    }
+    // The package is a folder of files (maybe inside one folder).
+    let top = if work.join("kairo.exe").is_file() {
+        work.to_owned()
+    } else {
+        std::fs::read_dir(work)
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .find(|p| p.join("kairo.exe").is_file())
+            .ok_or("The update has no kairo.exe")?
+    };
+    if !top.join("mihomo.exe").is_file() {
+        return Err("The update has no core".into());
+    }
+    let mut files = Vec::new();
+    collect_files(&top, &top, &mut files).map_err(|e| e.to_string())?;
+    // The launcher last: if anything before fails, the old one still runs.
+    files.sort();
+    files.sort_by_key(|f| f == Path::new("kairo.exe"));
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for rel in &files {
+        if let Err(e) = replace_windows_file(&top.join(rel), &dir.join(rel), &mut moved) {
+            for (old, original) in moved.iter().rev() {
+                let _ = std::fs::remove_file(original);
+                let _ = std::fs::rename(old, original);
+            }
+            return Err(e);
+        }
+    }
+    Ok(dir.join("kairo.exe"))
+}
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_files(root, &path, out)?;
+        } else if let Ok(rel) = path.strip_prefix(root) {
+            out.push(rel.to_owned());
+        }
+    }
+    Ok(())
+}
+
+/// Moves `to` aside (`to.old`) and puts a copy of `from` in its place.
+fn replace_windows_file(
+    from: &Path,
+    to: &Path,
+    moved: &mut Vec<(PathBuf, PathBuf)>,
+) -> Result<(), String> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    if to.exists() {
+        let mut old = PathBuf::from(format!("{}.old", to.display()));
+        // A leftover of an earlier update that is still in use: pick another name.
+        let mut n = 1;
+        while old.exists() && std::fs::remove_file(&old).is_err() {
+            old = PathBuf::from(format!("{}.old{n}", to.display()));
+            n += 1;
+        }
+        std::fs::rename(to, &old).map_err(|e| format!("{}: {e}", to.display()))?;
+        moved.push((old, to.to_owned()));
+    }
+    std::fs::copy(from, to)
+        .map(|_| ())
+        .map_err(|e| format!("{}: {e}", to.display()))
+}
+
+/// Deletes what an update left beside the program (`*.old`): called at start,
+/// when the old executable is no longer running. What is still in use stays.
+pub fn remove_leftovers(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_old = name
+            .rsplit_once(".old")
+            .is_some_and(|(_, tail)| tail.chars().all(|c| c.is_ascii_digit()));
+        if is_old && path.is_file() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// `pkexec apt-get install <deb>`: one password prompt, dependencies resolved.
 #[allow(unused_variables)]
 fn install_deb(deb: &Path) -> Result<PathBuf, String> {
@@ -919,6 +1072,12 @@ pub fn relaunch(exe: &Path) -> Result<(), String> {
             Ok(())
         });
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: it outlives this one.
+        cmd.creation_flags(0x0000_0008 | 0x0000_0200);
+    }
     cmd.spawn()
         .map(|_| ())
         .map_err(|e| format!("Could not start the new Kairo: {e}"))
@@ -959,7 +1118,11 @@ fn alive(pid: i32) -> bool {
         }
         true
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        crate::winapi::pid_alive(pid as u32)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
         false
@@ -1358,5 +1521,90 @@ mod tests {
                 & 0o111,
             0o111
         );
+    }
+
+    fn zip_of(files: &[(&str, &str)]) -> Vec<u8> {
+        use std::io::Write;
+        let mut out = std::io::Cursor::new(Vec::new());
+        let mut w = zip::ZipWriter::new(&mut out);
+        for (name, text) in files {
+            w.start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(text.as_bytes()).unwrap();
+        }
+        w.finish().unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn windows_update_renames_old_files_aside() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("app");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("kairo.exe"), "old kairo").unwrap();
+        std::fs::write(dir.join("mihomo.exe"), "old core").unwrap();
+        let zip = zip_of(&[
+            ("Kairo/kairo.exe", "new kairo"),
+            ("Kairo/mihomo.exe", "new core"),
+            ("Kairo/wintun.dll", "wintun"),
+        ]);
+        let exe = install_windows(&dir, &zip, &tmp.path().join("work")).unwrap();
+        assert_eq!(exe, dir.join("kairo.exe"));
+        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe")).unwrap(), "new kairo");
+        assert_eq!(std::fs::read_to_string(dir.join("mihomo.exe")).unwrap(), "new core");
+        assert_eq!(std::fs::read_to_string(dir.join("wintun.dll")).unwrap(), "wintun");
+        // What a running program held is still there, under another name.
+        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe.old")).unwrap(), "old kairo");
+        remove_leftovers(&dir);
+        assert!(!dir.join("kairo.exe.old").exists());
+        assert!(!dir.join("mihomo.exe.old").exists());
+        assert!(dir.join("kairo.exe").exists());
+    }
+
+    #[test]
+    fn windows_update_without_a_core_changes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("app");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("kairo.exe"), "old kairo").unwrap();
+        let zip = zip_of(&[("kairo.exe", "new kairo")]);
+        assert!(install_windows(&dir, &zip, &tmp.path().join("work")).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe")).unwrap(), "old kairo");
+    }
+
+    #[test]
+    fn windows_update_failing_halfway_puts_the_old_files_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("app");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("kairo.exe"), "old kairo").unwrap();
+        std::fs::write(dir.join("mihomo.exe"), "old core").unwrap();
+        // A file where a folder must go: what is under it cannot be written.
+        std::fs::write(dir.join("zz"), "in the way").unwrap();
+        let zip = zip_of(&[
+            ("kairo.exe", "new kairo"),
+            ("mihomo.exe", "new core"),
+            ("zz/readme.txt", "licence"),
+        ]);
+        assert!(install_windows(&dir, &zip, &tmp.path().join("work")).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe")).unwrap(), "old kairo");
+        assert_eq!(std::fs::read_to_string(dir.join("mihomo.exe")).unwrap(), "old core");
+    }
+
+    #[test]
+    fn windows_install_is_found_beside_its_core() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("kairo.exe");
+        std::fs::write(&exe, "").unwrap();
+        assert_eq!(Install::detect_windows(&exe), Install::Other);
+        std::fs::write(tmp.path().join("mihomo.exe"), "").unwrap();
+        let found = Install::detect_windows(&exe);
+        assert_eq!(
+            found,
+            Install::WindowsDir {
+                dir: tmp.path().to_owned()
+            }
+        );
+        assert_eq!(found.package_key().unwrap().split('-').next(), Some("windows"));
     }
 }

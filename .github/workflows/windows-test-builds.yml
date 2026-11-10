@@ -1,0 +1,52 @@
+name: Windows test builds
+
+# For testing the updater end to end on a Windows machine: two builds of the
+# installer and zip, the second with a higher version, both trusting the
+# public key given here instead of the release key (the matching private key
+# signs the update manifest on the tester's machine). Nothing is released.
+on:
+  workflow_dispatch:
+    inputs:
+      test_key_hex:
+        description: "Public half of the throwaway update key (64 hex characters)"
+        required: true
+      newer_version:
+        description: "Version of the second build"
+        required: true
+        default: "0.3.1"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  KAIRO_TEST_UPDATE_KEY_HEX: ${{ inputs.test_key_hex }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: choco install innosetup -y --no-progress
+      - name: The first build (the version in the repository)
+        shell: pwsh
+        run: |
+          $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          scripts\package-windows.ps1
+          New-Item -ItemType Directory -Force out\a | Out-Null
+          Move-Item dist\Kairo-* out\a\
+      - name: The second build (a newer version)
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.newer_version }}"
+          (Get-Content Cargo.toml) -replace '^version = ".*"', "version = `"$v`"" | Set-Content Cargo.toml
+          $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          scripts\package-windows.ps1
+          New-Item -ItemType Directory -Force out\b | Out-Null
+          Move-Item dist\Kairo-* out\b\
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-builds
+          path: out

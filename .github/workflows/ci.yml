@@ -45,3 +45,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets
       - run: cargo test -p kairo-core --lib
+
+  windows:
+    name: Windows · check, unit and e2e tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+      - name: The pinned mihomo core (the one the packages ship) for the e2e tests
+        shell: bash
+        run: |
+          scripts/fetch-mihomo.sh windows-x86_64 "$RUNNER_TEMP/core"
+          echo "KAIRO_TEST_CORE=$RUNNER_TEMP\\core\\mihomo.exe" >> "$GITHUB_ENV"
+      - run: cargo test --workspace

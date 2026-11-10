@@ -4,7 +4,8 @@
 //! core; a command-line tool that ignores it connects straight out and the
 //! core never sees it. The operating system's socket table does: this module
 //! reads the current user's established TCP connections (`ss` on Linux,
-//! `lsof` on macOS; no root, only the person's own processes appear) and
+//! `lsof` on macOS, the IP Helper API on Windows; no root, only the person's own
+//! processes appear) and
 //! reports the ones that belong to a known AI tool and go to the internet
 //! rather than to the proxy or this network.
 //!
@@ -208,11 +209,23 @@ pub fn tool_of(name: &str, path: &str, home: Option<&str>) -> Option<&'static Ai
 /// What the person can paste in a terminal so command-line tools use the
 /// proxy: one line, upper and lower case (tools read either).
 pub fn terminal_env(mixed_port: u16) -> String {
+    if cfg!(windows) {
+        return terminal_env_powershell(mixed_port);
+    }
     let proxy = format!("http://127.0.0.1:{mixed_port}");
     let skip = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local";
     format!(
         "export HTTP_PROXY={proxy} HTTPS_PROXY={proxy} ALL_PROXY={proxy} NO_PROXY={skip} \
          http_proxy={proxy} https_proxy={proxy} all_proxy={proxy} no_proxy={skip}"
+    )
+}
+
+/// The same for PowerShell (Windows): `$env:` assignments on one line.
+pub fn terminal_env_powershell(mixed_port: u16) -> String {
+    let proxy = format!("http://127.0.0.1:{mixed_port}");
+    let skip = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local";
+    format!(
+        "$env:HTTP_PROXY=\"{proxy}\"; $env:HTTPS_PROXY=\"{proxy}\"; $env:ALL_PROXY=\"{proxy}\"; $env:NO_PROXY=\"{skip}\""
     )
 }
 
@@ -332,9 +345,36 @@ pub fn list_processes() -> Vec<Proc> {
     out
 }
 
-#[cfg(not(unix))]
+/// The current user's processes: the ones whose executable can be read, which
+/// on Windows are the person's own (system and other users' processes refuse).
+#[cfg(windows)]
+pub fn list_processes() -> Vec<Proc> {
+    use crate::winapi;
+    winapi::processes()
+        .into_iter()
+        .filter_map(|(pid, exe)| {
+            let path = winapi::image_path(pid)?;
+            Some(Proc {
+                pid,
+                name: win_tool_name(&exe),
+                path,
+            })
+        })
+        .collect()
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn list_processes() -> Vec<Proc> {
     Vec::new()
+}
+
+/// `claude.exe` → `claude`: the name a tool goes by on Windows.
+pub fn win_tool_name(file: &str) -> String {
+    let lower = file.to_ascii_lowercase();
+    match lower.strip_suffix(".exe") {
+        Some(_) => file[..file.len() - 4].to_owned(),
+        None => file.to_owned(),
+    }
 }
 
 /// The current user's established TCP connections. Blocking.
@@ -361,7 +401,28 @@ pub fn list_connections() -> Vec<Conn> {
         .unwrap_or_default()
 }
 
-#[cfg(not(unix))]
+/// The established TCP connections of this machine with their owners (the
+/// socket table of the IP Helper API; no elevation).
+#[cfg(windows)]
+pub fn list_connections() -> Vec<Conn> {
+    use crate::winapi;
+    let names: HashMap<u32, String> = winapi::processes()
+        .into_iter()
+        .map(|(pid, exe)| (pid, win_tool_name(&exe)))
+        .collect();
+    winapi::tcp_table()
+        .into_iter()
+        .filter(|r| r.state == winapi::TCP_ESTABLISHED && r.pid != 0)
+        .map(|r| Conn {
+            pid: r.pid,
+            name: names.get(&r.pid).cloned().unwrap_or_default(),
+            remote: r.remote.0,
+            port: r.remote.1,
+        })
+        .collect()
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn list_connections() -> Vec<Conn> {
     Vec::new()
 }
@@ -373,7 +434,9 @@ pub fn scan(mixed_port: u16, exclude: &[u32], now: i64) -> Vec<Bypass> {
     if std::env::var_os("KAIRO_NO_BYPASS").is_some_and(|v| !v.is_empty()) {
         return Vec::new();
     }
-    let home = std::env::var("HOME").ok();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
     let procs = list_processes();
     let candidates: Vec<Proc> = procs
         .into_iter()
@@ -396,6 +459,21 @@ pub fn scan(mixed_port: u16, exclude: &[u32], now: i64) -> Vec<Bypass> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn powershell_env_is_one_line_of_assignments() {
+        let t = terminal_env_powershell(7897);
+        assert!(!t.contains('\n'));
+        assert!(t.starts_with("$env:HTTP_PROXY=\"http://127.0.0.1:7897\""));
+        assert!(t.contains("$env:NO_PROXY="));
+    }
+
+    #[test]
+    fn windows_tool_names_lose_the_extension() {
+        assert_eq!(win_tool_name("claude.exe"), "claude");
+        assert_eq!(win_tool_name("Cursor.EXE"), "Cursor");
+        assert_eq!(win_tool_name("node"), "node");
+    }
 
     /// `ss -tnpH state established` as iproute2 prints it (the State column
     /// is left out by the filter), with an IPv6 peer, a mapped address, a

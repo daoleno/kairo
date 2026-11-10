@@ -203,7 +203,8 @@ async fn the_login_check_leaves_a_starting_kairo_connected() {
         Backends {
             gnome: false,
             kde: Some("6"),
-            mac: false
+            mac: false,
+            windows: false
         },
         "only the test's own KDE settings may be written"
     );

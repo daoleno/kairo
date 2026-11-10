@@ -142,9 +142,92 @@ mod guardian {
     }
 }
 
-fn main() {
+/// What the guardian does once Kairo is gone: if it ended without cleaning up,
+/// puts the system proxy back and stops the core.
+#[cfg(windows)]
+mod guardian {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    const FLAG: &str = "--guard";
+
+    pub fn is_guardian() -> bool {
+        std::env::args().nth(1).as_deref() == Some(FLAG)
+    }
+
+    /// Starts the guardian for this process: a second copy of Kairo that does
+    /// nothing but wait for this one to end.
+    pub fn spawn() {
+        use std::os::windows::process::CommandExt;
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        let flags = 0x0000_0008 | 0x0000_0200 | 0x0800_0000;
+        if let Err(e) = Command::new(exe)
+            .arg(FLAG)
+            .arg(std::process::id().to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+        {
+            log::warn!("no guardian: {e}");
+        }
+    }
+
+    pub fn run() -> ! {
+        let parent = std::env::args()
+            .nth(2)
+            .and_then(|p| p.parse::<u32>().ok())
+            .unwrap_or(0);
+        if parent != 0 {
+            // INFINITE: until Kairo is gone, however it went.
+            kairo_core::winapi::wait_for_exit(parent, u32::MAX);
+        }
+        let paths = Paths::new(Paths::default_home());
+        if paths.sysproxy_state().exists() || paths.core_pid().exists() {
+            log::warn!(
+                "Kairo ended without cleaning up: restoring the system proxy and stopping the core"
+            );
+            Service::restore_system_proxy_now(&paths);
+            if let Ok(rt) = kairo_core::tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                rt.block_on(kairo_core::supervisor::stop_stale(&paths));
+            }
+        }
+        std::process::exit(0);
+    }
+}
+
+/// A windowed program has no console: its log goes to `logs/kairo.log`.
+#[cfg(windows)]
+fn init_logging() {
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
+    let dir = Paths::default_home().join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("kairo.log");
+    // The guardian and the next Kairo append; a log of a megabyte starts over.
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 1 << 20) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        builder.target(env_logger::Target::Pipe(Box::new(file)));
+    }
+    builder.init();
+}
+
+#[cfg(not(windows))]
+fn init_logging() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    #[cfg(unix)]
+}
+
+fn main() {
+    init_logging();
+    #[cfg(any(unix, windows))]
     if guardian::is_guardian() {
         guardian::run();
     }
@@ -175,7 +258,7 @@ fn main() {
 /// Starts the engine of the one running Kairo: the guardian, the service
 /// (which recovers from a crash and starts the core) and the handlers.
 fn start_primary() -> Service {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     guardian::spawn();
     let svc = Service::global();
     emergency_handlers(&svc);
@@ -438,19 +521,240 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::*;
-    use nsh_platform_windows::{AppOptions, AppSource};
+    //! The window is Kairo's own, not NSH's runner's: closing it hides it (with
+    //! a tray icon), a second launch shows the first one's window, and logging
+    //! off puts the system proxy back first.
 
-    pub fn run(_minimized: bool) {
-        let svc = super::start_primary();
-        nsh_platform_windows::run_app(
-            AppSource::Rust(super::root()),
+    use super::*;
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+
+    use nsh_platform_windows::{App, AppOptions, AppView, Appearance};
+    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
+    use windows::Win32::System::Threading::CreateMutexW;
+    use windows::Win32::UI::HiDpi::{
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+    };
+    use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        AllowSetForegroundWindow, CallWindowProcW, DispatchMessageW, FindWindowW, GWLP_WNDPROC,
+        GetMessageW, GetWindowThreadProcessId, IsIconic, MSG, PostMessageW, SW_HIDE, SW_RESTORE,
+        SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, TranslateMessage,
+        WM_APP, WM_CLOSE, WM_ENDSESSION,
+    };
+    use windows::core::{HSTRING, w};
+
+    const APP_ID: &str = "dev.kairo.app";
+    /// Posted to the window to show it (by the tray, or by a second launch).
+    const WM_SHOW: u32 = WM_APP + 10;
+
+    static SERVICE: OnceLock<Service> = OnceLock::new();
+    static TRAY_OK: AtomicBool = AtomicBool::new(false);
+    static QUITTING: AtomicBool = AtomicBool::new(false);
+    static MAIN_WINDOW: AtomicIsize = AtomicIsize::new(0);
+    static ORIGINAL_PROC: AtomicIsize = AtomicIsize::new(0);
+
+    fn window() -> HWND {
+        HWND(MAIN_WINDOW.load(Ordering::SeqCst) as *mut std::ffi::c_void)
+    }
+
+    /// One Kairo per user (and per `KAIRO_HOME`, so isolated test runs can
+    /// run beside it). `false` when another one is running.
+    fn first_instance() -> bool {
+        let name = match std::env::var("KAIRO_HOME") {
+            Ok(h) if !h.is_empty() => {
+                let sum: u32 = h.bytes().fold(5381u32, |a, b| a.wrapping_mul(33) ^ u32::from(b));
+                format!("Local\\{APP_ID}.{sum:08x}")
+            }
+            _ => format!("Local\\{APP_ID}"),
+        };
+        // SAFETY: a named mutex kept for the life of the process.
+        unsafe {
+            let handle = CreateMutexW(None, true, &HSTRING::from(name));
+            let exists = GetLastError() == ERROR_ALREADY_EXISTS;
+            // Never closed: it is what the next launch finds.
+            std::mem::forget(handle);
+            !exists
+        }
+    }
+
+    /// A second launch: asks the first one to show its window.
+    fn show_the_first() {
+        // SAFETY: plain calls on another process's window.
+        unsafe {
+            let Ok(hwnd) = FindWindowW(None, w!("Kairo")) else {
+                return;
+            };
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            let _ = AllowSetForegroundWindow(pid);
+            let _ = PostMessageW(Some(hwnd), WM_SHOW, WPARAM(0), LPARAM(0));
+        }
+    }
+
+    fn show_window(hwnd: HWND) {
+        // SAFETY: plain calls on this process's window.
+        unsafe {
+            let _ = ShowWindow(hwnd, if IsIconic(hwnd).as_bool() { SW_RESTORE } else { SW_SHOW });
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+
+    /// Our window procedure, in front of NSH's: closing hides to the tray,
+    /// the show message brings the window back, logging off cleans up.
+    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        match msg {
+            WM_SHOW => {
+                show_window(hwnd);
+                return LRESULT(0);
+            }
+            WM_CLOSE if !QUITTING.load(Ordering::SeqCst) => {
+                let to_tray = TRAY_OK.load(Ordering::SeqCst)
+                    && SERVICE.get().is_some_and(|s| s.settings().close_to_tray);
+                if to_tray {
+                    // SAFETY: a plain call on this window.
+                    unsafe {
+                        let _ = ShowWindow(hwnd, SW_HIDE);
+                    }
+                    return LRESULT(0);
+                }
+                // Closing the window is quitting: say so before the engine goes.
+                if let Some(svc) = SERVICE.get() {
+                    svc.shutdown();
+                }
+                QUITTING.store(true, Ordering::SeqCst);
+            }
+            WM_ENDSESSION if wparam.0 != 0 => {
+                // Logging off or shutting down: the system proxy goes back now,
+                // the process is ended soon after.
+                if let Some(svc) = SERVICE.get() {
+                    svc.shutdown();
+                }
+            }
+            _ => {}
+        }
+        // SAFETY: NSH's procedure, which this one replaced.
+        unsafe {
+            let original: windows::Win32::UI::WindowsAndMessaging::WNDPROC =
+                std::mem::transmute(ORIGINAL_PROC.load(Ordering::SeqCst));
+            CallWindowProcW(original, hwnd, msg, wparam, lparam)
+        }
+    }
+
+    fn quit_app(svc: &Service) {
+        svc.shutdown();
+        QUITTING.store(true, Ordering::SeqCst);
+        // SAFETY: posting to the window of the UI thread.
+        unsafe {
+            let _ = PostMessageW(Some(window()), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+    }
+
+    /// The UI thread: the window, the tray and the message loop.
+    fn ui(svc: Service, minimized: bool) {
+        // SAFETY: process setup before any window exists (what NSH's runner does).
+        unsafe {
+            let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            let _ = OleInitialize(None);
+            let _ = SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(APP_ID));
+        }
+        nsh_app_kairo::chrome::set_native(false);
+        let view = match AppView::new(
+            None,
             AppOptions {
-                title: "Kairo".to_owned(),
+                app_id: APP_ID.into(),
+                title: "Kairo".into(),
                 size: (1180, 760),
-                ..Default::default()
+                appearance: Appearance::System,
+                limits: nsh_platform_windows::Limits::default(),
+                ..AppOptions::default()
             },
-        );
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                nsh_platform_windows::fatal_error(&format!("Cannot open a window: {e}"));
+                return;
+            }
+        };
+        view.load(App::Rust(super::root()));
+        let hwnd = view.hwnd();
+        MAIN_WINDOW.store(hwnd.0 as isize, Ordering::SeqCst);
+        // SAFETY: replaces the window's procedure with one that forwards to it.
+        unsafe {
+            let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, proc as *const () as isize);
+            ORIGINAL_PROC.store(original, Ordering::SeqCst);
+        }
+
+        let quit_svc = svc.clone();
+        let quit: Arc<dyn Fn() + Send + Sync> = Arc::new(move || quit_app(&quit_svc));
+        svc.set_quit_hook(quit.clone());
+        let hooks = kairo_tray::Hooks {
+            show: Arc::new(|| {
+                // SAFETY: posting to the window of the UI thread.
+                unsafe {
+                    let _ = PostMessageW(Some(window()), WM_SHOW, WPARAM(0), LPARAM(0));
+                }
+            }),
+            page: Arc::new(|name| {
+                if let Some(page) = nsh_app_kairo::store::Page::named(name) {
+                    nsh_app_kairo::chrome::select(page);
+                }
+                // SAFETY: as above.
+                unsafe {
+                    let _ = PostMessageW(Some(window()), WM_SHOW, WPARAM(0), LPARAM(0));
+                }
+            }),
+            quit,
+        };
+        match kairo_tray::start(svc.clone(), hooks) {
+            Ok(()) => TRAY_OK.store(true, Ordering::SeqCst),
+            Err(e) => log::warn!("no tray: {e}; closing the window quits"),
+        }
+        let hide = (minimized || svc.settings().start_minimized) && TRAY_OK.load(Ordering::SeqCst);
+        if !hide {
+            view.show();
+        }
+        let mut msg = MSG::default();
+        // SAFETY: the standard message loop.
+        unsafe {
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        view.stop();
+        drop(view);
+        // SAFETY: pairs the OleInitialize above.
+        unsafe { OleUninitialize() };
+    }
+
+    pub fn run(minimized: bool) {
+        // Leftovers of the update that brought this Kairo here.
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(dir) = exe.parent()
+        {
+            kairo_core::update::remove_leftovers(dir);
+        }
+        if !first_instance() {
+            show_the_first();
+            return;
+        }
+        let svc = super::start_primary();
+        let _ = SERVICE.set(svc.clone());
+        // Deep view trees recurse in drawing: NSH's runner gives its thread 8 MB too.
+        let thread_svc = svc.clone();
+        let ui = std::thread::Builder::new()
+            .name("nsh-ui".into())
+            .stack_size(8 << 20)
+            .spawn(move || ui(thread_svc, minimized));
+        match ui {
+            Ok(handle) => {
+                let _ = handle.join();
+            }
+            Err(e) => nsh_platform_windows::fatal_error(&format!("Cannot start the UI thread: {e}")),
+        }
+        kairo_tray::stop();
         svc.shutdown();
     }
 }

@@ -16,6 +16,7 @@ names = {
     "linux-x86_64-deb": f"kairo_{v}_amd64.deb",
     "linux-aarch64-deb": f"kairo_{v}_arm64.deb",
     "macos-universal-zip": f"Kairo-{v}-macos-universal.zip",
+    "windows-x86_64-zip": f"Kairo-{v}-windows-x86_64.zip",
 }
 sums = {}
 for line in open(f"{d}/SHA256SUMS"):

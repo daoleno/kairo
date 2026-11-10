@@ -5,6 +5,7 @@
 //! - Linux: a StatusNotifierItem (KDE Plasma, GNOME with the AppIndicator
 //!   extension, most panels) through `ksni`.
 //! - macOS: an `NSStatusItem` with an `NSMenu`.
+//! - Windows: a notification-area icon (`Shell_NotifyIconW`) with a popup menu.
 
 use std::sync::Arc;
 
@@ -14,6 +15,8 @@ use kairo_core::{CoreStatus, Mode, Service};
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(windows)]
+mod windows;
 
 /// What the app does for the tray.
 #[derive(Clone)]
@@ -78,6 +81,17 @@ pub fn menu_flag(flag: &str) -> String {
     } else {
         format!("{flag}  ")
     }
+}
+
+/// A flag emoji is two regional-indicator letters, which Windows draws as
+/// letters ("JP"): its menu leaves them out.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn without_flags(text: &str) -> String {
+    text.chars()
+        .filter(|c| !('\u{1F1E6}'..='\u{1F1FF}').contains(c))
+        .collect::<String>()
+        .trim_start()
+        .to_owned()
 }
 
 /// How a delay reads in a menu.
@@ -361,15 +375,32 @@ pub fn start(svc: Service, hooks: Hooks) -> Result<(), String> {
     {
         macos::start(svc, hooks)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        windows::start(svc, hooks)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = (svc, hooks);
         Err("no tray on this platform yet".into())
     }
 }
 
+/// Takes the tray icon away (Windows keeps a ghost of it until the pointer
+/// passes over otherwise). A no-op elsewhere.
+pub fn stop() {
+    #[cfg(windows)]
+    windows::stop();
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn flags_are_left_out_of_menu_text() {
+        assert_eq!(super::without_flags("🇯🇵  Tokyo 01"), "Tokyo 01");
+        assert_eq!(super::without_flags("Tokyo"), "Tokyo");
+    }
+
     #[test]
     fn renders_a_png() {
         let png = super::render_png(include_str!("../../../assets/glyph.svg"), 36);
