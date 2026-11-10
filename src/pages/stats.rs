@@ -155,7 +155,8 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
             .child(charts::collecting(
                 "Collecting data",
                 &format!(
-                    "Kairo started recording {ago}. The first chart appears after an hour of use. It is recorded on this computer and never sent anywhere."
+                    "Kairo started recording {ago}. The first chart appears after an hour of use. It is recorded on {} and never sent anywhere.",
+                    ui::this_device()
                 ),
             ))
             .into_element();
@@ -333,7 +334,7 @@ fn clear_footer() -> impl IntoElement {
         .flex_row()
         .items_center()
         .child(
-            ui::muted("Recorded on this computer · kept 30 days")
+            ui::muted(format!("Recorded on {} · kept 30 days", ui::this_device()))
                 .flex_1()
                 .text_size(px(size::small())),
         )

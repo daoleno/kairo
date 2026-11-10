@@ -908,7 +908,9 @@ fn lanes() -> impl IntoElement {
                     .flex_1()
                     .number_of_lines(1),
                 )
-                .child(ui::muted("On this computer: Ollama, LM Studio").number_of_lines(1))
+                .child(when(|| !cfg!(target_os = "android"), || {
+                    ui::muted("On this computer: Ollama, LM Studio").number_of_lines(1)
+                }))
                 .into_element()
         })
     })

@@ -3,6 +3,7 @@ package dev.kairo.app;
 import android.app.Activity;
 import android.app.Application;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.net.VpnService;
 
@@ -27,6 +28,12 @@ public final class Bridge {
     /** Rust: the VPN was taken away (the user switched it off in Settings, or another VPN took over). */
     static native void nativeRevoked();
 
+    /** Rust: the notification's Disconnect button was pressed. */
+    static native void nativeDisconnect();
+
+    /** Rust: the package installer's last word on an update (a PackageInstaller.STATUS_*, and Android's message). */
+    static native void nativeInstallResult(int status, String message);
+
     static void init(Application a) {
         app = a;
         nativeInit(a.getFilesDir().getAbsolutePath(), a.getApplicationInfo().nativeLibraryDir);
@@ -42,6 +49,7 @@ public final class Bridge {
      */
     public static int establish() {
         try {
+            askForNotifications();
             if (VpnService.prepare(app) != null) {
                 CompletableFuture<Boolean> f = new CompletableFuture<>();
                 consent = f;
@@ -58,6 +66,30 @@ public final class Bridge {
             return up.get(30, TimeUnit.SECONDS);
         } catch (Exception e) {
             return -2;
+        }
+    }
+
+    /** Waited on by {@link #askForNotifications()} while the permission dialog is up. */
+    static volatile CompletableFuture<Boolean> notifications;
+
+    /**
+     * The first time Kairo connects, asks (Android 13+) to show notifications: the one
+     * that says Kairo is on, with its Disconnect button, is only visible once allowed.
+     * Asked once; the answer does not stop the connection.
+     */
+    private static void askForNotifications() {
+        try {
+            android.content.SharedPreferences prefs = app.getSharedPreferences("kairo", Context.MODE_PRIVATE);
+            if (android.os.Build.VERSION.SDK_INT < 33 || prefs.getBoolean("asked_notifications", false)) {
+                return;
+            }
+            prefs.edit().putBoolean("asked_notifications", true).apply();
+            CompletableFuture<Boolean> f = new CompletableFuture<>();
+            notifications = f;
+            app.startActivity(new Intent(app, NotificationPermissionActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            f.get(120, TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+            // Connecting matters more than the notification.
         }
     }
 

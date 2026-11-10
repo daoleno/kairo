@@ -65,6 +65,29 @@ pub extern "system" fn Java_dev_kairo_app_Bridge_nativeRevoked(_env: JNIEnv<'_>,
     }
 }
 
+/// `Bridge.nativeDisconnect()`: the notification's Disconnect button.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kairo_app_Bridge_nativeDisconnect(_env: JNIEnv<'_>, _class: JClass<'_>) {
+    if let Some(svc) = crate::Service::try_global() {
+        drop(svc.connect(false));
+    }
+}
+
+/// `Bridge.nativeInstallResult(int, String)`: the package installer refused the
+/// update (or the person cancelled it).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kairo_app_Bridge_nativeInstallResult(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    status: jni::sys::jint,
+    message: JString<'_>,
+) {
+    let message = string(&mut env, &message);
+    if let Some(svc) = crate::Service::try_global() {
+        svc.install_result(status, &message);
+    }
+}
+
 /// The app's private files directory (the home of Kairo's files).
 pub fn files_dir() -> Option<PathBuf> {
     FILES.get().cloned()

@@ -255,6 +255,10 @@ pub fn update_button(u: &kairo_core::UpdateStatus) -> Option<UpdateButton> {
         U::Available { version } | U::Manual { version, .. } => {
             button(format!("Download Kairo {version}"), true)
         }
+        // Android installs it where it is: no restart of ours in it.
+        U::Ready { version } if cfg!(target_os = "android") => {
+            button(format!("Update to {version}"), true)
+        }
         U::Downloading {
             progress: Some(p), ..
         } => button(format!("Downloading… {:.0}%", p * 100.0), false),

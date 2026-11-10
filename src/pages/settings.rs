@@ -474,10 +474,18 @@ fn update_text(u: &UpdateStatus) -> String {
         } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
         UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
         UpdateStatus::Available { version } => {
-            format!("Kairo {version} is available · Download is at the foot of the sidebar")
+            if ui::phone() {
+                format!("Kairo {version} is available · Download is on Home")
+            } else {
+                format!("Kairo {version} is available · Download is at the foot of the sidebar")
+            }
         }
         UpdateStatus::Ready { version } => {
-            format!("Kairo {version} is ready · Restart to Update is at the foot of the sidebar")
+            if ui::phone() {
+                format!("Kairo {version} is ready · Update is on Home")
+            } else {
+                format!("Kairo {version} is ready · Restart to Update is at the foot of the sidebar")
+            }
         }
         UpdateStatus::Manual { version, .. } => {
             format!("Kairo {version} is out (this copy cannot update itself)")

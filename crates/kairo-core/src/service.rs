@@ -2338,6 +2338,24 @@ impl Service {
         self.run(async move { crate::update::download(&svc).await })
     }
 
+    /// The package installer (Android) gave its last word on the update: a
+    /// refusal becomes the failure the person reads, with a way to try again.
+    pub fn install_result(&self, status: i32, message: &str) {
+        if let Some(message) = crate::update::install_failure(status, message) {
+            self.set_update(crate::update::UpdateStatus::Failed { message });
+        }
+    }
+
+    /// Clears a failed update from the screen (the next check offers it again).
+    pub fn dismiss_update_failure(&self) {
+        if matches!(
+            self.snapshot().update,
+            crate::update::UpdateStatus::Failed { .. }
+        ) {
+            self.set_update(crate::update::UpdateStatus::Idle);
+        }
+    }
+
     /// Installs the downloaded update and restarts into it.
     pub fn restart_to_update(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();

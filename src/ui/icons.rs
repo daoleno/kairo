@@ -40,6 +40,7 @@ pub enum Icon {
     Restart,
     Download,
     Layers,
+    More,
     Activity,
 }
 
@@ -108,6 +109,7 @@ fn body(icon: Icon) -> &'static str {
         Icon::Restart => r#"<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>"#,
         Icon::Download => r#"<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>"#,
         Icon::Layers => r#"<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>"#,
+        Icon::More => r#"<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>"#,
     }
 }
 

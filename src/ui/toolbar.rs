@@ -305,6 +305,9 @@ fn toolbar_with(
     tools: Vec<Spec>,
     room: bool,
 ) -> View {
+    if super::phone() {
+        return phone_header(page, subtitle, tools);
+    }
     if chrome::native() {
         let specs = Rc::new(tools);
         HANDLERS.with(|h| {
@@ -382,4 +385,82 @@ fn toolbar_with(
                 ),
         )
         .children(tools.into_iter().map(Spec::element).collect::<Vec<_>>())
+}
+
+/// A phone's page header: the title (the gear on Home, a way back from
+/// Settings), its subtitle under it, then each tool on its own line: the
+/// search and the choices as wide as the screen, the buttons together in a
+/// row that wraps. Nothing here has a fixed width, so a larger system font
+/// makes it taller, never wider.
+fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<Spec>) -> View {
+    let store = crate::store::store();
+    let subtitle: Rc<dyn Fn() -> String> = Rc::new(subtitle);
+    let mut lines: Vec<AnyElement> = Vec::new();
+    let mut buttons: Vec<AnyElement> = Vec::new();
+    for tool in tools {
+        match tool {
+            Spec::Button { .. } => buttons.push(tool.element()),
+            Spec::Search {
+                placeholder, value, ..
+            } => lines.push(
+                search_field(value, placeholder)
+                    .w_full()
+                    .into_element(),
+            ),
+            Spec::Choice { .. } => lines.push(view().w_full().child(tool.element()).into_element()),
+        }
+    }
+    let back = match page {
+        Page::Settings => Some(Page::Overview),
+        p if p.inspect() => Some(Page::Settings),
+        _ => None,
+    };
+    view()
+        .flex_shrink_0()
+        .px_4()
+        .pt_2()
+        .pb_3()
+        .gap_2()
+        .border_b_1()
+        .border_color(move || theme().border)
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .min_h(px(super::touch_h(28.0)))
+                .child(back.map(|to| {
+                    super::icon_btn(Icon::ChevronLeft, "Back")
+                        .on_press(move || store.page.set(to))
+                        .ml(px(-8.0))
+                }))
+                .child(
+                    title(page.title())
+                        .text_size(px(size::title()))
+                        .flex_shrink(1.0)
+                        .min_w(px(0.0))
+                        .number_of_lines(1),
+                )
+                .child(view().flex_1())
+                .child((page == Page::Overview).then(|| {
+                    super::icon_btn(Icon::Settings, "Settings")
+                        .on_press(move || store.page.set(Page::Settings))
+                        .mr(px(-8.0))
+                })),
+        )
+        .child(when(
+            {
+                let subtitle = subtitle.clone();
+                move || !subtitle().is_empty()
+            },
+            move || {
+                let subtitle = subtitle.clone();
+                text(move || -> SharedString { subtitle().into() })
+                    .text_size(px(size::small()))
+                    .number_of_lines(2)
+                    .text_color(move || theme().muted_foreground)
+            },
+        ))
+        .children(lines)
+        .child((!buttons.is_empty()).then(|| view().flex_row().flex_wrap().gap_2().children(buttons)))
 }

@@ -79,11 +79,14 @@ public class KairoVpnService extends VpnService {
         nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Kairo is on", NotificationManager.IMPORTANCE_LOW));
         Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
         PendingIntent tap = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent off = PendingIntent.getBroadcast(this, 0,
+                new Intent(this, DisconnectReceiver.class).setPackage(getPackageName()), PendingIntent.FLAG_IMMUTABLE);
         Notification n = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentTitle("Kairo is on")
                 .setContentText("Your apps go through Kairo")
                 .setContentIntent(tap)
+                .addAction(new Notification.Action.Builder(null, "Disconnect", off).build())
                 .setOngoing(true)
                 .build();
         startForeground(NOTIFICATION, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);

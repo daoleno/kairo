@@ -258,7 +258,6 @@ fn phone_shell() -> impl IntoElement {
         Page::Activity,
         Page::Apps,
         Page::Profiles,
-        Page::Settings,
     ];
     view()
         .flex_1()
@@ -271,6 +270,7 @@ fn phone_shell() -> impl IntoElement {
                 .min_h(px(0.0))
                 .child(current_page(store)),
         )
+        .child(update_failure(store))
         // A newer Kairo: the download beside the tabs, where the sidebar had it.
         .child(dynamic(move || {
             let b = store
@@ -307,6 +307,54 @@ fn phone_shell() -> impl IntoElement {
                 .children(tabs.into_iter().map(tab)),
         )
         .child(toast())
+}
+
+/// A failed update, said above the tabs where the button was: what went wrong
+/// in words, with Try Again (look for the update again) and a way to dismiss it.
+fn update_failure(store: crate::store::Store) -> impl IntoElement {
+    when(
+        move || {
+            store
+                .state
+                .with(|s| matches!(s.update, kairo_core::UpdateStatus::Failed { .. }))
+        },
+        move || {
+            let message = move || -> SharedString {
+                store
+                    .state
+                    .with(|s| match &s.update {
+                        kairo_core::UpdateStatus::Failed { message } => message.clone(),
+                        _ => String::new(),
+                    })
+                    .into()
+            };
+            view()
+                .flex_shrink_0()
+                .mx_3()
+                .mb_2()
+                .p_3()
+                .gap_2()
+                .rounded(px(16.0))
+                .bg(move || ui::warning().opacity(0.14))
+                .child(ui::body("The update did not install").font_weight(FontWeight::SEMIBOLD))
+                .child(ui::muted(message))
+                .child(
+                    view()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(ui::btn("Try Again", ui::Variant::Primary).on_press(move || {
+                            let svc = store.svc();
+                            svc.dismiss_update_failure();
+                            store.run(svc.check_for_update());
+                        }))
+                        .child(
+                            ui::btn("Dismiss", ui::Variant::Secondary)
+                                .on_press(move || store.svc().dismiss_update_failure()),
+                        ),
+                )
+        },
+    )
 }
 
 /// One tab of the phone's bar: the icon over a small label.

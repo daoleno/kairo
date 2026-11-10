@@ -189,7 +189,7 @@ pub fn explain(e: &str) -> (String, Option<String>) {
     {
         return (
             "Kairo can't reach the provider.".into(),
-            Some("Check that this Mac or PC is online, then try again.".into()),
+            Some(format!("Check that {} is online, then try again.", if cfg!(target_os = "android") { "this phone" } else { "this Mac or PC" })),
         );
     }
     if low.contains("base64 node list") {

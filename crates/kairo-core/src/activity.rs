@@ -166,7 +166,13 @@ impl ExitKind {
             ExitKind::Downloads => "Downloads",
             ExitKind::Direct => "Direct",
             ExitKind::Blocked => "Blocked",
-            ExitKind::Local => "On this computer",
+            ExitKind::Local => {
+                if cfg!(target_os = "android") {
+                    "On this phone"
+                } else {
+                    "On this computer"
+                }
+            }
         }
     }
 }

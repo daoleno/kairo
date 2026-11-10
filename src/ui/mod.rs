@@ -115,6 +115,16 @@ pub fn phone() -> bool {
     use nsh_core::platform::{Idiom, Os};
     try_os() == Some(Os::Android) && idiom() == Idiom::Phone
 }
+/// What the machine Kairo runs on is called in its own words.
+pub fn this_device() -> &'static str {
+    if cfg!(target_os = "android") { "this phone" } else { "this computer" }
+}
+
+/// The height of a control a thumb presses (Android's guideline is 48 dp for
+/// the target, 40 for the drawn control); `desktop` where a pointer is exact.
+pub fn touch_h(desktop: f32) -> f32 {
+    if phone() { desktop.max(40.0) } else { desktop }
+}
 /// The least height of a row in a group (System Settings' and libadwaita's
 /// rows are about this tall).
 pub const ROW_MIN: f32 = 48.0;
@@ -173,12 +183,17 @@ fn base_button(variant: Variant) -> Button {
         .items_center()
         .justify_center()
         .gap_1p5()
-        .h(px(28.0))
         .px_3()
         .rounded(radius_control())
         .cursor_pointer()
         .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
         .disabled_style(|s| s.opacity(0.45));
+    // A thumb's height, growing with the text size; a pointer's, fixed.
+    let b = if phone() {
+        b.min_h(px(touch_h(28.0))).px_4()
+    } else {
+        b.h(px(28.0))
+    };
     match variant {
         Variant::Primary => b
             .bg(move || theme().primary)
@@ -249,7 +264,7 @@ pub fn icon_btn(glyph: Icon, label: &'static str) -> Button {
         .accessibility_label(label)
         .items_center()
         .justify_center()
-        .size(px(28.0))
+        .size(px(touch_h(28.0)))
         .rounded(radius_control())
         .cursor_pointer()
         .text_color(move || theme().muted_foreground)
@@ -370,7 +385,7 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
                 .min_w(px(56.0))
                 .items_center()
                 .justify_center()
-                .h(px(26.0))
+                .min_h(px(touch_h(26.0)))
                 .px_3p5()
                 .rounded_full()
                 .cursor_pointer()
@@ -414,7 +429,7 @@ pub fn search_field(value: Signal<String>, placeholder: &'static str) -> View {
         .flex_row()
         .items_center()
         .gap_1p5()
-        .h(px(28.0))
+        .min_h(px(touch_h(28.0)))
         .px_2()
         .rounded(radius_control())
         .border_1()

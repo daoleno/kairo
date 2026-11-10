@@ -349,7 +349,11 @@ pub fn page() -> impl IntoElement {
             Page::Profiles,
             move || {
                 let n = store.state.with(|s| s.profiles.profiles.len());
-                if n == 0 { String::new() } else { n.to_string() }
+                match n {
+                    0 => String::new(),
+                    1 => "1 subscription".to_owned(),
+                    n => format!("{n} subscriptions"),
+                }
             },
             vec![
                 toolbar::button(
@@ -374,8 +378,8 @@ pub fn page() -> impl IntoElement {
         .child(
             scroll().flex_1().child(
                 view()
-                    .px_6()
-                    .pt(toolbar::scroll_top(20.0))
+                    .px(px(if ui::phone() { 16.0 } else { 24.0 }))
+                    .pt(toolbar::scroll_top(if ui::phone() { 12.0 } else { 20.0 }))
                     .pb_6()
                     .gap_3()
                     .w_full()
@@ -390,6 +394,16 @@ pub fn page() -> impl IntoElement {
                         when(
                             move || profiles.with(|p| !p.is_empty()),
                             move || {
+                                if ui::phone() {
+                                    return view()
+                                        .gap_3()
+                                        .child(each(
+                                            move || profiles.get(),
+                                            |p: &Profile| p.id.clone(),
+                                            move |p, _| phone_row(p, expanded, dialog),
+                                        ))
+                                        .into_element();
+                                }
                                 ui::card().child(each(
                                     move || profiles.get(),
                                     |p: &Profile| p.id.clone(),
@@ -400,6 +414,7 @@ pub fn page() -> impl IntoElement {
                                             .child(row(p, expanded, dialog))
                                     },
                                 ))
+                                .into_element()
                             },
                         )
                         .otherwise(move || {
@@ -639,6 +654,136 @@ fn row(
         ))
 }
 
+/// A subscription on a phone: a card, not a table row. The name and what it
+/// is on top, its numbers under it (the meter as wide as the card), then the
+/// actions in a row that wraps, and the usage opening below.
+fn phone_row(
+    p: ReadSignal<Profile>,
+    expanded: Signal<Option<String>>,
+    dialog: Signal<Option<Dialog>>,
+) -> impl IntoElement {
+    let store = store();
+    let id = p.get_untracked().id.clone();
+    let active = {
+        let id = id.clone();
+        let m = computed(move || {
+            store
+                .state
+                .with(|s| s.profiles.active.as_deref() == Some(id.as_str()))
+        });
+        move || m.get()
+    };
+    let updating = {
+        let id = id.clone();
+        let m = computed(move || store.state.with(|s| s.updating.contains(&id)));
+        move || m.get()
+    };
+    let open = {
+        let id = id.clone();
+        let m = computed(move || expanded.with(|e| e.as_deref() == Some(id.as_str())));
+        move || m.get()
+    };
+    let remote = move || p.with(|p| p.is_remote());
+    let has_usage = move || p.with(|p| p.usage.is_some());
+    let limited = move || p.with(|p| p.usage.is_some_and(|u| u.total > 0));
+    let id_use = id.clone();
+    let id_update = id.clone();
+    let id_menu = id.clone();
+    let id_toggle = id.clone();
+    ui::card_soft()
+        .child(
+            view()
+                .px_4()
+                .py_3()
+                .gap_2()
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            view()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .child(
+                                    text(move || -> SharedString {
+                                        p.with(|p| p.name.clone()).into()
+                                    })
+                                    .text_size(px(size::large()))
+                                    .font_weight(FontWeight::SEMIBOLD),
+                                )
+                                .child(
+                                    ui::muted(move || -> SharedString {
+                                        p.with(|p| source_label(&p.source)).into()
+                                    })
+                                    .number_of_lines(1),
+                                ),
+                        )
+                        .child(when(active, || in_use_tag()))
+                        .child(
+                            ui::icon_btn(Icon::More, "More")
+                                .mr(px(-8.0))
+                                .on_press(move || menu(id_menu.clone(), p, dialog)),
+                        ),
+                )
+                .child(ui::muted(move || -> SharedString {
+                    p.with(|p| usage_line(p.usage.as_ref(), now(), offset()))
+                        .into()
+                }))
+                .child(when(limited, move || {
+                    ui::meter(move || {
+                        p.with(|p| p.usage.and_then(|u| u.fraction()).unwrap_or(0.0) as f32)
+                    })
+                }))
+                .child(ui::muted(move || -> SharedString {
+                    if updating() {
+                        return "Updating…".into();
+                    }
+                    p.with(|p| schedule_line(&p.source, p.updated_at, now()))
+                        .into()
+                }))
+                .child(
+                    view()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(when(move || !active(), move || {
+                            let id = id_use.clone();
+                            ui::btn("Use", Variant::Primary)
+                                .on_press(move || store.run(store.svc().activate(id.clone())))
+                        }))
+                        .child(when(remote, move || {
+                            let id = id_update.clone();
+                            ui::btn_icon(Icon::Refresh, "Update", Variant::Secondary)
+                                .disabled(updating)
+                                .on_press(move || {
+                                    store.run(store.svc().update_profile(id.clone()))
+                                })
+                        }))
+                        .child(when(has_usage, move || {
+                            let id = id_toggle.clone();
+                            ui::btn(
+                                move || -> SharedString {
+                                    if open() { "Hide usage" } else { "Usage" }.into()
+                                },
+                                Variant::Secondary,
+                            )
+                            .on_press(move || {
+                                if open() {
+                                    expanded.set(None)
+                                } else {
+                                    expanded.set(Some(id.clone()))
+                                }
+                            })
+                        })),
+                ),
+        )
+        .child(when(
+            move || open() && has_usage(),
+            move || usage_section(p),
+        ))
+}
+
 fn in_use_tag() -> View {
     view()
         .px_2()
@@ -780,15 +925,21 @@ fn usage_section(p: ReadSignal<Profile>) -> impl IntoElement {
         .pb_4()
         .gap_2()
         .child(ui::section_label("Subscription usage"))
-        .child(
+        .child(if ui::phone() {
+            // Two by two: four across is too narrow for a figure and its words.
+            view()
+                .gap_2()
+                .child(view().flex_row().gap_2().child(one(0)).child(one(1)))
+                .child(view().flex_row().gap_2().child(one(2)).child(one(3)))
+        } else {
             view()
                 .flex_row()
                 .gap_3()
                 .child(one(0))
                 .child(one(1))
                 .child(one(2))
-                .child(one(3)),
-        )
+                .child(one(3))
+        })
         .child(ui::muted("As your provider reported at the last update."))
         .child(dynamic(move || {
             let id = p.with(|p| p.id.clone());

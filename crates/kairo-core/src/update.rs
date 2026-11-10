@@ -1045,6 +1045,42 @@ pub fn remove_leftovers(dir: &Path) {
 /// Hands the APK to Android's installer; the system asks the user (and the
 /// first time, to allow installs from Kairo) and replaces the app, which then
 /// stops. Nothing to relaunch: the returned path is not started.
+/// What to tell the person when Android's package installer gave up on the
+/// update (`PackageInstaller.STATUS_*` and its own message); `None` when they
+/// only said no (the update stays ready).
+pub(crate) fn install_failure(status: i32, message: &str) -> Option<String> {
+    const FAILURE: i32 = 1;
+    const BLOCKED: i32 = 2;
+    const ABORTED: i32 = 3;
+    const INVALID: i32 = 4;
+    const CONFLICT: i32 = 5;
+    const STORAGE: i32 = 6;
+    const INCOMPATIBLE: i32 = 7;
+    let low = message.to_ascii_lowercase();
+    if status == ABORTED {
+        return None;
+    }
+    Some(
+        if low.contains("signatures do not match")
+            || low.contains("update_incompatible")
+            || status == CONFLICT
+            || status == INCOMPATIBLE
+        {
+            "Android refused the update: it is signed with a different key than the Kairo installed on this phone (a test build, perhaps). Uninstall Kairo, then install this version from the release page; add your subscription again.".to_owned()
+        } else if status == STORAGE {
+            "There is not enough free storage on this phone to install the update.".to_owned()
+        } else if status == BLOCKED {
+            "Android, or a security app on this phone, blocked the update.".to_owned()
+        } else if status == INVALID {
+            "Android did not accept the downloaded update as a valid app.".to_owned()
+        } else if status == FAILURE && message.is_empty() {
+            "Android could not install the update.".to_owned()
+        } else {
+            format!("Android could not install the update ({}).", message.trim())
+        },
+    )
+}
+
 fn install_android(apk: &Path) -> Result<PathBuf, String> {
     #[cfg(target_os = "android")]
     {
@@ -1165,6 +1201,24 @@ fn alive(pid: i32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_installers_refusals_are_said_in_words() {
+        assert_eq!(install_failure(3, "cancelled"), None);
+        let sig = install_failure(
+            1,
+            "INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match newer version",
+        )
+        .unwrap();
+        assert!(sig.contains("different key") && sig.contains("Uninstall"));
+        assert!(install_failure(5, "").unwrap().contains("different key"));
+        assert!(install_failure(6, "").unwrap().contains("storage"));
+        assert!(install_failure(2, "").unwrap().contains("blocked"));
+        assert_eq!(
+            install_failure(1, "INSTALL_FAILED_X").unwrap(),
+            "Android could not install the update (INSTALL_FAILED_X)."
+        );
+    }
+
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
 
