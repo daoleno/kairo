@@ -265,7 +265,10 @@ fn flow(graph: Memo<Graph>) -> impl IntoElement {
                     .px_1()
                     .child(
                         ui::link_btn("All connections")
-                            .on_press(move || store.page.set(crate::store::Page::Connections)),
+                            .on_press(move || {
+                                store.all_connections.set(true);
+                                store.page.set(crate::store::Page::Activity)
+                            }),
                     )
                     .child(view().flex_1())
                     .child(

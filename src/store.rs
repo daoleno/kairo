@@ -8,57 +8,61 @@ use kairo_core::model::Connections;
 use kairo_core::{Live, Proxies, Service, State};
 use nsh_core::prelude::*;
 
-/// The sidebar's destinations.
+/// The window's destinations: the five of the sidebar and Settings, and the
+/// four views Settings › Advanced › Inspect opens (they have no row of their own).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
     #[default]
     Overview,
+    Exits,
     Activity,
     Apps,
-    Proxies,
     Profiles,
-    Connections,
-    Rules,
-    Logs,
-    Dns,
     Settings,
+    /// Inspect: the subscription's own groups.
+    Proxies,
+    /// Inspect: the running rules, read-only.
+    Rules,
+    /// Inspect: the core's log, as Diagnostics.
+    Logs,
+    /// Inspect: DNS lookups.
+    Dns,
 }
 
 impl Page {
     pub const ALL: [Page; 10] = [
         Page::Overview,
+        Page::Exits,
         Page::Activity,
         Page::Apps,
-        Page::Proxies,
         Page::Profiles,
-        Page::Connections,
+        Page::Settings,
+        Page::Proxies,
         Page::Rules,
         Page::Logs,
         Page::Dns,
-        Page::Settings,
     ];
 
-    /// The pages of the sidebars, in order (DNS is a search away: ⌘K).
-    pub const SIDEBAR: [Page; 9] = [
+    /// The pages of the sidebars, in order (Settings last, apart).
+    pub const SIDEBAR: [Page; 6] = [
         Page::Overview,
+        Page::Exits,
         Page::Activity,
         Page::Apps,
-        Page::Proxies,
         Page::Profiles,
-        Page::Connections,
-        Page::Rules,
-        Page::Logs,
         Page::Settings,
     ];
 
-    /// The page named `name` (its title or its old one, any case).
+    /// The page named `name` (its title or an old one, any case).
     pub fn named(name: &str) -> Option<Page> {
         let old = match name.to_ascii_lowercase().as_str() {
-            "overview" => Some(Page::Overview),
-            "proxies" => Some(Page::Proxies),
-            "profiles" => Some(Page::Profiles),
+            "overview" | "home" => Some(Page::Overview),
+            "location" | "locations" => Some(Page::Exits),
+            "profiles" | "subscriptions" => Some(Page::Profiles),
             "apps" => Some(Page::Apps),
-            "activity" => Some(Page::Activity),
+            "connections" => Some(Page::Activity),
+            "groups" => Some(Page::Proxies),
+            "diagnostics" => Some(Page::Logs),
             _ => None,
         };
         old.or_else(|| {
@@ -68,23 +72,28 @@ impl Page {
         })
     }
 
-    /// Pages under Advanced (the sidebar folds them away).
-    pub fn advanced(self) -> bool {
-        !matches!(self, Page::Overview | Page::Activity | Page::Apps)
+    /// An Inspect view: opened from Settings, shown under its row.
+    pub fn inspect(self) -> bool {
+        matches!(self, Page::Proxies | Page::Rules | Page::Logs | Page::Dns)
+    }
+
+    /// The sidebar row that stands for this page.
+    pub fn sidebar(self) -> Page {
+        if self.inspect() { Page::Settings } else { self }
     }
 
     pub fn title(self) -> &'static str {
         match self {
             Page::Overview => "Home",
+            Page::Exits => "Exits",
             Page::Activity => "Activity",
             Page::Apps => "Apps & Sites",
-            Page::Proxies => "Groups",
             Page::Profiles => "Subscriptions",
-            Page::Connections => "Connections",
-            Page::Rules => "Rules",
-            Page::Logs => "Logs",
-            Page::Dns => "DNS",
             Page::Settings => "Settings",
+            Page::Proxies => "Groups",
+            Page::Rules => "Rules",
+            Page::Logs => "Diagnostics",
+            Page::Dns => "DNS",
         }
     }
 }
@@ -109,6 +118,8 @@ pub struct Store {
     pub activity: Signal<Snap<Tally>>,
     pub log_seq: Signal<u64>,
     pub page: Signal<Page>,
+    /// Activity shows the raw connection list (otherwise: by app).
+    pub all_connections: Signal<bool>,
     /// Where the platform's chrome floats over the content.
     pub insets: Signal<crate::chrome::Insets>,
     /// The connections page is paused (the list stops following).
@@ -131,6 +142,7 @@ impl Store {
             activity: signal(Snap(activity_rx.borrow().clone())),
             log_seq: signal(*log_rx.borrow()),
             page: signal(*crate::chrome::bridge().page.borrow()),
+            all_connections: signal(false),
             toast: signal(None),
             insets: signal(*crate::chrome::bridge().insets.borrow()),
             svc: stored(svc),

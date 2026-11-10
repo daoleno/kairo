@@ -78,7 +78,7 @@ fn commands(store: Store) -> Vec<Command> {
     for page in Page::ALL {
         out.push(cmd(
             format!("Go to {}", page.title()),
-            if page.advanced() { "Advanced" } else { "Page" },
+            if page.inspect() { "Inspect" } else { "Page" },
             Icon::ChevronRight,
             move |s| s.page.set(page),
         ));

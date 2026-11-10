@@ -44,14 +44,10 @@ enum Row {
 
 const ROWS: &[Row] = &[
     Row::Item(Page::Overview),
+    Row::Item(Page::Exits),
     Row::Item(Page::Activity),
     Row::Item(Page::Apps),
-    Row::Heading("Advanced"),
-    Row::Item(Page::Proxies),
     Row::Item(Page::Profiles),
-    Row::Item(Page::Connections),
-    Row::Item(Page::Rules),
-    Row::Item(Page::Logs),
     Row::Heading(""),
     Row::Item(Page::Settings),
 ];
@@ -59,15 +55,15 @@ const ROWS: &[Row] = &[
 fn symbol(page: Page) -> &'static str {
     match page {
         Page::Overview => "house",
-        Page::Activity => "waveform.path.ecg",
+        Page::Exits => "globe",
+        Page::Activity => "arrow.up.arrow.down",
         Page::Apps => "square.grid.2x2",
+        Page::Profiles => "list.bullet",
+        Page::Settings => "gearshape",
         Page::Proxies => "globe",
-        Page::Profiles => "doc.text",
-        Page::Connections => "arrow.up.arrow.down",
         Page::Rules => "line.3.horizontal.decrease",
         Page::Logs => "text.alignleft",
         Page::Dns => "server.rack",
-        Page::Settings => "gearshape",
     }
 }
 
@@ -161,13 +157,14 @@ impl Sidebar {
             return;
         };
         self.ivars().quiet.set(true);
+        let page = page.sidebar();
         match ROWS
             .iter()
             .position(|r| matches!(r, Row::Item(p) if *p == page))
         {
             Some(row) => table
                 .selectRowIndexes_byExtendingSelection(&NSIndexSet::indexSetWithIndex(row), false),
-            // A page the sidebar does not list (DNS, from the palette).
+            // A page the sidebar does not list.
             None => unsafe { table.deselectAll(None) },
         }
         self.ivars().quiet.set(false);
@@ -630,8 +627,6 @@ pub fn install(svc: Service) {
         content_item.setAutomaticallyAdjustsSafeAreaInsets(!flush);
         split.addSplitViewItem(&side_item);
         split.addSplitViewItem(&content_item);
-        // Home needs no sidebar: it folds away, holding Advanced, until asked for.
-        side_item.setCollapsed(!chrome::bridge().page.borrow().advanced());
 
         window.setStyleMask(window.styleMask() | NSWindowStyleMask::FullSizeContentView);
         window.setTitlebarAppearsTransparent(false);
@@ -696,10 +691,6 @@ fn follow(svc: Service) {
                                 i.window.setTitle(&NSString::from_str(page.title()));
                                 i.window.setSubtitle(&NSString::from_str(&bar.subtitle));
                                 i.sidebar.select(page);
-                                // An Advanced page from a menu, a key or the palette: show where it is.
-                                if page.advanced() && i.side_item.isCollapsed() {
-                                    i.side_item.setCollapsed(false);
-                                }
                                 i.footer.update(&s, &l);
                                 if let Some(toolbar) = i.window.toolbar() {
                                     show_tools(&toolbar, &i.toolbar, bar.tools);

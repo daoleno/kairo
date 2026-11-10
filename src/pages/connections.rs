@@ -88,7 +88,7 @@ pub fn page() -> impl IntoElement {
     view()
         .flex_1()
         .child(toolbar::toolbar(
-            Page::Connections,
+            Page::Activity,
             move || {
                 let (shown, all) = (count(), total());
                 let paused = if paused.with(Option::is_some) {
