@@ -481,7 +481,13 @@ pub(crate) fn classify(
     if !is_newer(version, current) {
         return Found::Nothing;
     }
-    if staged_file_present && staged.is_some_and(|s| &s.version == version) {
+    // The file on disk is the one the manifest names now: a package published again under the
+    // same version (a failed install is retried against it) is downloaded again.
+    if staged_file_present
+        && staged.is_some_and(|s| {
+            &s.version == version && package.is_none_or(|p| p.sha256 == s.sha256)
+        })
+    {
         return Found::Staged(version.clone());
     }
     if package.is_none() {
@@ -717,11 +723,15 @@ async fn stage(svc: &Service, proxy: Option<&str>) -> Result<String, Fetch> {
     }
     let version = manifest.version.clone();
     let dir = svc.paths().update_dir();
-    if staged_info(&dir).is_some_and(|s| s.version == version && dir.join(&s.file).is_file()) {
-        return Ok(version);
-    }
     let package = package_of(&manifest)
         .ok_or_else(|| Fetch::Fatal("This copy of Kairo cannot update itself".to_owned()))?;
+    // Only the very file the manifest names counts as downloaded already (not another
+    // build of the same version: one Android refused is fetched again).
+    if staged_info(&dir).is_some_and(|s| {
+        s.version == version && s.sha256 == package.sha256 && dir.join(&s.file).is_file()
+    }) {
+        return Ok(version);
+    }
     svc.set_update(UpdateStatus::Downloading {
         version: version.clone(),
         progress: None,
@@ -1389,6 +1399,16 @@ mod tests {
         assert_eq!(
             classify(&manifest("0.3.1"), "0.2.0", Some(&s), true, Some(&p)),
             Found::Downloadable("0.3.1".into())
+        );
+        // The same version, but the manifest names another file than the one on disk (it was
+        // published again, or the one on disk was refused by Android): downloaded again.
+        let other = Package {
+            sha256: "cd".into(),
+            ..pkg()
+        };
+        assert_eq!(
+            classify(&manifest("0.3.0"), "0.2.0", Some(&s), true, Some(&other)),
+            Found::Downloadable("0.3.0".into())
         );
     }
 
