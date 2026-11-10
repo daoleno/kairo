@@ -6,6 +6,8 @@
 //! lookup on as it is on macOS. Its own test file: the variable is the
 //! process's, and the other end-to-end tests must not see it.
 
+#![cfg(unix)]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
