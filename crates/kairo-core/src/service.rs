@@ -12,6 +12,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 mod ai_ops;
+mod bypass_ops;
+mod downloads_ops;
+mod route_ops;
 
 use crate::activity::Tally;
 use crate::ai_check;
@@ -136,6 +139,14 @@ pub struct State {
     /// a provider's note in use); later checks happen without saying so.
     pub locating: bool,
     pub ai: AiView,
+    /// The Downloads exit: where it goes, the mirror and its test.
+    pub downloads: crate::downloads::DownloadsInfo,
+    /// Routes (ids) the running config leaves out because their exit is not
+    /// in it (a node the subscription no longer has).
+    pub routes_skipped: Vec<String>,
+    /// AI tools whose connections go around the proxy (system-proxy mode
+    /// only; empty with TUN, or when the core is not running).
+    pub bypass: Vec<crate::bypass::Bypass>,
 }
 
 impl State {
@@ -216,6 +227,8 @@ struct Inner {
     /// for (macOS), and whether a look for them is running.
     proc_names: Mutex<crate::procname::Names>,
     proc_busy: std::sync::atomic::AtomicBool,
+    /// A mirror test is running.
+    mirror_busy: std::sync::atomic::AtomicBool,
     /// Ends the app (the launcher's Quit), for "Restart to Update".
     quit: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
@@ -283,6 +296,11 @@ impl Service {
         let profiles = ProfileIndex::load(&paths);
         let (core_tx, core_rx) = mpsc::unbounded_channel();
         let state = State {
+            downloads: crate::downloads::DownloadsInfo {
+                fastest: settings.downloads.fastest,
+                mirror: settings.downloads.mirror,
+                ..Default::default()
+            },
             settings,
             profiles,
             sysproxy_supported: sysproxy::supported(),
@@ -311,6 +329,7 @@ impl Service {
             ai_checked_at: std::sync::atomic::AtomicI64::new(0),
             proc_names: Mutex::new(crate::procname::Names::default()),
             proc_busy: std::sync::atomic::AtomicBool::new(false),
+            mirror_busy: std::sync::atomic::AtomicBool::new(false),
         }));
         let actor = svc.clone();
         rt.spawn(async move { actor.core_actor(core_rx).await });
@@ -322,6 +341,8 @@ impl Service {
         rt.spawn(async move { places.location_loop().await });
         let checks = svc.clone();
         rt.spawn(async move { checks.ai_loop().await });
+        let bypass = svc.clone();
+        rt.spawn(async move { bypass.bypass_loop().await });
         svc
     }
 
@@ -405,7 +426,13 @@ impl Service {
     }
 
     fn set_core(&self, status: CoreStatus) {
-        self.modify(|s| s.core = status);
+        let running = status.is_running();
+        self.modify(|s| {
+            s.core = status;
+            if !running {
+                s.bypass.clear();
+            }
+        });
     }
 
     /// Shows `text` to the user once.
@@ -795,6 +822,7 @@ impl Service {
             svc.refresh_proxies_now().await;
             svc.keep_fastest().await;
             svc.ai_sync().await;
+            svc.downloads_sync(false).await;
             svc.run_ai_check(false).await;
         });
         if self.settings().system_proxy && self.0.state.borrow().sysproxy_supported {
@@ -1121,7 +1149,11 @@ impl Service {
         // The profile's own local ports another client holds move aside (the
         // ones this Kairo's running core holds stay).
         let runtime = paths.runtime_dir();
-        let (built, applied) = config::build_applied(&text, &over, &settings, &|p| {
+        let config::Built {
+            text: built,
+            applied,
+            skipped_routes,
+        } = config::build_full(&text, &over, &settings, &|p| {
             crate::ports::held_by_other(p, &runtime)
         })
         .map_err(|e| e.to_string())?;
@@ -1136,6 +1168,7 @@ impl Service {
         std::fs::rename(paths.candidate_config(), paths.runtime_config())
             .map_err(|e| e.to_string())?;
         self.ai_config_loaded(&built, applied);
+        self.modify(|s| s.routes_skipped = skipped_routes);
         if reload && self.running() {
             self.controller()
                 .reload(&paths.runtime_config().to_string_lossy())
@@ -1146,6 +1179,7 @@ impl Service {
             tokio::spawn(async move {
                 svc.keep_fastest().await;
                 svc.ai_sync().await;
+                svc.downloads_sync(false).await;
                 svc.run_ai_check(false).await;
             });
         }
@@ -1217,13 +1251,24 @@ impl Service {
     ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
+            let mut next = next;
             next.validate()?;
+            // Routes are checked again whoever hands them over.
+            next.routes = crate::routes::sanitize(std::mem::take(&mut next.routes));
             let prev = svc.settings();
             if prev == next {
                 return Ok(());
             }
+            // The mirror is only ever turned on after it has passed its test.
+            if next.downloads.mirror
+                && !prev.downloads.mirror
+                && !svc.0.state.borrow().downloads.mirror_test.passed()
+            {
+                return Err(crate::downloads::MIRROR_REFUSED.into());
+            }
             svc.modify(|s| s.settings = next.clone());
             svc.save_settings();
+            svc.downloads_view_sync();
             if prev.launch_at_login != next.launch_at_login
                 || prev.start_minimized != next.start_minimized
             {
@@ -1238,7 +1283,8 @@ impl Service {
                 || prev.ipv6 != next.ipv6
                 || prev.log_level != next.log_level
                 || prev.tun != next.tun
-                || prev.tun_stack != next.tun_stack;
+                || prev.tun_stack != next.tun_stack
+                || prev.routes != next.routes;
             if svc.running() {
                 if restart {
                     svc.restart_core().await?;
@@ -1247,6 +1293,7 @@ impl Service {
                         // Put the old settings back: the running core still has them.
                         svc.modify(|s| s.settings = prev.clone());
                         svc.save_settings();
+                        svc.downloads_view_sync();
                         return Err(e);
                     }
                     if prev.log_level != next.log_level {
@@ -1261,6 +1308,14 @@ impl Service {
             }
             if prev.system_proxy != next.system_proxy {
                 svc.apply_sysproxy(next.system_proxy && svc.running());
+            }
+            if next.tun || !next.system_proxy {
+                svc.clear_bypass();
+            }
+            if prev.downloads.exit != next.downloads.exit
+                || prev.downloads.fastest != next.downloads.fastest
+            {
+                svc.downloads_sync(false).await;
             }
             Ok(())
         })
@@ -1576,6 +1631,9 @@ impl Service {
             tick.tick().await;
             if self.running() {
                 self.keep_fastest().await;
+                // The fastest place for downloads is measured by the same
+                // tests; when the Location is not automatic nothing ran them.
+                self.downloads_sync(!self.settings().auto_location).await;
             }
         }
     }
@@ -1891,6 +1949,7 @@ impl Service {
                 providers: providers.unwrap_or_default(),
                 testing,
             }));
+            self.downloads_node_changed();
         }
     }
 
@@ -2215,6 +2274,16 @@ impl Service {
     ) -> impl Future<Output = Result<Option<String>, String>> + 'static {
         let svc = self.clone();
         self.run(async move { crate::update::check(&svc).await })
+    }
+
+    /// Downloads the update on offer ([`crate::UpdateStatus::Available`]):
+    /// `Available` → `Downloading` → `Ready`. A failure puts it back to
+    /// `Available` and tells the person in a notice; the future still
+    /// resolves `Ok` then (read the state). Asked again meanwhile, it does
+    /// nothing.
+    pub fn download_update(&self) -> impl Future<Output = Result<(), String>> + 'static {
+        let svc = self.clone();
+        self.run(async move { crate::update::download(&svc).await })
     }
 
     /// Installs the downloaded update and restarts into it.

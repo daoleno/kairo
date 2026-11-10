@@ -39,11 +39,13 @@ impl Service {
             .map(|a| a.group.clone())
             .unwrap_or_default();
         let adopted = applied.as_ref().is_some_and(|a| a.adopted);
+        let downloads = applied.as_ref().and_then(|a| a.downloads.clone());
         self.modify(|s| {
             s.ai.group = group;
             s.ai.adopted = adopted;
         });
         let Some(mapping) = mapping else { return };
+        self.downloads_config_loaded(&mapping, downloads);
         let ai = self.settings().ai;
         if ai.enabled {
             match ai::exit_state(&mapping, ai.exit.as_ref()) {
