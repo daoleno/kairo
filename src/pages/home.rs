@@ -237,34 +237,23 @@ fn conn() -> Conn {
 }
 
 /// The place the main group goes through now.
-fn current_place() -> Option<Place> {
-    let store = store();
-    let preferred = store.state.with(|s| s.settings.tray_group.clone());
-    store.proxies.with(|p| {
-        let g = places::main_group(&p.0.groups, &preferred)?;
-        places::current(&p.0.groups, g)
-    })
-}
-
 fn home() -> impl IntoElement {
     scroll().flex_1().child(
         view()
-            .px_8()
-            .pt(toolbar::scroll_top(28.0))
+            .px_6()
+            .pt(toolbar::scroll_top(20.0))
             .pb_8()
-            .gap_5()
+            .gap_4()
             .w_full()
-            .max_w(px(600.0))
+            .max_w(px(1040.0))
             .self_center()
             .child(hero())
-            .child(crate::pages::ai::board())
-            .child(choices())
-            .child(traffic())
-            .child(plan()),
+            .child(exits())
+            .child(crate::pages::ai::board()),
     )
 }
 
-/// The switch and what it means now.
+/// The switch, what it means now, and the two choices that shape it.
 fn hero() -> impl IntoElement {
     let store = store();
     let state = computed(conn);
@@ -282,68 +271,51 @@ fn hero() -> impl IntoElement {
         }
     };
     let detail = move || -> SharedString {
-        let auto = store.state.with(|s| s.settings.auto_location);
-        let sysproxy_off = store
-            .state
-            .with(|s| s.sysproxy_supported && !s.settings.system_proxy && !s.settings.tun);
         match state.get() {
-            Conn::On => match current_place() {
-                Some(p) => {
-                    let mut parts = vec![format!(
-                        "{}{}",
-                        p.flag.map(|f| f + " ").unwrap_or_default(),
-                        p.title
-                    )];
-                    if let Some(d) = p.delay.filter(|d| *d > 0) {
-                        parts.push(format!("{d} ms"));
-                    }
-                    if auto {
-                        parts.push("automatic".into());
-                    }
-                    if sysproxy_off {
-                        parts.push("apps opt in by port".into());
-                    }
-                    parts.join(" · ").into()
-                }
-                None => "Through your subscription".into(),
-            },
+            Conn::On | Conn::Connecting(_) => plan_line().into(),
             Conn::Off => "Turn on to go through your subscription.".into(),
-            Conn::Connecting(_) => "".into(),
             Conn::Failed(m) => explain(&m).0.into(),
         }
     };
-    view()
-        .items_center()
+    ui::card_soft()
+        .px_6()
+        .py_5()
         .gap_3()
-        .py_4()
-        .child(big_switch(on, move |_| {
-            // A second press soon after the first undoes it, whatever the
-            // screen shows yet: the last press wins (the service orders
-            // them). Later, the screen is the truth.
-            let next = match last_press.get() {
-                Some((v, at))
-                    if at.elapsed() < std::time::Duration::from_secs(3)
-                        && !matches!(state.get(), Conn::Failed(_)) =>
-                {
-                    !v
-                }
-                _ => !on(),
-            };
-            last_press.set(Some((next, std::time::Instant::now())));
-            store.run(store.svc().connect(next));
-        }))
         .child(
-            text(headline)
-                .text_size(px(size::display()))
-                .font_weight(FontWeight::SEMIBOLD)
-                .role(AccessibilityRole::Header)
-                .mt_2(),
-        )
-        .child(
-            ui::muted(detail)
-                .text_size(px(size::body() + 1.0))
-                .text_center()
-                .number_of_lines(2),
+            view()
+                .flex_row()
+                .items_center()
+                .gap_4()
+                .child(big_switch(on, move |_| {
+                    // A second press soon after the first undoes it, whatever the
+                    // screen shows yet: the last press wins (the service orders
+                    // them). Later, the screen is the truth.
+                    let next = match last_press.get() {
+                        Some((v, at))
+                            if at.elapsed() < std::time::Duration::from_secs(3)
+                                && !matches!(state.get(), Conn::Failed(_)) =>
+                        {
+                            !v
+                        }
+                        _ => !on(),
+                    };
+                    last_press.set(Some((next, std::time::Instant::now())));
+                    store.run(store.svc().connect(next));
+                }))
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap_0p5()
+                        .child(
+                            text(headline)
+                                .text_size(px(size::title() + 2.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .role(AccessibilityRole::Header),
+                        )
+                        .child(ui::muted(detail).tabular_nums().number_of_lines(2)),
+                )
+                .child(choices()),
         )
         .child(when(
             move || matches!(state.get(), Conn::Failed(_)),
@@ -354,12 +326,15 @@ fn hero() -> impl IntoElement {
                     _ => String::new(),
                 };
                 view()
+                    .flex_row()
                     .items_center()
                     .gap_3()
-                    .child(when(
-                        move || !hint().is_empty(),
-                        move || ui::muted(hint).text_center().max_w(px(440.0)),
-                    ))
+                    .child(
+                        view().flex_1().child(when(
+                            move || !hint().is_empty(),
+                            move || ui::muted(hint),
+                        )),
+                    )
                     .child(fix_button(
                         move || match state.get() {
                             Conn::Failed(m) => m,
@@ -376,19 +351,12 @@ fn hero() -> impl IntoElement {
             move || {
                 let warning = move || store.state.with(|s| s.warning.clone().unwrap_or_default());
                 view()
+                    .flex_row()
                     .items_center()
                     .gap_3()
+                    .child(ui::dot(ui::warning))
                     .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .max_w(px(460.0))
-                            .child(ui::dot(ui::warning))
-                            .child(
-                                ui::muted(move || -> SharedString { warning().into() })
-                                    .text_center(),
-                            ),
+                        ui::muted(move || -> SharedString { warning().into() }).flex_1(),
                     )
                     .child(fix_button(warning, false))
             },
@@ -404,10 +372,44 @@ fn hero() -> impl IntoElement {
                         .with(|s| s.note.clone().unwrap_or_default())
                         .into()
                 })
-                .text_center()
-                .max_w(px(460.0))
             },
         ))
+}
+
+/// "Nebula · 37 of 100 GB · 22 days left": the subscription in use.
+pub fn plan_line() -> String {
+    let store = store();
+    store.state.with(|s| {
+        let Some(p) = s.profiles.active_profile() else {
+            return String::new();
+        };
+        plan_text(&p.name, p.usage.as_ref().map(|u| (u.used(), u.total, u.expire)), kairo_core::profile::now())
+    })
+}
+
+/// The plan line from its parts: name, (used, total, expiry), now.
+pub fn plan_text(name: &str, usage: Option<(u64, u64, Option<i64>)>, now: i64) -> String {
+    let mut parts = vec![name.to_owned()];
+    if let Some((used, total, expire)) = usage {
+        if total > 0 {
+            parts.push(format!(
+                "{} of {}",
+                kairo_core::bytes(used),
+                kairo_core::bytes(total)
+            ));
+        }
+        if let Some(t) = expire {
+            let days = (t - now) / 86400;
+            parts.push(if t < now {
+                "expired".into()
+            } else if days == 1 {
+                "1 day left".into()
+            } else {
+                format!("{days} days left")
+            });
+        }
+    }
+    parts.join(" · ")
 }
 
 /// The ports a message names (`Port 7897 …`, `127.0.0.1:7874: bind …`).
@@ -482,7 +484,7 @@ fn big_switch(
     on: impl Fn() -> bool + Copy + 'static,
     set: impl Fn(bool) + Copy + 'static,
 ) -> Button {
-    let (w, h, pad) = (104.0_f32, 60.0_f32, 5.0_f32);
+    let (w, h, pad) = (58.0_f32, 34.0_f32, 3.0_f32);
     let knob = h - pad * 2.0;
     nsh_base::button()
         .role(AccessibilityRole::Switch)
@@ -509,431 +511,104 @@ fn big_switch(
         )
 }
 
-/// Location, route, apps and sites.
+/// Route and the way apps reach Kairo: two small controls.
 fn choices() -> impl IntoElement {
-    // The AI exit's row exists while the AI layer is on.
-    let ai = computed(crate::pages::ai::on);
-    dynamic(move || {
-        let ai = ai.get();
-        untracked(move || {
-            let mut rows = vec![location_row().into_element()];
-            if ai {
-                rows.push(crate::pages::ai::exit_row().into_element());
-            }
-            rows.push(route_row().into_element());
-            rows.push(apps_row().into_element());
-            ui::rows(rows).into_element()
-        })
-    })
-}
-
-fn location_row() -> impl IntoElement {
-    let store = store();
-    let open = signal(false);
-    let place = computed(current_place);
-    let auto = move || store.state.with(|s| s.settings.auto_location);
-    let value = move || -> SharedString {
-        match place.get() {
-            Some(p) => format!("{} · {}", p.title, ui::delay_text(p.delay)).into(),
-            None => "—".into(),
-        }
-    };
-    popover()
-        .open(move || Some(open.get()))
-        .on_open_change(move |e: &nsh_base::PopoverEvent| {
-            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
-                open.set(*next);
-                if *next {
-                    test_if_stale();
-                }
-            }
-        })
-        .placement(Placement::Bottom)
-        .align(Align::End)
-        .offset(px(6.0))
-        .popup_class("transition-opacity duration-150")
-        .popup_starting_class(Some(SharedString::from("opacity-0")))
-        .trigger(
-            ui::row_view()
-                .cursor_pointer()
-                .child(
-                    text(move || {
-                        place
-                            .get()
-                            .and_then(|p| p.flag)
-                            .unwrap_or_else(|| "◎".into())
-                    })
-                    .text_size(px(size::large() + 2.0)),
-                )
-                .child(
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .gap_0p5()
-                        .child(ui::body("Location"))
-                        .child(ui::muted(move || -> SharedString {
-                            if auto() {
-                                "Fastest, automatically".into()
-                            } else {
-                                "Chosen by you".into()
-                            }
-                        })),
-                )
-                .child(ui::muted(value).tabular_nums().number_of_lines(1))
-                .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground)),
-        )
-        .child(location_picker(move || open.set(false)))
-}
-
-/// The locations were never tested, or long ago: test them now.
-fn test_if_stale() {
-    let store = store();
-    let (untested, total, testing) = store.proxies.with_untracked(|p| {
-        let preferred = store
-            .state
-            .with_untracked(|s| s.settings.tray_group.clone());
-        let Some(g) = places::main_group(&p.0.groups, &preferred) else {
-            return (0, 0, true);
-        };
-        let all = places::places(&p.0.groups, g);
-        (
-            all.iter().filter(|p| p.delay.is_none()).count(),
-            all.len(),
-            !p.0.testing.is_empty(),
-        )
-    });
-    if total > 0 && untested * 2 >= total && !testing {
-        spawn(store.svc().test_places());
-    }
-}
-
-fn location_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
-    let store = store();
-    let query = signal(String::new());
-    let preferred = move || store.state.with(|s| s.settings.tray_group.clone());
-    let auto = move || store.state.with(|s| s.settings.auto_location);
-    let regions = move || {
-        let q = query.get().to_lowercase();
-        store.proxies.with(|p| {
-            let Some(g) = places::main_group(&p.0.groups, &preferred()) else {
-                return (None, vec![], false);
-            };
-            let current = places::current(&p.0.groups, g).map(|c| c.name);
-            let all: Vec<Place> = places::places(&p.0.groups, g)
-                .into_iter()
-                .filter(|p| {
-                    q.is_empty()
-                        || p.name.to_lowercase().contains(&q)
-                        || p.region.to_lowercase().contains(&q)
-                })
-                .collect();
-            (current, places::by_region(&all), !p.0.testing.is_empty())
-        })
-    };
-    let pick = move |name: Option<String>| {
-        close();
-        store.run(store.svc().set_location(name));
-    };
-    view()
-        .w(px(360.0))
-        .max_h(move || px((nsh_core::element::window().height.0 - 340.0).clamp(220.0, 520.0)))
-        .rounded(px(22.0))
-        .bg(move || theme().popover)
-        .shadow_xl()
-        .border_1()
-        .border_color(move || theme().border.opacity(0.6))
-        .overflow_hidden()
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .p_3()
-                .child(ui::search_field(query, "Search locations").flex_1())
-                .child(ui::icon_btn(Icon::Bolt, "Test Again").on_press(move || {
-                    spawn(store.svc().test_places());
-                })),
-        )
-        .child(
-            scroll().flex_shrink(1.0).child(
-                view()
-                    .px_2()
-                    .pb_2()
-                    .child(place_row(
-                        None,
-                        move || auto(),
-                        move || {
-                            let fastest = store.proxies.with(|p| {
-                                places::main_group(&p.0.groups, &preferred())
-                                    .and_then(|g| places::fastest(&p.0.groups, g))
-                            });
-                            fastest
-                                .map(|f| format!("{} · {}", f.title, ui::delay_text(f.delay)))
-                                .unwrap_or_default()
-                        },
-                        pick,
-                    ))
-                    .child(dynamic(move || {
-                        let (now, regions, testing) = regions();
-                        let manual = !auto();
-                        untracked(move || {
-                            view().children(regions.into_iter().map(move |(region, list)| {
-                                let now = now.clone();
-                                view()
-                                    .child(ui::section_label(region).px_3().pt_3().pb_1())
-                                    .children(list.into_iter().map(move |p| {
-                                        let is_now =
-                                            manual && now.as_deref() == Some(p.name.as_str());
-                                        let name = p.name.clone();
-                                        let delay = if testing && p.delay.is_none() {
-                                            "…".to_owned()
-                                        } else {
-                                            ui::delay_text(p.delay).to_string()
-                                        };
-                                        place_line(p, is_now, delay)
-                                            .on_press(move || pick(Some(name.clone())))
-                                    }))
-                            }))
-                        })
-                    })),
-            ),
-        )
-}
-
-/// "Fastest": Kairo keeps it on the fastest place.
-fn place_row(
-    _: Option<()>,
-    chosen: impl Fn() -> bool + 'static,
-    detail: impl Fn() -> String + 'static,
-    pick: impl Fn(Option<String>) + 'static,
-) -> Button {
-    nsh_base::button()
-        .on_press(move || pick(None))
-        .flex_row()
-        .items_center()
-        .gap_3()
-        .h(px(40.0))
-        .px_3()
-        .rounded(px(12.0))
-        .cursor_pointer()
-        .hover(|s| s.bg(move || theme().accent))
-        .child(icon(Icon::Bolt, 15.0).text_color(move || theme().primary))
-        .child(ui::body("Fastest").font_weight(FontWeight::MEDIUM).flex_1())
-        .child(ui::muted(detail).tabular_nums())
-        .child(view().w(px(16.0)).child(when(chosen, || {
-            icon(Icon::Check, 14.0).text_color(move || theme().primary)
-        })))
-}
-
-pub(crate) fn place_line(p: Place, chosen: bool, delay: String) -> Button {
-    let tone = ui::delay_tone(p.delay);
-    nsh_base::button()
-        .selected(chosen)
-        .accessibility_label(p.name.clone())
-        .flex_row()
-        .items_center()
-        .gap_3()
-        .h(px(36.0))
-        .px_3()
-        .rounded(px(12.0))
-        .cursor_pointer()
-        .hover(|s| s.bg(move || theme().accent))
-        .style_when(move || chosen, |s| s.bg(move || ui::selection()))
-        .child(
-            text(
-                p.flag
-                    .clone()
-                    .or_else(|| places::region_flag(p.region))
-                    .unwrap_or_else(|| "◎".into()),
-            )
-            .w(px(20.0)),
-        )
-        .child(ui::body(p.title.clone()).flex_1().number_of_lines(1))
-        .child(
-            text(delay)
-                .text_size(px(size::small()))
-                .tabular_nums()
-                .text_color(move || tone),
-        )
-        .child(
-            view()
-                .w(px(16.0))
-                .child(chosen.then(|| icon(Icon::Check, 14.0).text_color(move || theme().primary))),
-        )
-}
-
-fn route_row() -> impl IntoElement {
     let store = store();
     let mode = move || store.state.with(|s| s.settings.mode);
-    let detail = move || -> SharedString {
-        let place = current_place()
-            .map(|p| p.title)
-            .unwrap_or_else(|| "your location".into());
-        match mode() {
-            Mode::Rule => format!("Local sites go direct; the rest through {place}.").into(),
-            Mode::Global => format!("Everything goes through {place}.").into(),
-            Mode::Direct => "Everything goes direct, as without Kairo.".into(),
-        }
+    let via = move || {
+        store.state.with(|s| {
+            if s.settings.tun {
+                Via::Tun
+            } else {
+                Via::System
+            }
+        })
     };
-    ui::row_view()
-        .child(
-            view()
-                .flex_1()
-                .min_w(px(0.0))
-                .gap_0p5()
-                .child(ui::body("Route"))
-                .child(ui::muted(detail).number_of_lines(2)),
-        )
-        .child(ui::segmented(
-            vec![
-                (Mode::Rule, "Smart"),
-                (Mode::Global, "All"),
-                (Mode::Direct, "Direct"),
-            ],
-            mode,
-            move |m| store.run(store.svc().set_mode(m)),
+    view()
+        .gap_2()
+        .flex_shrink_0()
+        .child(labelled(
+            "Mode",
+            ui::segmented(
+                vec![
+                    (Mode::Rule, "Smart"),
+                    (Mode::Global, "Everything"),
+                    (Mode::Direct, "Direct"),
+                ],
+                mode,
+                move |m| store.run(store.svc().set_mode(m)),
+            ),
+        ))
+        .child(labelled(
+            "Apps",
+            ui::segmented(
+                vec![(Via::System, "System settings"), (Via::Tun, "Every app")],
+                via,
+                move |v| set_via(v),
+            ),
         ))
 }
 
-fn apps_row() -> impl IntoElement {
+fn labelled(label: &'static str, control: impl IntoElement) -> impl IntoElement {
+    view()
+        .flex_row()
+        .items_center()
+        .justify_end()
+        .gap_3()
+        .child(ui::muted(label))
+        .child(control)
+}
+
+/// How apps reach Kairo: those that follow the system's proxy settings, or every
+/// app (TUN).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    System,
+    Tun,
+}
+
+/// Switches to `via`; TUN asks for its permission the first time.
+pub fn set_via(via: Via) {
     let store = store();
-    let summary = move || -> SharedString {
-        let preferred = store.state.with(|s| s.settings.tray_group.clone());
-        store.proxies.with(|p| {
-            let Some(main) = places::main_group(&p.0.groups, &preferred) else {
-                return "".into();
-            };
-            let apps = crate::pages::ai::without_ai(places::app_choices(&p.0.groups, &main.name));
-            if apps.is_empty() {
-                return "Your subscription has no per-app choices.".into();
+    let svc = store.svc();
+    match via {
+        Via::System => store.run(async move {
+            svc.set_tun(false).await?;
+            if svc.snapshot().sysproxy_supported {
+                svc.set_system_proxy(true).await?;
             }
-            let own = apps.iter().filter(|a| !a.follows_main).count();
-            let names: Vec<&str> = apps.iter().take(3).map(|a| a.group.as_str()).collect();
-            if own == 0 {
-                format!(
-                    "{} and {} more follow your location",
-                    names.join(", "),
-                    apps.len().saturating_sub(3)
-                )
-                .into()
-            } else {
-                format!(
-                    "{} follow your location · {own} go their own way",
-                    apps.len() - own
-                )
-                .into()
-            }
-        })
-    };
-    nsh_base::button()
-        .on_press(move || store.page.set(Page::Apps))
+            Ok(())
+        }),
+        Via::Tun => {
+            let granted = store.state.with_untracked(|s| s.tun_privilege) == Some(kairo_core::tun::Privilege::Granted);
+            store.run(async move {
+                if !granted {
+                    svc.grant_tun().await?;
+                }
+                svc.set_tun(true).await
+            })
+        }
+    }
+}
+
+/// The three exits, as cards; a press opens the Exits page.
+fn exits() -> impl IntoElement {
+    let store = store();
+    view()
+        .gap_2()
+        .child(ui::section_label("Exits").px_1())
         .child(
-            ui::row_view()
-                .cursor_pointer()
-                .child(
+            view()
+                .flex_row()
+                .gap_3()
+                .children(crate::pages::exits::Exit::ALL.into_iter().map(move |e| {
                     view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .gap_0p5()
-                        .child(ui::body("Apps & Sites"))
-                        .child(ui::muted(summary).number_of_lines(1)),
-                )
-                .child(icon(Icon::ChevronRight, 13.0).text_color(move || theme().muted_foreground)),
+                        .child(crate::pages::exits::card(e, || false, move || {
+                            crate::pages::exits::select(e);
+                            store.page.set(Page::Exits)
+                        }))
+                })),
         )
-}
-
-/// What is flowing: the two speeds, and the way to the Activity page.
-fn traffic() -> impl IntoElement {
-    let store = store();
-    view()
-        .flex_row()
-        .items_center()
-        .gap_4()
-        .px_1()
-        .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down)))
-        .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
-        .child(view().flex_1())
-        .child(ui::link_btn("Activity").on_press(move || store.page.set(Page::Activity)))
-}
-
-fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
-    view()
-        .flex_row()
-        .items_center()
-        .gap_1()
-        .child(icon(glyph, 12.0).text_color(move || theme().muted_foreground))
-        .child(
-            text(move || kairo_core::speed(value()))
-                .text_size(px(size::small()))
-                .tabular_nums()
-                .text_color(move || theme().muted_foreground),
-        )
-}
-
-/// The subscription: usage, expiry and a failed update, quietly.
-fn plan() -> impl IntoElement {
-    let store = store();
-    let profile = move || store.state.with(|s| s.profiles.active_profile().cloned());
-    let updating = move || {
-        store
-            .state
-            .with(|s| profile().is_some_and(|p| s.updating.contains(&p.id)))
-    };
-    dynamic(move || {
-        let Some(p) = profile() else { return None };
-        let busy = updating();
-        Some(untracked(move || {
-            let id = p.id.clone();
-            let mut parts = vec![p.name.clone()];
-            if let Some(u) = p.usage {
-                if u.total > 0 {
-                    parts.push(format!(
-                        "{} of {}",
-                        kairo_core::bytes(u.used()),
-                        kairo_core::bytes(u.total)
-                    ));
-                }
-                if let Some(t) = u.expire {
-                    let days = (t - kairo_core::profile::now()) / 86400;
-                    parts.push(if days < 0 {
-                        "expired".into()
-                    } else {
-                        format!("{days} days left")
-                    });
-                }
-            }
-            let failed = p.last_error.clone();
-            view()
-                .gap_1()
-                .px_1()
-                .child(
-                    ui::muted(parts.join(" · "))
-                        .text_size(px(size::small()))
-                        .tabular_nums(),
-                )
-                .child(failed.map(move |e| {
-                    let id = id.clone();
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            ui::muted(format!(
-                                "Couldn't update the subscription — using the saved copy. {}",
-                                explain(&e).0
-                            ))
-                            .text_size(px(size::small()))
-                            .flex_1()
-                            .number_of_lines(2),
-                        )
-                        .child(
-                            ui::link_btn(if busy { "Updating…" } else { "Retry" })
-                                .disabled(busy)
-                                .on_press(move || {
-                                    store.run(store.svc().update_profile(id.clone()))
-                                }),
-                        )
-                }))
-        }))
-    })
 }

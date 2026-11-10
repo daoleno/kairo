@@ -428,6 +428,14 @@ pub fn card() -> View {
         .overflow_hidden()
 }
 
+/// A soft, borderless rounded surface (Home's cards and tables).
+pub fn card_soft() -> View {
+    view()
+        .rounded(px(20.0))
+        .bg(move || theme().muted)
+        .overflow_hidden()
+}
+
 /// A hairline separator.
 pub fn divider() -> View {
     view().h(px(1.0)).bg(move || theme().border)
