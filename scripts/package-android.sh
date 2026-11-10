@@ -85,7 +85,7 @@ apk="$out/Kairo-$version-android-$abi.apk"
 if [ -n "${KAIRO_ANDROID_KEYSTORE:-}" ]; then
   [ -f "${KAIRO_ANDROID_KEY_PASSWORD_FILE:-}" ] || { echo "KAIRO_ANDROID_KEY_PASSWORD_FILE is not a file" >&2; exit 1; }
   "$bt/apksigner" sign --ks "$KAIRO_ANDROID_KEYSTORE" --ks-key-alias kairo \
-    --ks-pass "file:$KAIRO_ANDROID_KEY_PASSWORD_FILE" --key-pass "file:$KAIRO_ANDROID_KEY_PASSWORD_FILE" \
+    --ks-pass "file:$KAIRO_ANDROID_KEY_PASSWORD_FILE" \
     --out "$apk" "$work/aligned.apk"
 else
   dk=${ANDROID_DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}
