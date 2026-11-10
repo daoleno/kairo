@@ -190,24 +190,31 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     <div class="gallery">
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/exits-light.webp" width="1180" height="760" alt="Exits: the three exits, and for the selected one Fastest and the countries with their best servers and how they are doing." loading="lazy">
-          <img class="shot-dark" src="shots/exits-dark.webp" width="1180" height="760" alt="Exits in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/activity-light.webp" width="1180" height="1130" alt="Activity: traffic per hour stacked by the exit it left through, the top apps, each AI service's share, and a reachability row per service for the day." loading="lazy">
+          <img class="shot-dark" src="shots/activity-dark.webp" width="1180" height="1130" alt="Activity in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Exits</b> <span>· AI, everything else and downloads each get a country; the AI exit stays when the others change</span></figcaption>
+        <figcaption><b>Activity</b> <span>· how much went through which exit, which apps and AI services used it, and how each service held up today. Recorded on your computer, kept 30 days</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/activity-light.webp" width="1180" height="760" alt="Activity: each app with the AI services and sites it talks to, the exit it goes through, and its total." loading="lazy">
-          <img class="shot-dark" src="shots/activity-dark.webp" width="1180" height="760" alt="Activity in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/aiservice-light.webp" width="1180" height="860" alt="One AI service: reachability for every hour of the week, the API response time, and the country the service saw." loading="lazy">
+          <img class="shot-dark" src="shots/aiservice-dark.webp" width="1180" height="860" alt="One AI service in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Activity</b> <span>· by app: what it talks to, where it goes through, and Always Direct, AI Exit or Block</span></figcaption>
+        <figcaption><b>Every AI service</b> <span>· a week of checks: reachable each hour, how fast the API answered, which country it saw</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/profiles-light.webp" width="1180" height="760" alt="Subscriptions: a subscription with its usage, expiry and last update." loading="lazy">
-          <img class="shot-dark" src="shots/profiles-dark.webp" width="1180" height="760" alt="Subscriptions in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/exits-light.webp" width="1180" height="1130" alt="Exits: the three exits, the countries with their best servers, and under them the quality of the exit: response time, failed tests and changes." loading="lazy">
+          <img class="shot-dark" src="shots/exits-dark.webp" width="1180" height="1130" alt="Exits in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Subscriptions</b> <span>· usage and expiry, and a provider's errors in plain words</span></figcaption>
+        <figcaption><b>Exits</b> <span>· AI, everything else and downloads each get a country; the AI exit stays when the others change. Below: how the server held up, and every switch</span></figcaption>
+      </figure>
+      <figure>
+        <div class="window">
+          <img class="shot-light" src="shots/profiles-light.webp" width="1180" height="980" alt="Subscriptions: usage, what is left, the recent pace, and a chart of use so far with where it ends if the pace continues." loading="lazy">
+          <img class="shot-dark" src="shots/profiles-dark.webp" width="1180" height="980" alt="Subscriptions in dark mode." loading="lazy">
+        </div>
+        <figcaption><b>Subscriptions</b> <span>· usage and expiry, and whether the data lasts until the plan ends</span></figcaption>
       </figure>
       <figure>
         <div class="window">
@@ -220,7 +227,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 
     <div class="facts">
       <div><b>One exit, pinned</b><span>AI tools stay on it when everything else changes. Open connections are never cut.</span></div>
-      <div><b>Measured, not promised</b><span>Reachable, API answer, the country a service sees, a connection held for 90 seconds.</span></div>
+      <div><b>Measured, not promised</b><span>Reachable, API answer, the country a service sees, a connection held for 90 seconds. Kept hour by hour for 30 days, on this computer only.</span></div>
       <div><b>Direct where it should be</b><span>Domestic AI goes straight out. Local models never leave your computer.</span></div>
       <div><b>Updates itself</b><span>When a new version is out, a Download button appears in the sidebar. mihomo ships inside and updates with the app.</span></div>
     </div>

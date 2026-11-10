@@ -30,6 +30,12 @@ Settings below them.
   connections (with close). When an AI tool such as Claude Code goes around Kairo (it ignores the system
   proxy), a banner says so, with **Use Every App** (TUN) and **Copy for terminal** (an `export` line, with
   `NO_PROXY`). It reads the socket table of the current user only; no root.
+- **Statistics.** Kairo records, on this computer only, how much went through each exit (per hour), which apps
+  and AI services used it, whether each AI service was reachable and how fast its API answered, how each exit's
+  server held up (a test every ten minutes) and every switch, and each subscription's use. Activity shows
+  Today, 7 days or 30 days; a service's row opens its week; Exits has a Quality section; Subscriptions says
+  whether the data lasts until the plan ends. History is kept 30 days in `stats.json` in Kairo's data folder;
+  **Clear History** in Activity removes it. Nothing is sent anywhere.
 - **Apps & Sites.** One list of choices: an app or a site goes through the AI exit, another country, direct,
   or is blocked. Everything not listed uses its usual exit.
 - **Subscriptions.** Add a link or a YAML file; Kairo checks each one with the core before using it. Usage
