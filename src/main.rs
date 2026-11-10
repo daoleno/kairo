@@ -375,7 +375,7 @@ mod platform {
                 let view = AppView::new(AppOptions {
                     app_id: APP_ID.into(),
                     title: "Kairo".into(),
-                    size: window_size(),
+                    size: (1180, 760),
                     appearance: Appearance::System,
                     ..AppOptions::default()
                 });
@@ -514,7 +514,7 @@ mod platform {
             AppOptions {
                 components,
                 title: "Kairo".to_owned(),
-                size: window_size(),
+                size: (1180, 760),
                 appearance: Appearance::System,
                 keep_alive_on_close: tray_ok && settings.close_to_tray,
                 ..Default::default()

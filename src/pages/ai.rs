@@ -285,6 +285,9 @@ pub enum Fix {
     UseAiExit,
     /// The tool does not go through Kairo: take every app (TUN).
     UseEveryApp,
+    /// The same, where TUN is not available (Windows for now): a proxy line
+    /// for the terminal the tool starts from.
+    CopyForTerminal,
 }
 
 /// One row of the table on Home.
@@ -400,7 +403,11 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
             };
             let bypassing = state.bypass.iter().any(|b| b.service == Some(t.id));
             let fix = if bypassing {
-                Some(Fix::UseEveryApp)
+                if state.tun_privilege == Some(kairo_core::tun::Privilege::Unsupported) {
+                    Some(Fix::CopyForTerminal)
+                } else {
+                    Some(Fix::UseEveryApp)
+                }
             } else {
                 (off_exit && state.settings.mode != kairo_core::Mode::Direct)
                     .then_some(Fix::UseAiExit)
@@ -659,6 +666,7 @@ fn table_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement
                     match fix {
                         Fix::UseAiExit => "Use AI Exit",
                         Fix::UseEveryApp => "Use Every App",
+                        Fix::CopyForTerminal => "Copy for Terminal",
                     },
                     true,
                 )
@@ -678,6 +686,10 @@ fn apply_fix(store: crate::store::Store, id: &'static str, fix: Fix) {
     match fix {
         Fix::UseAiExit => use_ai_exit(store, id),
         Fix::UseEveryApp => crate::pages::home::set_via(crate::pages::home::Via::Tun),
+        Fix::CopyForTerminal => {
+            set_clipboard(store.svc().terminal_env());
+            store.info("Copied. Paste it in the terminal before you start the tool.");
+        }
     }
 }
 
