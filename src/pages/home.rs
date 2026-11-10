@@ -239,7 +239,7 @@ fn conn() -> Conn {
 fn home() -> impl IntoElement {
     scroll().flex_1().child(
         view()
-            .px_6()
+            .px(px(if ui::phone() { 16.0 } else { 24.0 }))
             .pt(toolbar::scroll_top(20.0))
             .pb_8()
             .gap_4()
@@ -276,8 +276,9 @@ fn hero() -> impl IntoElement {
             Conn::Failed(m) => explain(&m).0.into(),
         }
     };
+    let phone = ui::phone();
     ui::card_soft()
-        .px_6()
+        .px(px(if phone { 16.0 } else { 24.0 }))
         .py_5()
         .gap_3()
         .child(
@@ -310,8 +311,10 @@ fn hero() -> impl IntoElement {
                         )
                         .child(ui::muted(detail).tabular_nums().number_of_lines(2)),
                 )
-                .child(choices()),
+                .child(when(move || !phone, choices)),
         )
+        // On a phone the choices go under the switch, the width being short.
+        .child(when(move || phone, choices))
         .child(when(
             move || matches!(state.get(), Conn::Failed(_)),
             move || {
@@ -520,6 +523,7 @@ fn choices() -> impl IntoElement {
             }
         })
     };
+    let phone = ui::phone();
     view()
         .gap_2()
         .flex_shrink_0()
@@ -535,13 +539,19 @@ fn choices() -> impl IntoElement {
                 move |m| store.run(store.svc().set_mode(m)),
             ),
         ))
-        .child(labelled(
-            "Apps",
-            ui::segmented(
-                vec![(Via::System, "System settings"), (Via::Tun, "Every app")],
-                via,
-                move |v| set_via(v),
-            ),
+        // On Android every app is in the VPN: nothing to choose.
+        .child(when(
+            move || !phone,
+            move || {
+                labelled(
+                    "Apps",
+                    ui::segmented(
+                        vec![(Via::System, "System settings"), (Via::Tun, "Every app")],
+                        via,
+                        move |v| set_via(v),
+                    ),
+                )
+            },
         ))
 }
 
@@ -605,25 +615,25 @@ fn exits() -> impl IntoElement {
     view()
         .gap_2()
         .child(ui::section_label("Exits").px_1())
-        .child(
-            view()
-                .flex_row()
-                .gap_3()
-                .children(crate::pages::exits::Exit::ALL.into_iter().map(move |e| {
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .child(crate::pages::exits::card_with(
-                            e,
-                            || false,
-                            move || {
-                                crate::pages::exits::select(e);
-                                store.page.set(Page::Exits)
-                            },
-                            true,
-                        ))
-                })),
-        )
+        .child({
+            // Three cards in a row; on a phone, one under another.
+            let phone = ui::phone();
+            let cards = view().gap_3();
+            let cards = if phone { cards } else { cards.flex_row() };
+            cards.children(crate::pages::exits::Exit::ALL.into_iter().map(move |e| {
+                let slot = view().min_w(px(0.0));
+                let slot = if phone { slot } else { slot.flex_1() };
+                slot.child(crate::pages::exits::card_with(
+                    e,
+                    || false,
+                    move || {
+                        crate::pages::exits::select(e);
+                        store.page.set(Page::Exits)
+                    },
+                    true,
+                ))
+            }))
+        })
 }
 
 #[cfg(test)]

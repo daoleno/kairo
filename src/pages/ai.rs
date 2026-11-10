@@ -539,7 +539,7 @@ pub fn board() -> impl IntoElement {
                             .on_press(move || store.run(store.svc().check_ai())),
                         ),
                 )
-                .child(header_row())
+                .child(when(|| !ui::phone(), header_row))
                 .child(dynamic(move || {
                     let rows = rows.get();
                     untracked(move || {
@@ -590,7 +590,85 @@ fn header_row() -> impl IntoElement {
         .child(head(4, "Used by").justify_end())
 }
 
+/// A phone's row: the service and its status on one line, where it sees and goes
+/// through (or the fix) under it.
+fn phone_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement {
+    let id = r.id;
+    let tone = r.tone;
+    let problem = matches!(tone, Tone::Bad | Tone::Look) || r.fix.is_some();
+    let store = store();
+    nsh_base::button()
+        .w_full()
+        .accessibility_label(format!(
+            "{}: {} · sees {} · {}",
+            r.name, r.status, r.sees, r.goes
+        ))
+        .on_press(move || {
+            selected.set(if selected.get_untracked() == Some(id) {
+                None
+            } else {
+                Some(id)
+            })
+        })
+        .gap_1()
+        .px_4()
+        .py_2p5()
+        .border_t_1()
+        .border_color(move || theme().border.opacity(0.7))
+        .bg(move || {
+            if problem {
+                tone_color(if tone == Tone::Ok { Tone::Look } else { tone }).opacity(0.12)
+            } else {
+                AdaptiveColor::from(black().opacity(0.0))
+            }
+        })
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(mono(r.mono))
+                .child(ui::body(r.name).number_of_lines(1).flex_1())
+                .child(ui::dot(move || tone_color(tone)))
+                .child(ui::body(r.status.clone()).number_of_lines(1)),
+        )
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .pl_8()
+                .child(ui::flag(r.sees_flag.clone(), size::body()))
+                .child(
+                    ui::muted(format!("{} · {}", r.sees, r.goes))
+                        .text_size(px(size::small()))
+                        .number_of_lines(1)
+                        .flex_1(),
+                )
+                .children(r.fix.map(|fix| {
+                    ui::capsule(
+                        match fix {
+                            Fix::UseAiExit => "Use AI Exit",
+                            Fix::UseEveryApp => "Use Every App",
+                            Fix::CopyForTerminal => "Copy for Terminal",
+                        },
+                        true,
+                    )
+                    .h(px(28.0))
+                    .px_3p5()
+                    .on_press(move || apply_fix(store, id, fix))
+                })),
+        )
+}
+
 fn table_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement {
+    if ui::phone() {
+        return phone_row(r, selected).into_element();
+    }
+    table_row_wide(r, selected).into_element()
+}
+
+fn table_row_wide(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement {
     let id = r.id;
     let tone = r.tone;
     let problem = matches!(tone, Tone::Bad | Tone::Look) || r.fix.is_some();
