@@ -1041,9 +1041,18 @@ impl Service {
             })
             .cloned()
             .collect();
-        self.0
-            .activity
-            .send_modify(|a| Arc::make_mut(a).ingest(&tools, now));
+        let names = {
+            let st = self.0.state.borrow();
+            crate::activity::ExitNames {
+                ai: st.ai.group.clone(),
+                downloads: st.downloads.group.clone(),
+            }
+        };
+        self.0.activity.send_modify(|a| {
+            let a = Arc::make_mut(a);
+            a.names = names;
+            a.ingest(&tools, now);
+        });
         self.0.connections.send_replace(Arc::new(Connections {
             upload_total: resp.upload_total,
             download_total: resp.download_total,

@@ -145,10 +145,104 @@ pub struct Flow {
     pub short: u32,
 }
 
+/// Where a connection leaves, in Kairo's three exits and the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ExitKind {
+    Ai,
+    Rest,
+    Downloads,
+    Direct,
+    Blocked,
+    /// Stays on this computer or the LAN.
+    Local,
+}
+
+impl ExitKind {
+    /// How the Activity page names it.
+    pub fn title(self) -> &'static str {
+        match self {
+            ExitKind::Ai => "AI exit",
+            ExitKind::Rest => "Everything else",
+            ExitKind::Downloads => "Downloads",
+            ExitKind::Direct => "Direct",
+            ExitKind::Blocked => "Blocked",
+            ExitKind::Local => "On this computer",
+        }
+    }
+}
+
+/// The names of the groups that stand for the exits in the running config.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExitNames {
+    pub ai: String,
+    pub downloads: String,
+}
+
+/// The exit a connection leaves through, from its chain of groups.
+pub fn exit_of(c: &Connection, names: &ExitNames) -> ExitKind {
+    let has = |n: &str| !n.is_empty() && c.chains.iter().any(|x| x == n);
+    if has(&names.ai) {
+        ExitKind::Ai
+    } else if has(&names.downloads) {
+        ExitKind::Downloads
+    } else if c.chains.iter().any(|x| x.starts_with("REJECT")) {
+        ExitKind::Blocked
+    } else if c.chains.iter().any(|x| x == "DIRECT") {
+        if is_local_host(&c.host) {
+            ExitKind::Local
+        } else {
+            ExitKind::Direct
+        }
+    } else {
+        ExitKind::Rest
+    }
+}
+
+/// A site's name as a person says it: `www.youtube.com` is `youtube.com`,
+/// `a.b.example.co.uk` is `example.co.uk`; an address stays as it is.
+pub fn site_of(host: &str) -> String {
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return host.to_owned();
+    }
+    let labels: Vec<&str> = host.trim_end_matches('.').split('.').collect();
+    if labels.len() <= 2 {
+        return host.to_owned();
+    }
+    let n = labels.len();
+    let second_level = labels[n - 1].len() == 2
+        && matches!(labels[n - 2], "co" | "com" | "org" | "net" | "gov" | "edu" | "ac");
+    labels[n - if second_level { 3 } else { 2 }..].join(".")
+}
+
+/// What one app has done, over every connection (not only AI's).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AppFlow {
+    pub up: u64,
+    pub down: u64,
+    pub open: u32,
+    /// Bytes per site.
+    pub sites: BTreeMap<String, u64>,
+    /// Bytes per AI service.
+    pub services: BTreeMap<&'static str, u64>,
+    /// Bytes per exit.
+    pub exits: BTreeMap<ExitKind, u64>,
+    /// The exits of the connections open now.
+    pub open_exits: std::collections::BTreeSet<ExitKind>,
+}
+
+impl AppFlow {
+    pub fn total(&self) -> u64 {
+        self.up + self.down
+    }
+}
+
 /// Counts the stream of snapshots. `ingest` is called once per snapshot.
 #[derive(Debug, Clone, Default)]
 pub struct Tally {
     flows: BTreeMap<(String, Target), Flow>,
+    apps: BTreeMap<String, AppFlow>,
+    /// The groups that are the exits, for telling where a connection left.
+    pub names: ExitNames,
     /// Last bytes seen per connection id, and its key and start.
     last: HashMap<String, Seen>,
     /// Connections that ended through the core's own close (user or Kairo).
@@ -157,7 +251,7 @@ pub struct Tally {
 
 #[derive(Debug, Clone)]
 struct Seen {
-    key: (String, Target),
+    key: Option<(String, Target)>,
     up: u64,
     down: u64,
     start: i64,
@@ -171,27 +265,46 @@ impl Tally {
             f.open = 0;
             f.longest = 0;
         }
+        for a in self.apps.values_mut() {
+            a.open = 0;
+            a.open_exits.clear();
+        }
         let mut alive = std::collections::HashSet::new();
         for c in conns {
-            let Some(target) = target_of(c) else { continue };
-            let key = (tool_name(&c.process, &c.process_path), target);
+            let tool = tool_name(&c.process, &c.process_path);
             let start = parse_time(&c.start).unwrap_or(now);
             alive.insert(c.id.clone());
-            let flow = self.flows.entry(key.clone()).or_default();
-            let (du, dd) = match self.last.get(&c.id) {
-                Some(p) => (
-                    c.upload.saturating_sub(p.up),
-                    c.download.saturating_sub(p.down),
-                ),
-                None => {
-                    flow.seen += 1;
-                    (c.upload, c.download)
-                }
+            let previous = self.last.get(&c.id).map(|p| (p.up, p.down));
+            let (du, dd) = match previous {
+                Some((pu, pd)) => (c.upload.saturating_sub(pu), c.download.saturating_sub(pd)),
+                None => (c.upload, c.download),
             };
-            flow.up += du;
-            flow.down += dd;
-            flow.open += 1;
-            flow.longest = flow.longest.max((now - start).max(0));
+            // Every app, every connection.
+            let kind = exit_of(c, &self.names);
+            let app = self.apps.entry(tool.clone()).or_default();
+            app.up += du;
+            app.down += dd;
+            app.open += 1;
+            app.open_exits.insert(kind);
+            *app.exits.entry(kind).or_default() += du + dd;
+            let target = target_of(c);
+            match &target {
+                Some(Target::Service(id)) => *app.services.entry(id).or_default() += du + dd,
+                Some(_) => {}
+                None => *app.sites.entry(site_of(&c.host)).or_default() += du + dd,
+            }
+            // AI and local-model pairs, for the flow of tools to services.
+            let key = target.map(|t| (tool, t));
+            if let Some(key) = &key {
+                let flow = self.flows.entry(key.clone()).or_default();
+                if previous.is_none() {
+                    flow.seen += 1;
+                }
+                flow.up += du;
+                flow.down += dd;
+                flow.open += 1;
+                flow.longest = flow.longest.max((now - start).max(0));
+            }
             self.last.insert(
                 c.id.clone(),
                 Seen {
@@ -214,7 +327,8 @@ impl Tally {
             if let Some(s) = self.last.remove(&id)
                 && s.last_seen - s.start <= 5
                 && s.up + s.down < 2048
-                && let Some(f) = self.flows.get_mut(&s.key)
+                && let Some(key) = &s.key
+                && let Some(f) = self.flows.get_mut(key)
             {
                 f.short += 1;
             }
@@ -233,6 +347,13 @@ impl Tally {
                 .cmp(&(a.2.up + a.2.down))
                 .then(a.0.cmp(b.0))
         });
+        v
+    }
+
+    /// Every app seen, most traffic first.
+    pub fn apps(&self) -> Vec<(&str, &AppFlow)> {
+        let mut v: Vec<_> = self.apps.iter().map(|(n, a)| (n.as_str(), a)).collect();
+        v.sort_by(|a, b| b.1.total().cmp(&a.1.total()).then(a.0.cmp(b.0)));
         v
     }
 
@@ -455,5 +576,65 @@ mod tests {
         assert_eq!(f[0].0, "Claude");
         assert_eq!(f[1].0, "Cursor");
         assert_eq!(*f[1].1, Target::Service("chatgpt"));
+    }
+
+    #[test]
+    fn every_app_is_counted_with_its_sites_and_exits() {
+        let mut t = Tally::default();
+        t.names = ExitNames { ai: "Kairo AI".into(), downloads: "Kairo Downloads".into() };
+        let s = "2026-11-09T15:00:00Z";
+        let now = parse_time(s).unwrap();
+        let mut ai = conn("1", "chatgpt.com", "Safari", "/Applications/Safari.app/x", 10, 900, s);
+        ai.chains = vec!["Tokyo 03".into(), "Kairo AI".into()];
+        let mut video = conn("2", "www.youtube.com", "Safari", "/Applications/Safari.app/x", 5, 4000, s);
+        video.chains = vec!["Hong Kong 01".into(), "Proxy".into()];
+        let mut direct = conn("3", "www.bilibili.com", "Safari", "/Applications/Safari.app/x", 1, 100, s);
+        direct.chains = vec!["DIRECT".into()];
+        t.ingest(&[ai, video, direct], now + 5);
+        let apps = t.apps();
+        assert_eq!(apps.len(), 1);
+        let (name, a) = apps[0];
+        assert_eq!(name, "Safari");
+        assert_eq!((a.up, a.down, a.open), (16, 5000, 3));
+        assert_eq!(a.services.get("chatgpt"), Some(&910));
+        assert_eq!(a.sites.get("youtube.com"), Some(&4005));
+        assert_eq!(a.sites.get("bilibili.com"), Some(&101));
+        assert_eq!(a.exits.get(&ExitKind::Ai), Some(&910));
+        assert_eq!(a.exits.get(&ExitKind::Rest), Some(&4005));
+        assert_eq!(a.exits.get(&ExitKind::Direct), Some(&101));
+        // Closed: the bytes stay, nothing is open.
+        t.ingest(&[], now + 60);
+        let a = t.apps()[0].1;
+        assert_eq!((a.total(), a.open), (5016, 0));
+    }
+
+    #[test]
+    fn names_the_exit_by_the_group_in_the_chain() {
+        let names = ExitNames { ai: "Kairo AI".into(), downloads: "Kairo Downloads".into() };
+        let mut c = conn("1", "x.com", "a", "", 0, 0, "");
+        c.chains = vec!["n".into(), "Proxy".into()];
+        assert_eq!(exit_of(&c, &names), ExitKind::Rest);
+        c.chains = vec!["n".into(), "Kairo Downloads".into()];
+        assert_eq!(exit_of(&c, &names), ExitKind::Downloads);
+        c.chains = vec!["REJECT".into()];
+        assert_eq!(exit_of(&c, &names), ExitKind::Blocked);
+        c.chains = vec!["DIRECT".into()];
+        assert_eq!(exit_of(&c, &names), ExitKind::Direct);
+        c.host = "localhost".into();
+        assert_eq!(exit_of(&c, &names), ExitKind::Local);
+        // An unset name never matches an empty chain entry.
+        let none = ExitNames::default();
+        c.chains = vec!["".into()];
+        c.host = "x.com".into();
+        assert_eq!(exit_of(&c, &none), ExitKind::Rest);
+    }
+
+    #[test]
+    fn a_site_is_its_registrable_name() {
+        assert_eq!(site_of("www.youtube.com"), "youtube.com");
+        assert_eq!(site_of("a.b.example.co.uk"), "example.co.uk");
+        assert_eq!(site_of("docker.io"), "docker.io");
+        assert_eq!(site_of("10.0.0.5"), "10.0.0.5");
+        assert_eq!(site_of("localhost"), "localhost");
     }
 }
