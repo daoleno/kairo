@@ -112,10 +112,13 @@ pub fn page() -> impl IntoElement {
                                     .flex_row()
                                     .items_center()
                                     .gap_2()
+                                    // A phone: the name, the record types and the button each on a line.
+                                    .when(ui::phone(), |v| v.flex_col().items_stretch())
                                     .child(ui::field(name, "example.com").flex_1().on_submit(move |_: &str| query()))
-                                    .child(ui::segmented(KINDS.iter().map(|k| (*k, *k)).collect(), move || kind.get(), move |k| kind.set(k)))
+                                    .child(view().when(ui::phone(), |v| v.w_full()).child(ui::segmented(KINDS.iter().map(|k| (*k, *k)).collect(), move || kind.get(), move |k| kind.set(k))))
                                     .child(
                                         ui::btn_icon(Icon::Search, "Query", Variant::Primary)
+                                            .when(ui::phone(), |b| b.w_full())
                                             .disabled(move || busy.get() || !running.get() || name.with(|n| n.trim().is_empty()))
                                             .on_press(query),
                                     ),
@@ -173,6 +176,7 @@ fn result_card(l: Lookup) -> impl IntoElement {
             .gap_2()
             .px_4()
             .py_2p5()
+            .when(ui::phone(), |v| v.flex_wrap())
             .child(ui::dot(move || {
                 if ok {
                     ui::success()
@@ -195,6 +199,7 @@ fn result_card(l: Lookup) -> impl IntoElement {
                 .gap_3()
                 .px_4()
                 .py_1p5()
+                .style_when(ui::phone, |s| s.hidden())
                 .bg(move || ui::subtle())
                 .child(col_head("Name", None))
                 .child(col_head("Type", Some(64.0)))
@@ -202,6 +207,26 @@ fn result_card(l: Lookup) -> impl IntoElement {
                 .child(col_head("Data", None)),
         );
         for a in l.answers {
+            if ui::phone() {
+                // The record on two lines: what it is, then its data.
+                card = card.child(
+                    view()
+                        .px_4()
+                        .py_2()
+                        .gap_0p5()
+                        .child(
+                            ui::muted(format!(
+                                "{} · {} · {} s",
+                                a.name.trim_end_matches('.'),
+                                dns_type_name(a.kind),
+                                a.ttl
+                            ))
+                            .number_of_lines(1),
+                        )
+                        .child(ui::body(a.data.clone()).selectable(true)),
+                );
+                continue;
+            }
             card = card.child(
                 view()
                     .flex_row()

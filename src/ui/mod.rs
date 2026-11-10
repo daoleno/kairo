@@ -3,6 +3,7 @@
 
 pub mod charts;
 pub mod icons;
+pub mod menu;
 pub mod toolbar;
 
 use nsh_base::{ButtonElement as Button, Input, button, input, switch, theme};
@@ -824,14 +825,12 @@ pub fn popup_button<T: Clone + PartialEq + 'static>(
                 .into_iter()
                 .map(|(value, title)| {
                     let checked = value == current;
-                    nsh_core::element::desktop::MenuItem::new(menu_text(title))
+                    menu::Choice::new(title)
                         .checked(checked)
                         .on_select(move || on_select(value.clone()))
                 })
                 .collect();
-            spawn(async move {
-                nsh_core::element::desktop::popup_menu(items).await;
-            });
+            menu::open(items);
         })
         .child(flagged(title, size::body()))
         .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground))

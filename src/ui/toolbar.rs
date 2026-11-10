@@ -416,6 +416,8 @@ fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
     let mut buttons: Vec<AnyElement> = Vec::new();
     for tool in tools {
         match tool {
+            // The arrow beside the title is the way back.
+            Spec::Button { id: "back", .. } => {}
             Spec::Button { .. } => buttons.push(tool.element()),
             Spec::Search {
                 placeholder, value, ..
@@ -444,7 +446,14 @@ fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
                 .min_h(px(super::touch_h(28.0)))
                 .child(back.map(|to| {
                     super::icon_btn(Icon::ChevronLeft, "Back")
-                        .on_press(move || store.page.set(to))
+                        .on_press(move || {
+                            if to == Page::Settings {
+                                // The Inspect views open from Settings › Advanced.
+                                crate::pages::settings::show_advanced(store);
+                            } else {
+                                store.page.set(to);
+                            }
+                        })
                         .ml(px(-8.0))
                 }))
                 .child(

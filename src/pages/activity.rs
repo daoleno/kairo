@@ -9,7 +9,7 @@ use kairo_core::ai;
 use kairo_core::bytes;
 use kairo_core::routes::{RouteExit, RouteKind};
 use nsh_base::theme;
-use nsh_core::element::desktop::MenuItem;
+use crate::ui::menu::{self, Choice};
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
@@ -460,15 +460,13 @@ fn row_menu(n: String) {
         }
     };
     let items = vec![
-        MenuItem::new("Always Direct").on_select(app(RouteExit::Direct, n.clone())),
-        MenuItem::new("Always AI Exit").on_select(app(RouteExit::Ai, n.clone())),
-        MenuItem::new("Block").on_select(app(RouteExit::Block, n.clone())),
-        MenuItem::separator(),
-        MenuItem::new("Show Connections").on_select(show),
+        Choice::new("Always Direct").on_select(app(RouteExit::Direct, n.clone())),
+        Choice::new("Always AI Exit").on_select(app(RouteExit::Ai, n.clone())),
+        Choice::new("Block").on_select(app(RouteExit::Block, n.clone())),
+        Choice::separator(),
+        Choice::new("Show Connections").on_select(show),
     ];
-    spawn(async move {
-        nsh_core::element::desktop::popup_menu(items).await;
-    });
+    menu::open(items);
 }
 
 fn head(i: usize, t: &'static str) -> impl IntoElement {
@@ -580,17 +578,15 @@ fn app_row(r: AppRow) -> impl IntoElement {
                             }
                         };
                         let items = vec![
-                            MenuItem::new("Always Direct")
+                            Choice::new("Always Direct")
                                 .on_select(app(RouteExit::Direct, n.clone())),
-                            MenuItem::new("Always AI Exit")
+                            Choice::new("Always AI Exit")
                                 .on_select(app(RouteExit::Ai, n.clone())),
-                            MenuItem::new("Block").on_select(app(RouteExit::Block, n.clone())),
-                            MenuItem::separator(),
-                            MenuItem::new("Show Connections").on_select(show),
+                            Choice::new("Block").on_select(app(RouteExit::Block, n.clone())),
+                            Choice::separator(),
+                            Choice::new("Show Connections").on_select(show),
                         ];
-                        spawn(async move {
-                            nsh_core::element::desktop::popup_menu(items).await;
-                        });
+                        menu::open(items);
                     }),
             ),
         )

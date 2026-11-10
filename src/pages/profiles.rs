@@ -9,12 +9,12 @@ use std::rc::Rc;
 
 use kairo_core::profile::{Profile, Source, Usage};
 use nsh_base::{alert_dialog, button, theme};
-use nsh_core::element::desktop::{MenuItem, popup_menu};
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
 use crate::store::{Page, store};
+use crate::ui::menu::{self, Choice};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, icon, size};
 
@@ -805,7 +805,7 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
     let store = store();
     let (name, source) = p.with_untracked(|p| (p.name.clone(), p.source.clone()));
     let mut items = Vec::new();
-    items.push(MenuItem::new("Rename…").on_select({
+    items.push(Choice::new("Rename…").on_select({
         let (id, name) = (id.clone(), name.clone());
         move || {
             dialog.set(Some(Dialog::Rename {
@@ -820,7 +820,7 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
     } = &source
     {
         let host = host_of(url);
-        items.push(MenuItem::new("Change Link…").on_select({
+        items.push(Choice::new("Change Link…").on_select({
             let id = id.clone();
             move || {
                 dialog.set(Some(Dialog::Link {
@@ -829,11 +829,11 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
                 }))
             }
         }));
-        items.push(MenuItem::submenu(
+        items.push(Choice::submenu(
             "Update Interval",
             interval_choices(*interval_hours).into_iter().map(|h| {
                 let id = id.clone();
-                MenuItem::new(interval_label(h))
+                Choice::new(interval_label(h))
                     .checked(h == *interval_hours)
                     .on_select(move || {
                         store
@@ -843,14 +843,12 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
             }),
         ));
     }
-    items.push(MenuItem::separator());
-    items.push(MenuItem::new("Remove…").on_select({
+    items.push(Choice::separator());
+    items.push(Choice::new("Remove…").on_select({
         let id = id.clone();
         move || remove(id.clone(), name.clone())
     }));
-    spawn(async move {
-        popup_menu(items).await;
-    });
+    menu::open(items);
 }
 
 fn remove(id: String, name: String) {

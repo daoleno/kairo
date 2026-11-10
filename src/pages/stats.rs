@@ -102,12 +102,12 @@ fn card() -> View {
 }
 
 fn heading(title: &str, sub: impl Into<SharedString>) -> impl IntoElement {
+    // On a phone the line under the title, so neither is squeezed beside the other.
+    let phone = ui::phone();
     view()
-        .flex_row()
-        .items_baseline()
-        .gap_2()
+        .when(!phone, |v| v.flex_row().items_baseline().gap_2())
         .child(ui::body(title.to_owned()).font_weight(FontWeight::SEMIBOLD))
-        .child(ui::muted(sub.into()).flex_1())
+        .child(ui::muted(sub.into()).when(!phone, |t| t.flex_1()))
 }
 
 // --- Activity: the overview ---------------------------------------------------------
@@ -272,13 +272,13 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
     let apps_total: u64 = apps.iter().map(|a| a.1).sum();
     let services = st.top_services(range, t, z);
     let ai_sum: u64 = services.iter().map(|a| a.1).sum();
+    // Side by side on a desktop, one above the other on a phone.
     let top = view()
-        .flex_row()
+        .when(!ui::phone(), |v| v.flex_row())
         .gap_3()
         .child(
             card()
-                .flex_1()
-                .min_w(px(0.0))
+                .when(!ui::phone(), |v| v.flex_1().min_w(px(0.0)))
                 .child(heading("Top apps", range.title()))
                 .child(charts::ranked(
                     apps.iter()
@@ -296,8 +296,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
         )
         .child(
             card()
-                .flex_1()
-                .min_w(px(0.0))
+                .when(!ui::phone(), |v| v.flex_1().min_w(px(0.0)))
                 .child(heading("AI services", "share of AI traffic"))
                 .child(charts::ranked(
                     services
@@ -333,9 +332,12 @@ fn clear_footer() -> impl IntoElement {
     view()
         .flex_row()
         .items_center()
+        // On a phone the button goes under the note when they do not fit side by side.
+        .when(ui::phone(), |v| v.flex_wrap().gap_y_1())
         .child(
             ui::muted(format!("Recorded on {} · kept 30 days", ui::this_device()))
                 .flex_1()
+                .min_w(px(if ui::phone() { 180.0 } else { 0.0 }))
                 .text_size(px(size::small())),
         )
         .child(
@@ -433,21 +435,51 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
             let id = s.id;
             let cells = cells(&hours, group);
             let tones: Vec<Tone> = cells.iter().map(|c| c.0).collect();
-            nsh_base::button()
+            let up_text = up.map_or("–".to_owned(), |u| format!("{u:.1}%"));
+            let ms_text = ms.map_or("–".to_owned(), |m| format!("{m} ms"));
+            let row = nsh_base::button()
                 .w_full()
                 .accessibility_label(format!("{}: open its week", s.name))
                 .on_press(move || {
                     store.ai_service.set(id);
                     store.page.set(Page::AiService);
                 })
-                .flex_row()
-                .items_center()
-                .gap_3()
                 .px_1()
-                .min_h(px(36.0))
                 .rounded(px(8.0))
                 .cursor_pointer()
-                .hover(|st| st.bg(move || theme().accent.opacity(0.5)))
+                .hover(|st| st.bg(move || theme().accent.opacity(0.5)));
+            if ui::phone() {
+                // A phone has no room for columns: the name, the ribbon, then the numbers in words.
+                return row
+                    .py_2()
+                    .gap_1p5()
+                    .items_start()
+                    .child(
+                        view()
+                            .w_full()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(crate::pages::ai::mono(s.mono))
+                            .child(ui::body(s.name).flex_1().min_w(px(0.0)).number_of_lines(1)),
+                    )
+                    .child(
+                        view()
+                            .w_full()
+                            .flex_row()
+                            .child(view().flex_1().min_w(px(0.0)).child(charts::ribbon_bare(tones, 14.0))),
+                    )
+                    .child(
+                        ui::muted(format!("{up_text} up · API {ms_text} · {data} of data"))
+                            .w_full()
+                            .text_size(px(size::small())),
+                    )
+                    .into_element();
+            }
+            row.flex_row()
+                .items_center()
+                .gap_3()
+                .min_h(px(36.0))
                 .child(
                     view()
                         .w(px(120.0))
@@ -458,16 +490,8 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
                         .child(ui::body(s.name).number_of_lines(1)),
                 )
                 .child(view().flex_1().child(charts::ribbon_bare(tones, 14.0)))
-                .child(
-                    ui::muted(up.map_or("–".to_owned(), |u| format!("{u:.1}%")))
-                        .tabular_nums()
-                        .w(px(52.0)),
-                )
-                .child(
-                    ui::muted(ms.map_or("–".to_owned(), |m| format!("{m} ms")))
-                        .tabular_nums()
-                        .w(px(84.0)),
-                )
+                .child(ui::muted(up_text).tabular_nums().w(px(52.0)))
+                .child(ui::muted(ms_text).tabular_nums().w(px(84.0)))
                 .child(ui::muted(data).tabular_nums().w(px(70.0)))
                 .into_element()
         })
@@ -489,7 +513,7 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
             ("Some checks failed".into(), ui::warning()),
             ("Unreachable".into(), ui::chart_bad()),
         ]))
-        .child(
+        .child((!ui::phone()).then(|| {
             view()
                 .flex_row()
                 .items_center()
@@ -499,8 +523,8 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
                 .child(ui::muted("Reachable").flex_1())
                 .child(ui::muted("Up").w(px(52.0)))
                 .child(ui::muted("API median").w(px(84.0)))
-                .child(ui::muted("Data").w(px(70.0))),
-        )
+                .child(ui::muted("Data").w(px(70.0)))
+        }))
         .child(view().children(rows))
         .child(ui::muted(
             "From Kairo's own checks every 10 minutes. API time is how long the API took to answer an unauthenticated request. Open a row for its week.",
@@ -518,13 +542,44 @@ fn stat(label: &str, value: String, detail: String) -> impl IntoElement {
         .bg(move || theme().muted)
         .gap_0p5()
         .child(ui::muted(label.to_owned()))
-        .child(
-            text(value)
-                .text_size(px(size::title()))
-                .font_weight(FontWeight::SEMIBOLD)
-                .number_of_lines(2),
-        )
+        .child({
+            // A value may be a place ("🇺🇸 Los Angeles 01"): its flag is a picture.
+            let (flag, rest) = kairo_core::places::split_flag(&value);
+            let rest = rest.trim().to_owned();
+            view()
+                .flex_row()
+                .items_center()
+                .gap_1p5()
+                // On a phone the tile is narrow: the flag goes above the name, which then has the width.
+                .when(ui::phone(), |v| v.flex_col().items_start().gap_1())
+                .child(flag.filter(|f| !f.is_empty()).map(|f| ui::flag(f, size::title() - 2.0)))
+                .child(
+                    text(rest)
+                        .text_size(px(size::title()))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .number_of_lines(2)
+                        .min_w(px(0.0)),
+                )
+        })
         .child(ui::muted(detail).number_of_lines(2))
+}
+
+/// The figures side by side on a desktop, two to a line on a phone.
+fn stats_row(items: Vec<AnyElement>) -> AnyElement {
+    if !ui::phone() {
+        return view().flex_row().gap_3().children(items).into_element();
+    }
+    let mut lines = Vec::new();
+    let mut items = items.into_iter();
+    while let Some(first) = items.next() {
+        let mut line = view().flex_row().gap_3().child(first);
+        line = match items.next() {
+            Some(second) => line.child(second),
+            None => line.child(view().flex_1()),
+        };
+        lines.push(line.into_element());
+    }
+    view().gap_3().children(lines).into_element()
 }
 
 /// The page of one AI service: its week of checks and API times.
@@ -680,11 +735,8 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                         .child(ui::muted(format!("Goes through {goes}"))),
                 ),
         )
-        .child(
-            view()
-                .flex_row()
-                .gap_3()
-                .child(stat(
+        .child(stats_row(vec![
+            stat(
                     "Reachable, 7 days",
                     up.map_or("–".into(), |u| format!("{u:.1}%")),
                     if checks == 0 {
@@ -692,13 +744,15 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                     } else {
                         format!("{} of {checks} checks failed", checks - passed)
                     },
-                ))
-                .child(stat(
+                )
+            .into_element(),
+            stat(
                     "API response, median",
                     med.map_or("–".into(), |m| format!("{m} ms")),
                     p95.map_or("no answers yet".into(), |p| format!("95% under {p} ms")),
-                ))
-                .child(stat(
+                )
+            .into_element(),
+            stat(
                     "Country it sees",
                     countries
                         .last()
@@ -708,8 +762,9 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                         1 => "no change this week".into(),
                         n => format!("{} changes this week", n - 1),
                     },
-                ))
-                .child(stat(
+                )
+            .into_element(),
+            stat(
                     "Held open 90 s",
                     if holds == 0 {
                         "–".into()
@@ -721,8 +776,9 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                     } else {
                         format!("hourly test · {} dropped", holds - held)
                     },
-                )),
-        )
+                )
+            .into_element(),
+        ]))
         .child(
             card()
                 .child(heading("Was it reachable?", "each square is one hour"))
@@ -785,9 +841,9 @@ pub fn quality(exit: usize) -> impl IntoElement {
         .p_4()
         .child(
             view()
-                .flex_row()
-                .items_center()
-                .child(ui::muted("From Kairo's own tests every 10 minutes").flex_1())
+                .when(!ui::phone(), |v| v.flex_row().items_center())
+                .when(ui::phone(), |v| v.gap_2())
+                .child(ui::muted("From Kairo's own tests every 10 minutes").when(!ui::phone(), |t| t.flex_1()))
                 .child(ui::segmented(
                     vec![(false, "24 hours"), (true, "7 days")],
                     move || week.get(),
@@ -921,31 +977,26 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         .unwrap_or_default();
     view()
         .gap_3()
-        .child(
-            view()
-                .flex_row()
-                .gap_3()
-                .child(stat(
-                    "Typical response",
-                    stats::median(all.clone()).map_or("–".into(), |m| format!("{m} ms")),
-                    "median".into(),
-                ))
-                .child(stat(
-                    "Failed tests",
-                    fails.to_string(),
-                    format!("of {tests}"),
-                ))
-                .child(stat(
-                    "Changes",
-                    switches.len().to_string(),
-                    if switches.is_empty() {
-                        "none".into()
-                    } else {
-                        format!("{by_you} by you · {} automatic", switches.len() - by_you)
-                    },
-                ))
-                .child(stat("Right now", node_now, String::new())),
-        )
+        .child(stats_row(vec![
+            stat(
+                "Typical response",
+                stats::median(all.clone()).map_or("–".into(), |m| format!("{m} ms")),
+                "median".into(),
+            )
+            .into_element(),
+            stat("Failed tests", fails.to_string(), format!("of {tests}")).into_element(),
+            stat(
+                "Changes",
+                switches.len().to_string(),
+                if switches.is_empty() {
+                    "none".into()
+                } else {
+                    format!("{by_you} by you · {} automatic", switches.len() - by_you)
+                },
+            )
+            .into_element(),
+            stat("Right now", node_now, String::new()).into_element(),
+        ]))
         .child(heading("Response time", "hourly median"))
         .child(line)
         .child(heading("Failed tests", "per hour"))

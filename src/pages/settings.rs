@@ -558,9 +558,10 @@ fn text_field(
         .placeholder(placeholder)
         .placeholder_color(|| color(theme().muted_foreground))
         .caret_color(|| color(theme().primary))
-        .h(px(28.0))
+        .h(px(ui::touch_h(28.0)))
         .px_2()
         .w(px(w))
+        .when(ui::phone() && w >= 200.0, |i| i.w_full())
         .text_size(px(size::body()))
         .rounded(ui::radius_control())
         .border_1()
@@ -634,8 +635,10 @@ fn advanced(
                     Some("mihomo's API, on 127.0.0.1 only; every request needs the secret."),
                     view()
                         .flex_row()
+                        .flex_wrap()
                         .items_center()
                         .gap_2()
+                        .when(ui::phone(), |v| v.w_full())
                         .child(
                             field(
                                 |d| d.controller_port.clone(),
@@ -672,8 +675,10 @@ fn advanced(
                     Some("The address requested through each node, and how long to wait for it."),
                     view()
                         .flex_row()
+                        .flex_wrap()
                         .items_center()
                         .gap_2()
+                        .when(ui::phone(), |v| v.w_full())
                         .child(field(
                             |d| d.test_url.clone(),
                             |d, v| d.test_url = v,
@@ -723,9 +728,10 @@ fn secret_mask(revealed: Signal<bool>) -> impl IntoElement {
         .on_press(move || revealed.set(true))
         .flex_row()
         .items_center()
-        .h(px(28.0))
+        .h(px(ui::touch_h(28.0)))
         .px_2()
         .w(px(240.0))
+        .when(ui::phone(), |v| v.w_full())
         .rounded(ui::radius_control())
         .border_1()
         .border_color(move || theme().input)

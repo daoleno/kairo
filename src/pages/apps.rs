@@ -139,11 +139,13 @@ fn route_row(r: Route) -> impl IntoElement {
     let exit = stored(r.exit.clone());
     let current = r.exit.clone();
     ui::row_view()
+        // At a large system font the exit's button goes under the name, which then has the room.
+        .when(ui::phone(), |v| v.flex_wrap().gap_y_2())
         .child(letter(&name))
         .child(
             view()
                 .flex_1()
-                .min_w(px(0.0))
+                .min_w(px(if ui::phone() { size::body() * 7.0 } else { 0.0 }))
                 .child(ui::body(name).number_of_lines(1))
                 .child(detail.map(ui::muted)),
         )

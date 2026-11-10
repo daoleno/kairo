@@ -817,11 +817,8 @@ fn alerts() -> impl IntoElement {
                 let now = place
                     .as_ref()
                     .map(|p| {
-                        format!(
-                            "{}{}",
-                            p.flag.clone().map(|f| f + " ").unwrap_or_default(),
-                            p.title
-                        )
+                        // A sentence has no room for a flag picture: the name alone.
+                        p.title.clone()
                     })
                     .unwrap_or_else(|| "Everything else".into());
                 let pin = place.map(|p| p.name);
@@ -872,7 +869,7 @@ fn banner(title: String, detail: String, actions: Vec<Option<AnyElement>>) -> im
 /// The service's initial, in a soft circle.
 pub fn mono(s: &'static str) -> impl IntoElement {
     view()
-        .size(px(28.0))
+        .size(px(28.0 * size::scale().max(1.0) * font_scale().max(1.0)))
         .flex_shrink_0()
         .rounded_full()
         .items_center()
@@ -881,6 +878,7 @@ pub fn mono(s: &'static str) -> impl IntoElement {
         .child(
             text(s)
                 .text_size(px(size::small()))
+                .number_of_lines(1)
                 .font_weight(FontWeight::SEMIBOLD),
         )
 }
@@ -979,7 +977,7 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
                                 .child(ui::body(service.name).font_weight(FontWeight::SEMIBOLD))
                                 .child(ui::muted(hosts).text_size(px(size::small()))),
                         )
-                        .child(text(flag_text).text_size(px(26.0)))
+                        .child(ui::flag(flag_text, 26.0))
                         .child(ui::icon_btn(Icon::Close, "Close").on_press(move || selected.set(None))),
                 )
                 .children(rows)

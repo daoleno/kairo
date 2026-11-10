@@ -146,7 +146,8 @@ pub fn page() -> impl IntoElement {
                     ui::muted("Read-only · change routes under Apps & Sites")
                         .flex_1()
                         .text_right()
-                        .number_of_lines(1),
+                        .number_of_lines(1)
+                        .style_when(ui::phone, |s| s.hidden()),
                 ),
         )
         .child(
@@ -192,6 +193,7 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
                 .border_b_1()
                 .border_color(move || theme().border)
                 .bg(move || ui::subtle())
+                .style_when(ui::phone, |s| s.hidden())
                 .child(head("#", Some(W_INDEX)))
                 .child(head("Type", Some(W_KIND)))
                 .child(head("Payload", None))
@@ -210,6 +212,64 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
                                     row.with(|r| r.as_ref().map(g).unwrap_or_default()).into()
                                 }
                             };
+                            let target_color = move || {
+                                let target = row.with(|r| {
+                                    r.as_ref().map(|r| r.1.proxy.clone()).unwrap_or_default()
+                                });
+                                match target.as_str() {
+                                    "REJECT" | "REJECT-DROP" => theme().destructive,
+                                    "DIRECT" => theme().muted_foreground,
+                                    _ => theme().primary,
+                                }
+                            };
+                            if ui::phone() {
+                                // The rule on two lines: what it matches, then its kind and where it goes.
+                                return view()
+                                    .h(px(size::body() * 1.5 + size::small() * 1.5 + 24.0))
+                                    .px_4()
+                                    .py_2()
+                                    .gap_1()
+                                    .justify_center()
+                                    .border_b_1()
+                                    .border_color(move || theme().border)
+                                    .child(
+                                        cell(
+                                            f(|r| {
+                                                if r.1.payload.is_empty() {
+                                                    "—".into()
+                                                } else {
+                                                    r.1.payload.clone()
+                                                }
+                                            }),
+                                            None,
+                                        )
+                                        .selectable(true),
+                                    )
+                                    .child(
+                                        view()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                text(f(|r| format!("{} · {}", r.0 + 1, r.1.kind)))
+                                                    .text_size(px(size::small()))
+                                                    .number_of_lines(1)
+                                                    .flex_shrink(1.0)
+                                                    .min_w(px(0.0))
+                                                    .text_color(move || theme().muted_foreground),
+                                            )
+                                            .child(view().flex_1())
+                                            .child(
+                                                text(f(|r| r.1.proxy.clone()))
+                                                    .text_size(px(size::small()))
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .number_of_lines(1)
+                                                    .max_w(px(160.0))
+                                                    .text_color(target_color),
+                                            ),
+                                    )
+                                    .into_element();
+                            }
                             view()
                                 .flex_row()
                                 .items_center()
@@ -253,10 +313,11 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
                                         }
                                     },
                                 ))
+.into_element()
                         },
                     )
                     .keys(move || shown.with(|s| s.iter().map(|r| r.0).collect::<Vec<_>>()))
-                    .estimated_item_size(px(ui::ROW_HEIGHT))
+                    .estimated_item_size(px(if ui::phone() { size::body() * 1.5 + size::small() * 1.5 + 24.0 } else { ui::ROW_HEIGHT }))
                     .flex_1()
                 },
             )

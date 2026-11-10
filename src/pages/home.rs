@@ -309,7 +309,7 @@ fn hero() -> impl IntoElement {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .role(AccessibilityRole::Header),
                         )
-                        .child(ui::muted(detail).tabular_nums().number_of_lines(2)),
+                        .child(ui::muted(detail).tabular_nums().number_of_lines(3)),
                 )
                 .child(when(move || !phone, choices)),
         )

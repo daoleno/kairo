@@ -8,6 +8,7 @@ use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
 use crate::store::{Snap, store};
+use crate::ui::menu::{self, Choice};
 use crate::ui::{self, Icon, Variant, icon, size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +118,7 @@ pub fn list(
             .with(|c| c.0.list.iter().any(|c| !c.process.is_empty()))
     });
 
+    let phone = ui::phone();
     view()
         .flex_1()
         .flex_row()
@@ -125,7 +127,13 @@ pub fn list(
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(header_row(order, compact, processes))
+                // On a phone a connection's details take the whole screen.
+                .style_when(move || phone && selected.with(Option::is_some), |s| s.hidden())
+                .child(if phone {
+                    sort_bar(order).into_element()
+                } else {
+                    header_row(order, compact, processes).into_element()
+                })
                 .child(
                     when(
                         move || count() > 0,
@@ -200,6 +208,52 @@ fn head(
             .into_element(),
         None => cell.disabled(true).into_element(),
     }
+}
+
+/// A phone's stand-in for the column headings: how the list is ordered.
+fn sort_bar(order: Signal<Order>) -> impl IntoElement {
+    let name = move || match order.get() {
+        Order::Newest => "Newest",
+        Order::Download => "Download speed",
+        Order::Upload => "Upload speed",
+        Order::Total => "Total",
+    };
+    view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .px_5()
+        .py_1()
+        .border_b_1()
+        .border_color(move || theme().border)
+        .child(ui::muted("Sorted by").flex_1())
+        .child(
+            button()
+                .flex_row()
+                .items_center()
+                .gap_1()
+                .h(px(ui::touch_h(40.0)))
+                .accessibility_label("Sort connections")
+                .on_press(move || {
+                    let pick = |o: Order, title: &'static str| {
+                        Choice::new(title)
+                            .checked(order.get_untracked() == o)
+                            .on_select(move || order.set(o))
+                    };
+                    menu::open(vec![
+                        pick(Order::Newest, "Newest"),
+                        pick(Order::Download, "Download speed"),
+                        pick(Order::Upload, "Upload speed"),
+                        pick(Order::Total, "Total"),
+                    ]);
+                })
+                .child(
+                    text(move || -> SharedString { name().into() })
+                        .text_size(px(size::body()))
+                        .font_weight(FontWeight::MEDIUM),
+                )
+                .child(icon(Icon::ArrowDown, 12.0).text_color(move || theme().muted_foreground)),
+        )
 }
 
 fn header_row(
@@ -280,6 +334,9 @@ fn table(
             };
             let id = move || conn.with(|c| c.as_ref().map(|c| c.id.clone()).unwrap_or_default());
             let is = move || selected.with(|s| s.as_deref() == Some(id().as_str()));
+            if ui::phone() {
+                return phone_row(conn, selected, id).into_element();
+            }
             button()
                 .on_press(move || {
                     let id = id();
@@ -384,6 +441,7 @@ fn table(
                             .on_press(move || store.run(store.svc().close_connection(id()))),
                     ),
                 )
+                .into_element()
         },
     )
     .keys(move || rows.with(|r| r.iter().map(|c| c.id.clone()).collect::<Vec<_>>()))
@@ -391,13 +449,91 @@ fn table(
     .flex_1()
 }
 
-fn footer() -> impl IntoElement {
+/// One connection on a phone: where it goes and what it is, the total and the speed, close.
+fn phone_row(
+    conn: Memo<Option<Connection>>,
+    selected: Signal<Option<String>>,
+    id: impl Fn() -> String + Copy + 'static,
+) -> impl IntoElement {
     let store = store();
-    view()
+    let line = move |g: fn(&Connection, &kairo_core::activity::ExitNames) -> String| {
+        move || -> SharedString {
+            let names = store.activity.with(|a| a.0.names.clone());
+            conn.with(|c| c.as_ref().map(|c| g(c, &names)).unwrap_or_default())
+                .into()
+        }
+    };
+    button()
+        .on_press(move || {
+            let id = id();
+            selected.set(Some(id));
+        })
+        .w_full()
         .flex_row()
         .items_center()
-        .gap_5()
-        .h(px(28.0))
+        .gap_3()
+        .pl_5()
+        .pr_3()
+        .py_2()
+        .border_b_1()
+        .border_color(move || theme().border)
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .child(
+                    text(line(|c, _| format!("{}:{}", c.host, c.port)))
+                        .text_size(px(size::body()))
+                        .number_of_lines(1),
+                )
+                .child(
+                    ui::muted(line(|c, names| {
+                        let mut s = goes_through(c, names);
+                        if !c.process.is_empty() {
+                            s = format!("{} · {s}", c.process);
+                        }
+                        s
+                    }))
+                    .text_size(px(size::small()))
+                    .number_of_lines(2),
+                ),
+        )
+        .child(
+            view()
+                .items_end()
+                .child(
+                    text(line(|c, _| kairo_core::bytes(c.download + c.upload)))
+                        .text_size(px(size::body()))
+                        .tabular_nums(),
+                )
+                .child(
+                    ui::muted(line(|c, _| {
+                        if c.down_speed == 0 {
+                            age(&c.start, kairo_core::service::unix())
+                        } else {
+                            format!("↓ {}", kairo_core::speed(c.down_speed))
+                        }
+                    }))
+                    .text_size(px(size::small()))
+                    .tabular_nums(),
+                ),
+        )
+        .child(
+            ui::icon_btn(Icon::Close, "Close Connection")
+                .on_press(move || store.run(store.svc().close_connection(id()))),
+        )
+}
+
+fn footer() -> impl IntoElement {
+    let store = store();
+    let phone = ui::phone();
+    view()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .gap_x_5()
+        .when(!phone, |v| v.h(px(28.0)))
+        .when(phone, |v| v.py_1p5())
         .px_5()
         .border_t_1()
         .border_color(move || theme().border)
@@ -413,7 +549,7 @@ fn footer() -> impl IntoElement {
             })
             .tabular_nums(),
         )
-        .child(view().flex_1())
+        .child(view().flex_1().min_w(px(0.0)))
         .child(ui::muted(move || -> SharedString {
             store
                 .live
@@ -454,10 +590,10 @@ fn inspector(
         let id = selected.get()?;
         source().0.list.iter().find(|c| c.id == id).cloned()
     });
+    let phone = ui::phone();
     view()
-        .w(px(300.0))
-        .flex_shrink_0()
-        .border_l_1()
+        .when(!phone, |v| v.w(px(300.0)).flex_shrink_0().border_l_1())
+        .when(phone, |v| v.flex_1().min_w(px(0.0)))
         .border_color(move || theme().border)
         .bg(move || ui::subtle())
         .child(

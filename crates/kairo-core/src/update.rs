@@ -428,7 +428,7 @@ pub fn spawn_checks(svc: Service) {
         // the usual interval) rather than hours later.
         let mut retry = RETRY_FIRST;
         loop {
-            let wait = match check(&svc).await {
+            let wait = match check_as(&svc, true).await {
                 Ok(_) => {
                     retry = RETRY_FIRST;
                     CHECK_EVERY
@@ -549,15 +549,23 @@ fn quiet(status: &UpdateStatus) -> bool {
 /// see [`download`]). `Ok(Some(version))` when one is on offer, `Ok(None)`
 /// when up to date.
 pub async fn check(svc: &Service) -> Result<Option<String>, String> {
+    check_as(svc, false).await
+}
+
+/// `background`: the timer's check, not the person's. It says nothing when it cannot reach the
+/// server (the next try is soon), and leaves a failed install on the screen until it is dealt with.
+async fn check_as(svc: &Service, background: bool) -> Result<Option<String>, String> {
     let _busy = match svc.update_lock().try_lock() {
         Ok(g) => g,
         Err(_) => return Ok(None),
     };
     let previous = svc.snapshot().update;
-    if matches!(previous, UpdateStatus::Installing { .. }) {
+    if matches!(previous, UpdateStatus::Installing { .. })
+        || (background && matches!(previous, UpdateStatus::Failed { .. }))
+    {
         return Ok(None);
     }
-    let silent = quiet(&previous);
+    let silent = background || quiet(&previous);
     if !silent {
         svc.set_update(UpdateStatus::Checking);
     }

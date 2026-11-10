@@ -85,6 +85,8 @@ pub fn page() -> impl IntoElement {
                 view()
                     .flex_1()
                     .flex_row()
+                    // A phone has no room beside the list: groups on top, nodes under.
+                    .when(ui::phone(), |v| v.flex_col())
                     .min_h(px(0.0))
                     .child(group_list(current, selected))
                     .child(view().flex_1().min_w(px(0.0)).child(dynamic(move || {
@@ -161,8 +163,9 @@ fn group_list(
     let providers = computed(move || store.proxies.with(|p| p.0.providers.clone()));
     scroll()
         .w(px(240.0))
+        .when(ui::phone(), |v| v.w_full().max_h(px(170.0)).border_b_1())
+        .when(!ui::phone(), |v| v.border_r_1())
         .flex_shrink_0()
-        .border_r_1()
         .border_color(move || theme().border)
         .child(
             view()
@@ -285,6 +288,7 @@ fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl
         .child(
             view()
                 .flex_row()
+                .when(ui::phone(), |v| v.flex_wrap().gap_y_2())
                 .items_center()
                 .gap_3()
                 .px_5()
@@ -294,7 +298,7 @@ fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl
                 .child(
                     view()
                         .flex_1()
-                        .min_w(px(0.0))
+                        .min_w(px(if ui::phone() { 150.0 } else { 0.0 }))
                         .gap_0p5()
                         .child(
                             text(header_name)
@@ -369,7 +373,7 @@ fn node_list(
                 .flex_row()
                 .items_center()
                 .gap_3()
-                .h(px(36.0))
+                .h(px(ui::touch_h(36.0)))
                 .px_5()
                 .cursor_pointer()
                 .hover(|s| s.bg(move || theme().accent))
@@ -400,6 +404,7 @@ fn node_list(
                     .text_size(px(size::small()))
                     .text_color(move || theme().muted_foreground)
                     .w(px(110.0))
+                    .style_when(ui::phone, |s| s.hidden())
                     .number_of_lines(1),
                 )
                 .child(

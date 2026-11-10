@@ -307,6 +307,7 @@ fn phone_shell() -> impl IntoElement {
                 .children(tabs.into_iter().map(tab)),
         )
         .child(toast())
+        .child(ui::menu::host())
 }
 
 /// A failed update, said above the tabs where the button was: what went wrong
@@ -336,7 +337,7 @@ fn update_failure(store: crate::store::Store) -> impl IntoElement {
                 .gap_2()
                 .rounded(px(16.0))
                 .bg(move || ui::warning().opacity(0.14))
-                .child(ui::body("The update did not install").font_weight(FontWeight::SEMIBOLD))
+                .child(ui::body("The update failed").font_weight(FontWeight::SEMIBOLD))
                 .child(ui::muted(message))
                 .child(
                     view()

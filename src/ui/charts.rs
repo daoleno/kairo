@@ -75,17 +75,35 @@ fn readout(text_now: impl Fn() -> String + 'static) -> impl IntoElement {
 }
 
 /// The y-axis labels beside a chart of `height`: top, middle and zero.
+/// The width of the y-axis labels: they grow with the text, so a larger system font
+/// does not break "1500 ms" into three lines.
+fn gutter() -> f32 {
+    52.0 * size::scale().max(1.0) * label_factor()
+}
+
+/// The system's text size (Android's font size setting) scales every label on top of ours;
+/// a chart's axis labels follow it only up to 1.3 times, or they would crowd out the plot.
+fn label_factor() -> f32 {
+    nsh_core::prelude::font_scale().clamp(1.0, 1.3)
+}
+
+/// The size of an axis label that, once the system scales it, is `label_factor()` times `base`.
+fn label_size(base: f32) -> f32 {
+    base * label_factor() / nsh_core::prelude::font_scale().max(1.0)
+}
+
 fn y_labels(top: f64, fmt: impl Fn(f64) -> String, height: f32) -> impl IntoElement {
     let labels = [top, top / 2.0, 0.0].map(|v| fmt(v));
     view()
-        .w(px(52.0))
+        .w(px(gutter()))
         .h(px(height))
         .justify_between()
         .items_end()
         .pr_2()
         .children(labels.into_iter().map(|l| {
             ui::muted(l)
-                .text_size(px(size::small() - 1.0))
+                .text_size(px(label_size(size::small() - 1.0)))
+                .number_of_lines(1)
                 .tabular_nums()
         }))
 }
@@ -118,7 +136,7 @@ fn x_labels(n: usize, labels: Vec<XLabel>) -> impl IntoElement {
                 .min_w(px(0.0))
                 .child(
                     ui::muted(text)
-                        .text_size(px(size::small() - 1.0))
+                        .text_size(px(label_size(size::small() - 1.0)))
                         .number_of_lines(1),
                 )
         }))
@@ -143,7 +161,7 @@ fn frame(
         .child(
             view()
                 .flex_row()
-                .child(view().w(px(52.0)))
+                .child(view().w(px(gutter())))
                 .child(x_labels(n, labels)),
         )
 }

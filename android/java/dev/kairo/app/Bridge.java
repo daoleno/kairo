@@ -109,7 +109,7 @@ public final class Bridge {
                         android.net.Uri.parse("package:" + app.getPackageName()))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 app.startActivity(s);
-                // The button stays "Restart to Update": press it again after allowing.
+                // The button stays "Update to X": press it again after allowing.
                 return null;
             }
             android.content.pm.PackageInstaller.SessionParams p = new android.content.pm.PackageInstaller.SessionParams(
