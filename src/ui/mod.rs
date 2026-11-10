@@ -480,21 +480,82 @@ pub fn card_soft() -> View {
         .overflow_hidden()
 }
 
-/// A flag, as the emoji of its country; Taiwan's is drawn: Apple's emoji font
-/// leaves it out on Macs set to some regions, and a missing-glyph box is worse
-/// than a picture.
+/// The picture of a flag (an emoji of two regional indicators), as a data URI cropped to the
+/// flag's own 36:26 box. Windows has no flag emoji (it draws "JP"), and the emoji fonts of the
+/// other platforms differ and clip, so every platform draws the same bundled pictures.
+fn flag_uri(flag: &str) -> Option<String> {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static URIS: RefCell<HashMap<String, Option<String>>> = RefCell::new(HashMap::new());
+    }
+    URIS.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry(flag.to_owned())
+            .or_insert_with(|| {
+                let code = kairo_core::places::flag_code(flag)?.to_ascii_lowercase();
+                let svg = crate::flags::svg(&code)?;
+                let svg = svg
+                    .replace("viewBox=\"0 0 36 36\"", "viewBox='0 5 36 26'")
+                    .replace('%', "%25")
+                    .replace('#', "%23")
+                    .replace('"', "'");
+                Some(format!("data:image/svg+xml,{svg}"))
+            })
+            .clone()
+    })
+}
+
+/// A flag: the picture of its country's flag; a neutral mark's text when there is none.
 pub fn flag(flag: impl Into<String>, size: f32) -> AnyElement {
     let flag = flag.into();
-    if flag == "🇹🇼" {
-        // Red field, blue canton, a white sun: 3:2.
-        let uri = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='20' viewBox='0 0 30 20'><rect width='30' height='20' rx='2' fill='%23fe0000'/><rect width='15' height='10' rx='2' fill='%23000095'/><rect x='6' width='9' height='10' fill='%23000095'/><circle cx='7.5' cy='5' r='3.1' fill='%23fff'/><circle cx='7.5' cy='5' r='2.2' fill='%23000095'/><circle cx='7.5' cy='5' r='1.8' fill='%23fff'/></svg>";
-        return svg(uri)
-            .w(px(size * 1.3))
-            .h(px(size * 0.87))
+    match flag_uri(&flag) {
+        // A hairline keeps the white-fielded flags (Japan, Singapore) from melting into a light card.
+        Some(uri) => view()
+            .rounded(px(size * 0.16))
+            .border_1()
+            .border_color(move || theme().border)
+            .overflow_hidden()
             .flex_shrink_0()
-            .into_element();
+            .child(svg(uri).w(px(size * 1.35)).h(px(size * 0.975)))
+            .into_element(),
+        None => text(flag).text_size(px(size)).into_element(),
     }
-    text(flag).text_size(px(size)).into_element()
+}
+
+/// A label that may start with a flag emoji ("🇯🇵 Tokyo 01"): the flag as its picture, then the text.
+pub fn flagged(label: impl Fn() -> SharedString + 'static, size: f32) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_1p5()
+        .min_w(px(0.0))
+        .child(dynamic(move || {
+            let full = label();
+            let (flag_emoji, rest) = kairo_core::places::split_flag(&full);
+            let rest = rest.trim().to_owned();
+            let picture = flag_emoji.filter(|f| flag_uri(f).is_some());
+            untracked(move || {
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap_1p5()
+                    .min_w(px(0.0))
+                    .child(picture.map(|f| flag(f, size + 1.0)))
+                    .child(text(rest).text_size(px(size)).number_of_lines(1))
+                    .into_element()
+            })
+        }))
+}
+
+/// A menu's text: Windows' menus cannot draw a flag picture and would show its two letters.
+pub fn menu_text(title: String) -> String {
+    if cfg!(windows) {
+        kairo_core::places::split_flag(&title).1.trim().to_owned()
+    } else {
+        title
+    }
 }
 
 /// A hairline separator.
@@ -763,7 +824,7 @@ pub fn popup_button<T: Clone + PartialEq + 'static>(
                 .into_iter()
                 .map(|(value, title)| {
                     let checked = value == current;
-                    nsh_core::element::desktop::MenuItem::new(title)
+                    nsh_core::element::desktop::MenuItem::new(menu_text(title))
                         .checked(checked)
                         .on_select(move || on_select(value.clone()))
                 })
@@ -772,6 +833,19 @@ pub fn popup_button<T: Clone + PartialEq + 'static>(
                 nsh_core::element::desktop::popup_menu(items).await;
             });
         })
-        .child(text(title).text_size(px(size::body())).number_of_lines(1))
+        .child(flagged(title, size::body()))
         .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground))
+}
+
+#[cfg(test)]
+mod flag_tests {
+    #[test]
+    fn a_flag_becomes_a_cropped_picture() {
+        let uri = super::flag_uri("🇯🇵").expect("Japan");
+        assert!(uri.starts_with("data:image/svg+xml,<svg"));
+        assert!(uri.contains("viewBox='0 5 36 26'"));
+        assert!(!uri.contains('#') && !uri.contains('"'));
+        assert!(super::flag_uri("🇹🇼").is_some());
+        assert!(super::flag_uri("◎").is_none());
+    }
 }

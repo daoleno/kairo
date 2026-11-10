@@ -530,7 +530,7 @@ fn about_group() -> impl IntoElement {
         vec![
             ui::setting_row(
                 concat!("Kairo ", env!("CARGO_PKG_VERSION")),
-                Some("A native mihomo client. Free software under the GPL-3.0, like the mihomo core it ships with."),
+                Some("A native mihomo client. Free software under the GPL-3.0, like the mihomo core it ships with. Flags: Twemoji, CC-BY 4.0."),
                 view(),
             )
             .into_element(),

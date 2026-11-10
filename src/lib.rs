@@ -3,6 +3,7 @@
 
 pub mod accent;
 pub mod chrome;
+mod flags;
 mod pages;
 pub mod palette;
 mod shell;
@@ -105,7 +106,7 @@ fn location_items(store: Store) -> Vec<MenuItem> {
     ];
     for p in list.into_iter().take(12) {
         let name = p.name.clone();
-        let title = format!(
+        let title = ui::menu_text(format!(
             "{}{}{}",
             p.flag.map(|f| f + "  ").unwrap_or_default(),
             p.title,
@@ -113,7 +114,7 @@ fn location_items(store: Store) -> Vec<MenuItem> {
                 .filter(|d| *d > 0)
                 .map(|d| format!("   {d} ms"))
                 .unwrap_or_default()
-        );
+        ));
         items.push(
             MenuItem::new(title)
                 .checked(!auto && now.as_deref() == Some(name.as_str()))

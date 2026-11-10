@@ -252,8 +252,13 @@ pub fn split_flag(name: &str) -> (Option<String>, &str) {
 pub fn flag_code(flag: &str) -> Option<String> {
     let code: String = flag
         .chars()
-        .filter_map(|c| char::from_u32(c as u32 - 0x1F1E6 + 'A' as u32))
-        .collect();
+        .map(|c| {
+            ('\u{1F1E6}'..='\u{1F1FF}')
+                .contains(&c)
+                .then(|| char::from_u32(c as u32 - 0x1F1E6 + 'A' as u32))
+                .flatten()
+        })
+        .collect::<Option<String>>()?;
     (code.len() == 2).then_some(code)
 }
 

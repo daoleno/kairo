@@ -352,7 +352,7 @@ fn panel(open: Signal<bool>, store: Store) -> impl IntoElement {
                                             }
                                         }))
                                         .child(
-                                            ui::body(c.title.clone()).flex_1().number_of_lines(1),
+                                            ui::flagged({ let t = c.title.clone(); move || t.clone().into() }, size::body()).flex_1(),
                                         )
                                         .child(
                                             ui::muted(c.detail.clone())
