@@ -323,63 +323,72 @@ fn provider_list(
                 move || providers.with(|p| p.is_empty()),
                 || ui::muted("This configuration has no rule sets."),
             ))
-            .child(when(move || providers.with(|p| !p.is_empty()), move || ui::card().child(each(
-                move || shown.get(),
-                |p: &RuleProvider| p.name.clone(),
-                move |p, i| {
-                    let name = p.with_untracked(|p| p.name.clone());
-                    let busy = {
-                        let name = name.clone();
-                        let m = computed(move || updating.with(|u| u.contains(&name)));
-                        move || m.get()
-                    };
-                    view()
-                        .child((i.get_untracked() > 0).then(|| ui::divider().ml_4()))
-                        .child(
+            .child(when(
+                move || providers.with(|p| !p.is_empty()),
+                move || {
+                    ui::card().child(each(
+                        move || shown.get(),
+                        |p: &RuleProvider| p.name.clone(),
+                        move |p, i| {
+                            let name = p.with_untracked(|p| p.name.clone());
+                            let busy = {
+                                let name = name.clone();
+                                let m = computed(move || updating.with(|u| u.contains(&name)));
+                                move || m.get()
+                            };
                             view()
-                                .flex_row()
-                                .items_center()
-                                .gap_3()
-                                .px_4()
-                                .py_2p5()
+                                .child((i.get_untracked() > 0).then(|| ui::divider().ml_4()))
                                 .child(
                                     view()
-                                        .flex_1()
-                                        .min_w(px(0.0))
-                                        .gap_0p5()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_3()
+                                        .px_4()
+                                        .py_2p5()
                                         .child(
-                                            ui::body(name.clone()).font_weight(FontWeight::MEDIUM),
+                                            view()
+                                                .flex_1()
+                                                .min_w(px(0.0))
+                                                .gap_0p5()
+                                                .child(
+                                                    ui::body(name.clone())
+                                                        .font_weight(FontWeight::MEDIUM),
+                                                )
+                                                .child(ui::muted(move || -> SharedString {
+                                                    p.with(|p| {
+                                                        let mut parts = vec![
+                                                            p.behavior.clone(),
+                                                            p.format.clone(),
+                                                            p.vehicle.clone(),
+                                                        ];
+                                                        parts.retain(|s| !s.is_empty());
+                                                        parts.push(format!(
+                                                            "{} rules",
+                                                            p.rule_count
+                                                        ));
+                                                        if let Some(at) = p.updated_at.as_deref() {
+                                                            parts.push(format!(
+                                                                "updated {}",
+                                                                at.replace('T', " ")
+                                                                    .split('.')
+                                                                    .next()
+                                                                    .unwrap_or("")
+                                                            ));
+                                                        }
+                                                        parts.join(" · ")
+                                                    })
+                                                    .into()
+                                                })),
                                         )
-                                        .child(ui::muted(move || -> SharedString {
-                                            p.with(|p| {
-                                                let mut parts = vec![
-                                                    p.behavior.clone(),
-                                                    p.format.clone(),
-                                                    p.vehicle.clone(),
-                                                ];
-                                                parts.retain(|s| !s.is_empty());
-                                                parts.push(format!("{} rules", p.rule_count));
-                                                if let Some(at) = p.updated_at.as_deref() {
-                                                    parts.push(format!(
-                                                        "updated {}",
-                                                        at.replace('T', " ")
-                                                            .split('.')
-                                                            .next()
-                                                            .unwrap_or("")
-                                                    ));
-                                                }
-                                                parts.join(" · ")
-                                            })
-                                            .into()
-                                        })),
+                                        .child(
+                                            ui::icon_btn(Icon::Refresh, "Update")
+                                                .disabled(busy)
+                                                .on_press(move || update(name.clone())),
+                                        ),
                                 )
-                                .child(
-                                    ui::icon_btn(Icon::Refresh, "Update")
-                                        .disabled(busy)
-                                        .on_press(move || update(name.clone())),
-                                ),
-                        )
+                        },
+                    ))
                 },
-            )))),
+            )),
     )
 }

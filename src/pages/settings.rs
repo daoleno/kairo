@@ -42,7 +42,13 @@ pub fn show_advanced(store: crate::store::Store) {
 /// built: the store comes from the context here, not when the button is pressed).
 pub fn back() -> toolbar::Spec {
     let store = store();
-    toolbar::button("back", "Settings", Glyph::Back, Icon::ChevronLeft, move || show_advanced(store))
+    toolbar::button(
+        "back",
+        "Settings",
+        Glyph::Back,
+        Icon::ChevronLeft,
+        move || show_advanced(store),
+    )
 }
 
 /// The typed settings, as text while they are edited.
@@ -92,9 +98,10 @@ impl Draft {
             .filter(|s| !s.is_empty())
             .collect();
         next.test_url = self.test_url.trim().to_owned();
-        next.test_timeout_ms = self.test_timeout_ms.trim().parse().map_err(|_| {
-            "The delay test timeout must be a number of milliseconds".to_string()
-        })?;
+        next.test_timeout_ms =
+            self.test_timeout_ms.trim().parse().map_err(|_| {
+                "The delay test timeout must be a number of milliseconds".to_string()
+            })?;
         let core = self.core_path.trim();
         next.core_path = (!core.is_empty()).then(|| core.to_owned());
         next.validate()?;
@@ -205,13 +212,21 @@ pub fn page() -> impl IntoElement {
                 .bg(move || ui::subtle())
                 .child(ui::dot(move || ui::warning()))
                 .child(ui::body("Unapplied changes").flex_1())
-                .child(ui::btn("Revert", Variant::Secondary).on_press(move || draft.set(saved.get_untracked())))
+                .child(
+                    ui::btn("Revert", Variant::Secondary)
+                        .on_press(move || draft.set(saved.get_untracked())),
+                )
                 .child(ui::btn("Apply", Variant::Primary).on_press(apply))
         }))
 }
 
 /// A switch that applies at once.
-fn flag(settings: Memo<Settings>, get: fn(&Settings) -> bool, label: &'static str, put: fn(&mut Settings, bool)) -> AnyElement {
+fn flag(
+    settings: Memo<Settings>,
+    get: fn(&Settings) -> bool,
+    label: &'static str,
+    put: fn(&mut Settings, bool),
+) -> AnyElement {
     let store = store();
     ui::toggle(
         move || settings.with(get),
@@ -244,7 +259,11 @@ fn general(settings: Memo<Settings>) -> impl IntoElement {
                     "Appearance",
                     None,
                     ui::segmented(
-                        vec![(Theme::System, "System"), (Theme::Light, "Light"), (Theme::Dark, "Dark")],
+                        vec![
+                            (Theme::System, "System"),
+                            (Theme::Light, "Light"),
+                            (Theme::Dark, "Dark"),
+                        ],
                         move || settings.with(|s| s.theme),
                         move |t| {
                             let mut next = store.svc().settings();
@@ -255,21 +274,48 @@ fn general(settings: Memo<Settings>) -> impl IntoElement {
                 )
                 .into_element(),
                 ui::setting_row(
-                    if mac { "Open at login" } else { "Launch at login" },
+                    if mac {
+                        "Open at login"
+                    } else {
+                        "Launch at login"
+                    },
                     Some("Start Kairo when you log in."),
-                    flag(settings, |s| s.launch_at_login, "Open at login", |s, on| s.launch_at_login = on),
+                    flag(
+                        settings,
+                        |s| s.launch_at_login,
+                        "Open at login",
+                        |s, on| s.launch_at_login = on,
+                    ),
                 )
                 .into_element(),
                 ui::setting_row(
                     "Start minimized",
-                    Some(if mac { "Open in the menu bar, without the window." } else { "Open in the tray, without the window." }),
-                    flag(settings, |s| s.start_minimized, "Start minimized", |s, on| s.start_minimized = on),
+                    Some(if mac {
+                        "Open in the menu bar, without the window."
+                    } else {
+                        "Open in the tray, without the window."
+                    }),
+                    flag(
+                        settings,
+                        |s| s.start_minimized,
+                        "Start minimized",
+                        |s, on| s.start_minimized = on,
+                    ),
                 )
                 .into_element(),
                 ui::setting_row(
-                    if mac { "Keep running in the menu bar" } else { "Keep running in the tray" },
+                    if mac {
+                        "Keep running in the menu bar"
+                    } else {
+                        "Keep running in the tray"
+                    },
                     Some("Closing the window leaves Kairo and the proxy running."),
-                    flag(settings, |s| s.close_to_tray, "Keep running in the tray", |s, on| s.close_to_tray = on),
+                    flag(
+                        settings,
+                        |s| s.close_to_tray,
+                        "Keep running in the tray",
+                        |s, on| s.close_to_tray = on,
+                    ),
                 )
                 .into_element(),
             ],
@@ -309,7 +355,9 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
         Follow::Tun => match privilege.get_untracked() {
             Some(Privilege::Granted) => store.run(store.svc().set_tun(true)),
             Some(Privilege::Needed) => allow(true),
-            Some(Privilege::Unsupported) => store.error("Every app (TUN) is not available on this system"),
+            Some(Privilege::Unsupported) => {
+                store.error("Every app (TUN) is not available on this system")
+            }
             None => store.error("Install the core to use Every app (TUN)"),
         },
     };
@@ -406,8 +454,12 @@ fn update_text(u: &UpdateStatus) -> String {
             progress: Some(p),
         } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
         UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
-        UpdateStatus::Available { version } => format!("Kairo {version} is available · Download is at the foot of the sidebar"),
-        UpdateStatus::Ready { version } => format!("Kairo {version} is ready · Restart to Update is at the foot of the sidebar"),
+        UpdateStatus::Available { version } => {
+            format!("Kairo {version} is available · Download is at the foot of the sidebar")
+        }
+        UpdateStatus::Ready { version } => {
+            format!("Kairo {version} is ready · Restart to Update is at the foot of the sidebar")
+        }
         UpdateStatus::Manual { version, .. } => {
             format!("Kairo {version} is out (this copy cannot update itself)")
         }
@@ -428,9 +480,9 @@ pub fn update_button() -> impl IntoElement {
             | UpdateStatus::Installing { .. }
             | UpdateStatus::Available { .. }
             | UpdateStatus::Ready { .. }
-            | UpdateStatus::Manual { .. } => {
-                ui::btn("Check for Updates", Variant::Secondary).disabled(true).into_element()
-            }
+            | UpdateStatus::Manual { .. } => ui::btn("Check for Updates", Variant::Secondary)
+                .disabled(true)
+                .into_element(),
             _ => ui::btn("Check for Updates", Variant::Secondary)
                 .on_press(move || {
                     store.run_then(store.svc().check_for_update(), move |r| {
@@ -490,11 +542,17 @@ fn text_field(
         .focus(|s| s.border_color(move || theme().primary))
 }
 
-fn advanced(settings: Memo<Settings>, draft: Signal<Draft>, apply: impl Fn() + Copy + 'static) -> impl IntoElement {
+fn advanced(
+    settings: Memo<Settings>,
+    draft: Signal<Draft>,
+    apply: impl Fn() + Copy + 'static,
+) -> impl IntoElement {
     let store = store();
-    let field = move |get: fn(&Draft) -> String, put: fn(&mut Draft, String), placeholder: &'static str, w: f32| {
-        text_field(draft, apply, get, put, placeholder, w)
-    };
+    let field =
+        move |get: fn(&Draft) -> String,
+              put: fn(&mut Draft, String),
+              placeholder: &'static str,
+              w: f32| { text_field(draft, apply, get, put, placeholder, w) };
     let home = store.svc().paths().home.clone();
     let revealed = signal(false);
 
@@ -506,13 +564,25 @@ fn advanced(settings: Memo<Settings>, draft: Signal<Draft>, apply: impl Fn() + C
                 ui::setting_row(
                     "Port (HTTP + SOCKS)",
                     Some("One port for both; the system proxy points here."),
-                    field(|d| d.mixed_port.clone(), |d, v| d.mixed_port = v, "7897", 90.0).text_right().test_id("mixed-port"),
+                    field(
+                        |d| d.mixed_port.clone(),
+                        |d, v| d.mixed_port = v,
+                        "7897",
+                        90.0,
+                    )
+                    .text_right()
+                    .test_id("mixed-port"),
                 )
                 .into_element(),
                 ui::setting_row(
                     "Allow other devices on the network",
                     Some("Let other devices on your network use this proxy."),
-                    flag(settings, |s| s.allow_lan, "Allow other devices on the network", |s, on| s.allow_lan = on),
+                    flag(
+                        settings,
+                        |s| s.allow_lan,
+                        "Allow other devices on the network",
+                        |s, on| s.allow_lan = on,
+                    ),
                 )
                 .into_element(),
                 ui::setting_row(
@@ -524,7 +594,12 @@ fn advanced(settings: Memo<Settings>, draft: Signal<Draft>, apply: impl Fn() + C
                 ui::setting_row(
                     "Skip the proxy for",
                     Some("Hosts that skip the system proxy, separated by commas."),
-                    field(|d| d.bypass.clone(), |d, v| d.bypass = v, "localhost, 127.0.0.1, ::1", 280.0),
+                    field(
+                        |d| d.bypass.clone(),
+                        |d, v| d.bypass = v,
+                        "localhost, 127.0.0.1, ::1",
+                        280.0,
+                    ),
                 )
                 .into_element(),
                 ui::setting_row(
@@ -534,10 +609,28 @@ fn advanced(settings: Memo<Settings>, draft: Signal<Draft>, apply: impl Fn() + C
                         .flex_row()
                         .items_center()
                         .gap_2()
-                        .child(field(|d| d.controller_port.clone(), |d, v| d.controller_port = v, "9097", 76.0).text_right())
                         .child(
-                            when(move || revealed.get(), move || field(|d| d.secret.clone(), |d, v| d.secret = v, "secret", 240.0))
-                                .otherwise(move || secret_mask(revealed)),
+                            field(
+                                |d| d.controller_port.clone(),
+                                |d, v| d.controller_port = v,
+                                "9097",
+                                76.0,
+                            )
+                            .text_right(),
+                        )
+                        .child(
+                            when(
+                                move || revealed.get(),
+                                move || {
+                                    field(
+                                        |d| d.secret.clone(),
+                                        |d, v| d.secret = v,
+                                        "secret",
+                                        240.0,
+                                    )
+                                },
+                            )
+                            .otherwise(move || secret_mask(revealed)),
                         )
                         .child(ui::btn("New Secret", Variant::Secondary).on_press(move || {
                             draft.update(|d| d.secret = kairo_core::settings::new_secret());
@@ -554,8 +647,21 @@ fn advanced(settings: Memo<Settings>, draft: Signal<Draft>, apply: impl Fn() + C
                         .flex_row()
                         .items_center()
                         .gap_2()
-                        .child(field(|d| d.test_url.clone(), |d, v| d.test_url = v, "https://www.gstatic.com/generate_204", 280.0))
-                        .child(field(|d| d.test_timeout_ms.clone(), |d, v| d.test_timeout_ms = v, "5000", 70.0).text_right())
+                        .child(field(
+                            |d| d.test_url.clone(),
+                            |d, v| d.test_url = v,
+                            "https://www.gstatic.com/generate_204",
+                            280.0,
+                        ))
+                        .child(
+                            field(
+                                |d| d.test_timeout_ms.clone(),
+                                |d, v| d.test_timeout_ms = v,
+                                "5000",
+                                70.0,
+                            )
+                            .text_right(),
+                        )
                         .child(ui::muted("ms")),
                 )
                 .into_element(),
@@ -563,7 +669,11 @@ fn advanced(settings: Memo<Settings>, draft: Signal<Draft>, apply: impl Fn() + C
                     "Config folder",
                     Some("Kairo's settings, profiles and the core's working files."),
                     ui::btn(
-                        if cfg!(target_os = "macos") { "Open in Finder" } else { "Open Folder" },
+                        if cfg!(target_os = "macos") {
+                            "Open in Finder"
+                        } else {
+                            "Open Folder"
+                        },
                         Variant::Secondary,
                     )
                     .on_press(move || {
@@ -618,7 +728,11 @@ fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static) -> AnyEleme
                 CoreStatus::Stopped => "stopped",
                 CoreStatus::Failed { .. } => "stopped with an error",
             };
-            let custom = if s.settings.core_path.is_some() { " · your own core" } else { "" };
+            let custom = if s.settings.core_path.is_some() {
+                " · your own core"
+            } else {
+                ""
+            };
             format!("{version} · {state}{custom}").into()
         })
     };
@@ -636,11 +750,17 @@ fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static) -> AnyEleme
                     .on_press(move || store.run(store.svc().restart_core())),
             )
             .child(when(custom, move || {
-                ui::btn("Use Kairo's", Variant::Secondary).on_press(move || draft.update(|d| d.core_path.clear()))
+                ui::btn("Use Kairo's", Variant::Secondary)
+                    .on_press(move || draft.update(|d| d.core_path.clear()))
             }))
             .child(ui::btn("Custom…", Variant::Secondary).on_press(move || {
                 spawn(async move {
-                    let picked = pick_paths(OpenDialog::files().title("Choose a mihomo binary").button_label("Choose")).await;
+                    let picked = pick_paths(
+                        OpenDialog::files()
+                            .title("Choose a mihomo binary")
+                            .button_label("Choose"),
+                    )
+                    .await;
                     if let Ok(Some(paths)) = picked
                         && let Some(path) = paths.first()
                     {
@@ -664,7 +784,10 @@ fn geo_row() -> AnyElement {
         match geo_mtime(&paths) {
             Some(secs) => format!(
                 "Updated {}",
-                date_text(secs + kairo_core::service::local_offset_seconds(), kairo_core::service::unix() + kairo_core::service::local_offset_seconds())
+                date_text(
+                    secs + kairo_core::service::local_offset_seconds(),
+                    kairo_core::service::unix() + kairo_core::service::local_offset_seconds()
+                )
             )
             .into(),
             None => "Not downloaded yet".into(),
@@ -674,7 +797,13 @@ fn geo_row() -> AnyElement {
         "GeoIP and GeoSite",
         detail,
         ui::btn(
-            move || -> SharedString { if updating.get() { "Updating…".into() } else { "Update".into() } },
+            move || -> SharedString {
+                if updating.get() {
+                    "Updating…".into()
+                } else {
+                    "Update".into()
+                }
+            },
             Variant::Secondary,
         )
         .disabled(move || updating.get() || !running.get())
@@ -696,7 +825,12 @@ fn geo_row() -> AnyElement {
 fn geo_mtime(paths: &kairo_core::paths::Paths) -> Option<i64> {
     [kairo_core::geo::MMDB, kairo_core::geo::GEOSITE]
         .into_iter()
-        .filter_map(|f| std::fs::metadata(paths.runtime_dir().join(f.name)).ok()?.modified().ok())
+        .filter_map(|f| {
+            std::fs::metadata(paths.runtime_dir().join(f.name))
+                .ok()?
+                .modified()
+                .ok()
+        })
         .filter_map(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64)
         .max()
@@ -705,7 +839,9 @@ fn geo_mtime(paths: &kairo_core::paths::Paths) -> Option<i64> {
 /// A day as "Nov 8" (with the year when it is not this one). Both times are
 /// local seconds.
 fn date_text(local_secs: i64, local_now: i64) -> String {
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     let (year, month, day) = civil(local_secs.div_euclid(86_400));
     let (now_year, _, _) = civil(local_now.div_euclid(86_400));
     let name = MONTHS[(month as usize).clamp(1, 12) - 1];
@@ -744,7 +880,12 @@ fn thousands(n: usize) -> String {
 }
 
 /// The count and a Show button that opens `page`.
-fn open(store: crate::store::Store, label: &'static str, page: Page, count: impl Fn() -> SharedString + 'static) -> View {
+fn open(
+    store: crate::store::Store,
+    label: &'static str,
+    page: Page,
+    count: impl Fn() -> SharedString + 'static,
+) -> View {
     view()
         .flex_row()
         .items_center()
@@ -758,7 +899,14 @@ fn open(store: crate::store::Store, label: &'static str, page: Page, count: impl
 fn inspect_group() -> impl IntoElement {
     let store = store();
     let running = computed(move || store.state.with(|s| s.core.is_running()));
-    let groups = computed(move || store.proxies.with(|p| p.0.groups.iter().filter(|g| !g.hidden && g.name != "GLOBAL").count()));
+    let groups = computed(move || {
+        store.proxies.with(|p| {
+            p.0.groups
+                .iter()
+                .filter(|g| !g.hidden && g.name != "GLOBAL")
+                .count()
+        })
+    });
     // How many rules run: asked of the core while it is up.
     let rules = signal(None::<usize>);
     effect(move || {
@@ -866,7 +1014,10 @@ mod tests {
     fn the_bypass_list_splits_on_commas_and_lines() {
         let mut d = draft();
         d.bypass = "localhost, 127.0.0.1\n*.local,, ".into();
-        assert_eq!(d.apply(&Settings::default()).unwrap().bypass, ["localhost", "127.0.0.1", "*.local"]);
+        assert_eq!(
+            d.apply(&Settings::default()).unwrap().bypass,
+            ["localhost", "127.0.0.1", "*.local"]
+        );
     }
 
     #[test]
@@ -882,7 +1033,10 @@ mod tests {
         assert!(d.apply(&base).is_err());
         d.test_url = "https://example.com/204".into();
         let next = d.apply(&base).unwrap();
-        assert_eq!((next.test_timeout_ms, next.test_url.as_str()), (3000, "https://example.com/204"));
+        assert_eq!(
+            (next.test_timeout_ms, next.test_url.as_str()),
+            (3000, "https://example.com/204")
+        );
     }
 
     #[test]
@@ -891,7 +1045,10 @@ mod tests {
         d.core_path = "  ".into();
         assert_eq!(d.apply(&Settings::default()).unwrap().core_path, None);
         d.core_path = "/opt/mihomo".into();
-        assert_eq!(d.apply(&Settings::default()).unwrap().core_path.as_deref(), Some("/opt/mihomo"));
+        assert_eq!(
+            d.apply(&Settings::default()).unwrap().core_path.as_deref(),
+            Some("/opt/mihomo")
+        );
     }
 
     #[test]

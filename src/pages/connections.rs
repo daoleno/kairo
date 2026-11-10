@@ -238,7 +238,9 @@ fn header_row(
             true,
             Some((order, Order::Total)),
         ))
-        .child(when(wide, move || head("Time", Some(W_TIME()), false, None)))
+        .child(when(wide, move || {
+            head("Time", Some(W_TIME()), false, None)
+        }))
         .child(view().w(px(W_CLOSE)))
 }
 
@@ -322,8 +324,12 @@ fn table(
                 .child(cell(
                     move || -> SharedString {
                         let names = store.activity.with(|a| a.0.names.clone());
-                        conn.with(|c| c.as_ref().map(|c| goes_through(c, &names)).unwrap_or_default())
-                            .into()
+                        conn.with(|c| {
+                            c.as_ref()
+                                .map(|c| goes_through(c, &names))
+                                .unwrap_or_default()
+                        })
+                        .into()
                     },
                     Some(W_CHAIN()),
                     false,
@@ -563,7 +569,12 @@ fn always_buttons(c: &Connection) -> impl IntoElement {
         let site = site.clone();
         ui::btn(label, Variant::Secondary).on_press(move || {
             store.run_then(
-                store.svc().set_route(RouteKind::Site { domain: site.clone() }, exit.clone()),
+                store.svc().set_route(
+                    RouteKind::Site {
+                        domain: site.clone(),
+                    },
+                    exit.clone(),
+                ),
                 move |r| {
                     if r.is_ok() {
                         store.info("Saved in Apps & Sites");
@@ -572,18 +583,15 @@ fn always_buttons(c: &Connection) -> impl IntoElement {
             )
         })
     };
-    view()
-        .gap_2()
-        .child(ui::muted("For this site"))
-        .child(
-            view()
-                .flex_row()
-                .flex_wrap()
-                .gap_2()
-                .child(one("Always Direct", RouteExit::Direct))
-                .child(one("Always AI Exit", RouteExit::Ai))
-                .child(one("Block", RouteExit::Block)),
-        )
+    view().gap_2().child(ui::muted("For this site")).child(
+        view()
+            .flex_row()
+            .flex_wrap()
+            .gap_2()
+            .child(one("Always Direct", RouteExit::Direct))
+            .child(one("Always AI Exit", RouteExit::Ai))
+            .child(one("Block", RouteExit::Block)),
+    )
 }
 
 #[cfg(test)]

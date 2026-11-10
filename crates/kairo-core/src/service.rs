@@ -1850,7 +1850,13 @@ impl Service {
         let result = if self.running() {
             self.write_config(true).await
         } else if self.core_path().exists() {
-            self.start_core().await
+            // A core already on its way up (the launch at startup) read its
+            // config before this profile was the active one: once it is up,
+            // load the profile.
+            match self.start_core().await {
+                Ok(()) if self.running() => self.write_config(true).await,
+                other => other,
+            }
         } else {
             Ok(())
         };

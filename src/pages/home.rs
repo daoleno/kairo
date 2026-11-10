@@ -289,15 +289,11 @@ fn hero() -> impl IntoElement {
                     // A second press soon after the first undoes it, whatever the
                     // screen shows yet: the last press wins (the service orders
                     // them). Later, the screen is the truth.
-                    let next = match last_press.get() {
-                        Some((v, at))
-                            if at.elapsed() < std::time::Duration::from_secs(3)
-                                && !matches!(state.get(), Conn::Failed(_)) =>
-                        {
-                            !v
-                        }
-                        _ => !on(),
-                    };
+                    let next = next_press(
+                        last_press.get(),
+                        on(),
+                        matches!(state.get(), Conn::Failed(_)),
+                    );
                     last_press.set(Some((next, std::time::Instant::now())));
                     store.run(store.svc().connect(next));
                 }))
@@ -329,10 +325,9 @@ fn hero() -> impl IntoElement {
                     .items_center()
                     .gap_3()
                     .child(
-                        view().flex_1().child(when(
-                            move || !hint().is_empty(),
-                            move || ui::muted(hint),
-                        )),
+                        view()
+                            .flex_1()
+                            .child(when(move || !hint().is_empty(), move || ui::muted(hint))),
                     )
                     .child(fix_button(
                         move || match state.get() {
@@ -354,9 +349,7 @@ fn hero() -> impl IntoElement {
                     .items_center()
                     .gap_3()
                     .child(ui::dot(ui::warning))
-                    .child(
-                        ui::muted(move || -> SharedString { warning().into() }).flex_1(),
-                    )
+                    .child(ui::muted(move || -> SharedString { warning().into() }).flex_1())
                     .child(fix_button(warning, false))
             },
         ))
@@ -382,7 +375,11 @@ pub fn plan_line() -> String {
         let Some(p) = s.profiles.active_profile() else {
             return String::new();
         };
-        plan_text(&p.name, p.usage.as_ref().map(|u| (u.used(), u.total, u.expire)), kairo_core::profile::now())
+        plan_text(
+            &p.name,
+            p.usage.as_ref().map(|u| (u.used(), u.total, u.expire)),
+            kairo_core::profile::now(),
+        )
     })
 }
 
@@ -566,6 +563,17 @@ pub enum Via {
     Tun,
 }
 
+/// What a press of the big switch asks for. A second press soon after the
+/// first undoes it, whatever the screen shows yet (the core takes a moment to
+/// stop or start): the last press wins. After a while, or after a failure,
+/// the screen is the truth.
+fn next_press(last: Option<(bool, std::time::Instant)>, shown_on: bool, failed: bool) -> bool {
+    match last {
+        Some((v, at)) if at.elapsed() < std::time::Duration::from_secs(3) && !failed => !v,
+        _ => !shown_on,
+    }
+}
+
 /// Switches to `via`; TUN asks for its permission the first time.
 pub fn set_via(via: Via) {
     let store = store();
@@ -579,7 +587,8 @@ pub fn set_via(via: Via) {
             Ok(())
         }),
         Via::Tun => {
-            let granted = store.state.with_untracked(|s| s.tun_privilege) == Some(kairo_core::tun::Privilege::Granted);
+            let granted = store.state.with_untracked(|s| s.tun_privilege)
+                == Some(kairo_core::tun::Privilege::Granted);
             store.run(async move {
                 if !granted {
                     svc.grant_tun().await?;
@@ -604,10 +613,41 @@ fn exits() -> impl IntoElement {
                     view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .child(crate::pages::exits::card(e, || false, move || {
-                            crate::pages::exits::select(e);
-                            store.page.set(Page::Exits)
-                        }))
+                        .child(crate::pages::exits::card(
+                            e,
+                            || false,
+                            move || {
+                                crate::pages::exits::select(e);
+                                store.page.set(Page::Exits)
+                            },
+                        ))
                 })),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_quick_second_press_undoes_the_first_whatever_the_screen_shows() {
+        // Pressed off a moment ago; the screen still says on (the core has not
+        // stopped yet): the second press asks for on, not off again.
+        let first = (false, Instant::now() - Duration::from_millis(130));
+        assert!(next_press(Some(first), true, false));
+        // And once more: on, then off, before the screen caught up either time.
+        let second = (true, Instant::now() - Duration::from_millis(130));
+        assert!(!next_press(Some(second), false, false));
+    }
+
+    #[test]
+    fn later_or_after_a_failure_the_screen_is_the_truth() {
+        let old = (false, Instant::now() - Duration::from_secs(10));
+        assert!(!next_press(Some(old), true, false));
+        assert!(next_press(None, false, false));
+        let recent = (false, Instant::now() - Duration::from_millis(130));
+        // A failed connect is on screen as failed (off): pressing asks for on.
+        assert!(next_press(Some(recent), false, true));
+    }
 }

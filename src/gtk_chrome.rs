@@ -92,7 +92,10 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     });
     // The page the app opens on, before the list reports selections.
     let first = *chrome::bridge().page.borrow();
-    let first_row = PAGES.iter().position(|p| *p == first.sidebar()).unwrap_or(0);
+    let first_row = PAGES
+        .iter()
+        .position(|p| *p == first.sidebar())
+        .unwrap_or(0);
     list.select_row(list.row_at_index(first_row as i32).as_ref());
     list.connect_row_selected(|_, row| {
         if let Some(page) = row.and_then(|r| PAGES.get(r.index() as usize)) {

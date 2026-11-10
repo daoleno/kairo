@@ -153,7 +153,14 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     for e in &m.exits {
-        let holder = item(target, mtm, &format!("{}: {}", e.title, e.place), 0, true, None);
+        let holder = item(
+            target,
+            mtm,
+            &format!("{}: {}", e.title, e.place),
+            0,
+            true,
+            None,
+        );
         unsafe { holder.setAction(None) };
         let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(e.title));
         sub.setAutoenablesItems(false);

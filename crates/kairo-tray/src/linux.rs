@@ -53,14 +53,20 @@ impl ksni::Tray for KairoTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let m = &self.model;
-        let mut items: Vec<MenuItem<Self>> = vec![CheckmarkItem {
-            label: if m.running { "Connected".into() } else { m.status.clone() },
-            checked: m.running,
-            enabled: m.has_profile,
-            activate: Box::new(|t: &mut Self| act::connect(&t.svc, !t.model.running)),
-            ..Default::default()
-        }
-        .into()];
+        let mut items: Vec<MenuItem<Self>> = vec![
+            CheckmarkItem {
+                label: if m.running {
+                    "Connected".into()
+                } else {
+                    m.status.clone()
+                },
+                checked: m.running,
+                enabled: m.has_profile,
+                activate: Box::new(|t: &mut Self| act::connect(&t.svc, !t.model.running)),
+                ..Default::default()
+            }
+            .into(),
+        ];
         if !m.ai.is_empty() {
             items.push(
                 StandardItem {

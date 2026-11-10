@@ -65,7 +65,11 @@ pub fn page() -> impl IntoElement {
             os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
             ports: (state.settings.mixed_port, state.settings.controller_port),
             lines: &lines,
-            hidden: &hidden_strings(&state, svc.paths().home.to_str(), std::env::var("HOME").ok().as_deref()),
+            hidden: &hidden_strings(
+                &state,
+                svc.paths().home.to_str(),
+                std::env::var("HOME").ok().as_deref(),
+            ),
         });
         set_clipboard(text);
         store.info("Diagnostics copied");
@@ -123,11 +127,24 @@ pub fn page() -> impl IntoElement {
                         }
                     },
                 ),
-                toolbar::button("logs.clear", "Clear", Glyph::Clear, Icon::Trash, move || {
-                    store.svc().clear_logs();
-                    paused.set(None);
-                }),
-                toolbar::button("logs.copy", "Copy Diagnostics", Glyph::Copy, Icon::File, copy).prominent(),
+                toolbar::button(
+                    "logs.clear",
+                    "Clear",
+                    Glyph::Clear,
+                    Icon::Trash,
+                    move || {
+                        store.svc().clear_logs();
+                        paused.set(None);
+                    },
+                ),
+                toolbar::button(
+                    "logs.copy",
+                    "Copy Diagnostics",
+                    Glyph::Copy,
+                    Icon::File,
+                    copy,
+                )
+                .prominent(),
             ],
         ))
         .child(header())
@@ -235,13 +252,19 @@ pub fn page() -> impl IntoElement {
 fn header() -> impl IntoElement {
     let store = store();
     let home = store.svc().paths().home.clone();
-    let shown_home = tilde(&home.display().to_string(), std::env::var("HOME").ok().as_deref());
+    let shown_home = tilde(
+        &home.display().to_string(),
+        std::env::var("HOME").ok().as_deref(),
+    );
     let core_line = move || -> SharedString {
         let (text, running) = store.state.with(|s| (core_text(s), s.core.is_running()));
         let memory = store.live.with(|l| l.memory);
-        let ports = store
-            .state
-            .with(|s| format!("ports {} / {}", s.settings.mixed_port, s.settings.controller_port));
+        let ports = store.state.with(|s| {
+            format!(
+                "ports {} / {}",
+                s.settings.mixed_port, s.settings.controller_port
+            )
+        });
         let mut line = text;
         if running && memory > 0 {
             line.push_str(&format!(" · memory {}", kairo_core::bytes(memory)));
@@ -253,25 +276,27 @@ fn header() -> impl IntoElement {
         .mx_5()
         .mt_3()
         .mb_2()
-        .child(
-            ui::setting_row_dyn(
-                "Core",
-                core_line,
-                ui::btn(
-                    move || -> SharedString {
-                        if running() { "Restart Core".into() } else { "Start Core".into() }
-                    },
-                    Variant::Secondary,
-                )
-                .on_press(move || {
+        .child(ui::setting_row_dyn(
+            "Core",
+            core_line,
+            ui::btn(
+                move || -> SharedString {
                     if running() {
-                        store.run(store.svc().restart_core());
+                        "Restart Core".into()
                     } else {
-                        store.run(store.svc().start_core());
+                        "Start Core".into()
                     }
-                }),
-            ),
-        )
+                },
+                Variant::Secondary,
+            )
+            .on_press(move || {
+                if running() {
+                    store.run(store.svc().restart_core());
+                } else {
+                    store.run(store.svc().start_core());
+                }
+            }),
+        ))
         .child(ui::divider().ml_4())
         .child(ui::setting_row_dyn(
             concat!("Kairo ", env!("CARGO_PKG_VERSION")),
@@ -356,7 +381,12 @@ fn diagnostics_text(r: &Report) -> String {
         if lines.len() == 1 { "" } else { "s" },
     );
     for l in lines {
-        out.push_str(&format!("{} {} {}\n", l.time, l.level, redact(&l.payload, r.hidden)));
+        out.push_str(&format!(
+            "{} {} {}\n",
+            l.time,
+            l.level,
+            redact(&l.payload, r.hidden)
+        ));
     }
     // The header and the lines went through the same filter: nothing of `hidden`
     // survives in the core's or the system's text either.
@@ -373,7 +403,11 @@ fn redact(line: &str, hidden: &[String]) -> String {
     let mut after_key = false;
     // Words after "dial": the protocol, then the address.
     let mut dial = 0u8;
-    let flush = |word: &mut String, out: &mut String, after_key: &mut bool, dial: &mut u8, next: Option<char>| {
+    let flush = |word: &mut String,
+                 out: &mut String,
+                 after_key: &mut bool,
+                 dial: &mut u8,
+                 next: Option<char>| {
         if word.is_empty() {
             return;
         }
@@ -424,15 +458,21 @@ fn is_delimiter(c: char) -> bool {
 }
 
 fn is_secret_key(key: &str) -> bool {
-    ["token", "secret", "password", "passwd", "pwd", "auth", "uuid", "key", "sign"]
-        .iter()
-        .any(|k| key.contains(k))
+    [
+        "token", "secret", "password", "passwd", "pwd", "auth", "uuid", "key", "sign",
+    ]
+    .iter()
+    .any(|k| key.contains(k))
 }
 
 /// `text` with every non-empty `hidden` string replaced (the longest first, so
 /// a link goes whole before its host does).
 fn scrub_literals(text: &str, hidden: &[String]) -> String {
-    let mut hidden: Vec<&str> = hidden.iter().map(|h| h.trim()).filter(|h| h.len() >= 3).collect();
+    let mut hidden: Vec<&str> = hidden
+        .iter()
+        .map(|h| h.trim())
+        .filter(|h| h.len() >= 3)
+        .collect();
     hidden.sort_by_key(|h| std::cmp::Reverse(h.len()));
     hidden.dedup();
     let mut out = text.to_owned();
@@ -463,8 +503,12 @@ fn scrub_word(w: &str) -> String {
         return swap(match url::Url::parse(core) {
             Ok(u) => match u.host() {
                 Some(url::Host::Domain(d)) => format!("{}://{d}", u.scheme()),
-                Some(url::Host::Ipv4(a)) => format!("{}://{}", u.scheme(), mask_ip(IpAddr::V4(a), None)),
-                Some(url::Host::Ipv6(a)) => format!("{}://{}", u.scheme(), mask_ip(IpAddr::V6(a), None)),
+                Some(url::Host::Ipv4(a)) => {
+                    format!("{}://{}", u.scheme(), mask_ip(IpAddr::V4(a), None))
+                }
+                Some(url::Host::Ipv6(a)) => {
+                    format!("{}://{}", u.scheme(), mask_ip(IpAddr::V6(a), None))
+                }
                 None => format!("{}://<link>", u.scheme()),
             },
             Err(_) => "<link>".into(),
@@ -503,7 +547,8 @@ fn mask_ip(ip: IpAddr, port: Option<u16>) -> String {
 /// A long run of letters and digits (a key, a token, a UUID).
 fn looks_like_a_token(w: &str) -> bool {
     w.len() >= 24
-        && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '+' || c == '=')
+        && w.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '+' || c == '=')
         && w.chars().any(|c| c.is_ascii_digit())
         && w.chars().any(|c| c.is_ascii_alphabetic())
 }
@@ -525,7 +570,8 @@ mod tests {
     use super::*;
 
     const SECRET: &str = "fake-controller-secret-9d8c7b";
-    const SUB: &str = "https://sub.provider.test/api/v1/client/subscribe?token=FAKETOKEN0123456789abcdef";
+    const SUB: &str =
+        "https://sub.provider.test/api/v1/client/subscribe?token=FAKETOKEN0123456789abcdef";
 
     fn entry(seq: u64, level: &str, payload: &str) -> LogEntry {
         LogEntry {
@@ -548,7 +594,10 @@ mod tests {
 
     #[test]
     fn literals_are_hidden_everywhere() {
-        let out = redact(&format!("controller said {SECRET} and fetched {SUB} for /home/fakeuser/x"), &hidden());
+        let out = redact(
+            &format!("controller said {SECRET} and fetched {SUB} for /home/fakeuser/x"),
+            &hidden(),
+        );
         assert!(!out.contains(SECRET), "{out}");
         assert!(!out.contains("FAKETOKEN"), "{out}");
         assert!(!out.contains("sub.provider.test"), "{out}");
@@ -557,37 +606,65 @@ mod tests {
 
     #[test]
     fn a_link_shrinks_to_its_host_when_not_known() {
-        let out = redact("GET https://user:pw@dl.example.test/a/b?token=abc123 failed", &[]);
+        let out = redact(
+            "GET https://user:pw@dl.example.test/a/b?token=abc123 failed",
+            &[],
+        );
         assert!(out.contains("https://dl.example.test"), "{out}");
-        assert!(!out.contains("abc123") && !out.contains("user:pw") && !out.contains("/a/b"), "{out}");
+        assert!(
+            !out.contains("abc123") && !out.contains("user:pw") && !out.contains("/a/b"),
+            "{out}"
+        );
     }
 
     #[test]
     fn addresses_are_masked_but_loopback_stays() {
-        let out = redact("[TCP] 127.0.0.1:50000 --> 203.0.113.9:443 and 2001:db8::7 and [2001:db8::8]:443 via ::1", &[]);
-        assert!(!out.contains("203.0.113.9") && !out.contains("2001:db8"), "{out}");
-        assert!(out.contains("127.0.0.1:50000") && out.contains("<ip>:443") && out.contains("::1"), "{out}");
+        let out = redact(
+            "[TCP] 127.0.0.1:50000 --> 203.0.113.9:443 and 2001:db8::7 and [2001:db8::8]:443 via ::1",
+            &[],
+        );
+        assert!(
+            !out.contains("203.0.113.9") && !out.contains("2001:db8"),
+            "{out}"
+        );
+        assert!(
+            out.contains("127.0.0.1:50000") && out.contains("<ip>:443") && out.contains("::1"),
+            "{out}"
+        );
     }
 
     #[test]
     fn the_address_a_dial_failed_on_is_a_servers() {
         let out = redact("dial tcp hk01.nodes.example.test:443: i/o timeout", &[]);
         assert!(!out.contains("hk01"), "{out}");
-        assert!(out.contains("dial tcp <server>:") && out.contains("i/o timeout"), "{out}");
-        let out = redact("proxy Tokyo 03 dial tcp 198.51.100.4:8443: connection refused", &[]);
+        assert!(
+            out.contains("dial tcp <server>:") && out.contains("i/o timeout"),
+            "{out}"
+        );
+        let out = redact(
+            "proxy Tokyo 03 dial tcp 198.51.100.4:8443: connection refused",
+            &[],
+        );
         assert!(!out.contains("198.51.100.4"), "{out}");
     }
 
     #[test]
     fn keys_and_long_tokens_go() {
-        let out = redact("request token=abcdef0123 uuid=123e4567-e89b-12d3-a456-426614174000 and Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MA end", &[]);
-        assert!(!out.contains("abcdef0123") && !out.contains("123e4567") && !out.contains("Zm9vYmFy"), "{out}");
+        let out = redact(
+            "request token=abcdef0123 uuid=123e4567-e89b-12d3-a456-426614174000 and Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MA end",
+            &[],
+        );
+        assert!(
+            !out.contains("abcdef0123") && !out.contains("123e4567") && !out.contains("Zm9vYmFy"),
+            "{out}"
+        );
         assert!(out.contains("and") && out.contains("end"));
     }
 
     #[test]
     fn ordinary_lines_survive() {
-        let line = "claude.ai:443 match RuleSet(ai) using AI[Tokyo 03] ServiceUnavailable at 14:35:58";
+        let line =
+            "claude.ai:443 match RuleSet(ai) using AI[Tokyo 03] ServiceUnavailable at 14:35:58";
         assert_eq!(redact(line, &hidden()), line);
     }
 
@@ -595,7 +672,11 @@ mod tests {
     fn the_report_has_the_facts_and_none_of_the_private() {
         let lines = vec![
             entry(1, "info", &format!("subscription {SUB} updated")),
-            entry(2, "error", &format!("API call with secret {SECRET} refused")),
+            entry(
+                2,
+                "error",
+                &format!("API call with secret {SECRET} refused"),
+            ),
             entry(3, "warning", "dial tcp 192.0.2.55:443: i/o timeout"),
             entry(4, "info", "claude.ai:443 --> AI exit"),
         ];
@@ -608,17 +689,32 @@ mod tests {
             lines: &lines,
             hidden: &hidden,
         });
-        for fact in ["Kairo 0.3.0", "mihomo 1.19.18 · running", "macos aarch64", "proxy 7890, controller 9097", "claude.ai:443 --> AI exit", "The last 4 log lines"] {
+        for fact in [
+            "Kairo 0.3.0",
+            "mihomo 1.19.18 · running",
+            "macos aarch64",
+            "proxy 7890, controller 9097",
+            "claude.ai:443 --> AI exit",
+            "The last 4 log lines",
+        ] {
             assert!(text.contains(fact), "{fact}\n{text}");
         }
-        for private in [SECRET, "FAKETOKEN", "sub.provider.test", "192.0.2.55", "fakeuser"] {
+        for private in [
+            SECRET,
+            "FAKETOKEN",
+            "sub.provider.test",
+            "192.0.2.55",
+            "fakeuser",
+        ] {
             assert!(!text.contains(private), "{private}\n{text}");
         }
     }
 
     #[test]
     fn the_report_keeps_only_the_newest_lines() {
-        let lines: Vec<LogEntry> = (0..300).map(|i| entry(i, "info", &format!("line number {i}"))).collect();
+        let lines: Vec<LogEntry> = (0..300)
+            .map(|i| entry(i, "info", &format!("line number {i}")))
+            .collect();
         let text = diagnostics_text(&Report {
             kairo_version: "0.3.0",
             core: String::new(),
@@ -652,15 +748,29 @@ mod tests {
             stats: Default::default(),
         };
         state.profiles.profiles.push(p);
-        let h = hidden_strings(&state, Some("/home/fakeuser/.config/Kairo"), Some("/home/fakeuser"));
-        for want in [SECRET, SUB, "sub.provider.test", "https://portal.provider.test/home", "portal.provider.test", "/home/fakeuser"] {
+        let h = hidden_strings(
+            &state,
+            Some("/home/fakeuser/.config/Kairo"),
+            Some("/home/fakeuser"),
+        );
+        for want in [
+            SECRET,
+            SUB,
+            "sub.provider.test",
+            "https://portal.provider.test/home",
+            "portal.provider.test",
+            "/home/fakeuser",
+        ] {
             assert!(h.iter().any(|x| x == want), "{want}: {h:?}");
         }
     }
 
     #[test]
     fn the_home_folder_is_written_as_a_tilde() {
-        assert_eq!(tilde("/home/u/.config/Kairo", Some("/home/u")), "~/.config/Kairo");
+        assert_eq!(
+            tilde("/home/u/.config/Kairo", Some("/home/u")),
+            "~/.config/Kairo"
+        );
         assert_eq!(tilde("/home/u", Some("/home/u")), "~");
         assert_eq!(tilde("/homer/x", Some("/home")), "/homer/x");
         assert_eq!(tilde("/opt/x", None), "/opt/x");

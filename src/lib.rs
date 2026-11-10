@@ -227,9 +227,7 @@ fn menus(store: Store) {
         ];
         go.extend(GO.into_iter().enumerate().map(|(i, page)| {
             MenuItem::new(page.title())
-                .shortcut(
-                    ["mod+1", "mod+2", "mod+3", "mod+4", "mod+5"][i],
-                )
+                .shortcut(["mod+1", "mod+2", "mod+3", "mod+4", "mod+5"][i])
                 .on_select(move || store.page.set(page))
         }));
         menus.push(MenuItem::submenu("Go", go));

@@ -104,17 +104,31 @@ pub fn ai_line(state: &kairo_core::State) -> String {
         .filter(|c| {
             !c.reachable
                 || matches!(c.api, Api::Unexpected { .. } | Api::Unreachable { .. })
-                || odd.as_ref().is_some_and(|(_, ids)| ids.contains(&c.service))
+                || odd
+                    .as_ref()
+                    .is_some_and(|(_, ids)| ids.contains(&c.service))
         })
         .count()
-        + state.bypass.iter().map(|b| b.tool.clone()).collect::<std::collections::BTreeSet<_>>().len();
+        + state
+            .bypass
+            .iter()
+            .map(|b| b.tool.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
     if problems > 0 {
-        return format!("AI: {problems} {}", if problems == 1 { "problem" } else { "problems" });
+        return format!(
+            "AI: {problems} {}",
+            if problems == 1 { "problem" } else { "problems" }
+        );
     }
     let codes: std::collections::BTreeSet<&str> =
         checks.iter().filter_map(|c| c.country.code()).collect();
     match (codes.len(), codes.iter().next()) {
-        (1, Some(code)) => format!("AI: all {} see {}", checks.len(), ai_check::country_name(code)),
+        (1, Some(code)) => format!(
+            "AI: all {} see {}",
+            checks.len(),
+            ai_check::country_name(code)
+        ),
         _ => format!("AI: {} reachable", checks.len()),
     }
 }
@@ -140,7 +154,11 @@ impl Model {
             format!(
                 "{}{}",
                 menu_flag(p.flag.as_deref().unwrap_or("")),
-                if p.region == "Other" { p.title.clone() } else { p.region.to_owned() }
+                if p.region == "Other" {
+                    p.title.clone()
+                } else {
+                    p.region.to_owned()
+                }
             )
         };
         // Countries, the best server of each, quickest first.
@@ -179,15 +197,25 @@ impl Model {
             exits.push(ExitMenu {
                 id: ExitId::Rest,
                 title: "Everything else",
-                place: rest_place.as_ref().map(label_of).unwrap_or_else(|| "—".into()),
+                place: rest_place
+                    .as_ref()
+                    .map(label_of)
+                    .unwrap_or_else(|| "—".into()),
                 fastest: Some(s.auto_location),
-                choices: countries(if s.auto_location { None } else { rest_place.as_ref() }),
+                choices: countries(if s.auto_location {
+                    None
+                } else {
+                    rest_place.as_ref()
+                }),
             });
             if s.ai.enabled && !state.ai.group.is_empty() {
                 exits.push(ExitMenu {
                     id: ExitId::Ai,
                     title: "AI exit",
-                    place: ai_place.as_ref().map(label_of).unwrap_or_else(|| "—".into()),
+                    place: ai_place
+                        .as_ref()
+                        .map(label_of)
+                        .unwrap_or_else(|| "—".into()),
                     fastest: None,
                     choices: countries(ai_place.as_ref()),
                 });
@@ -206,7 +234,11 @@ impl Model {
             up: live.up,
             down: live.down,
             has_profile: state.profiles.active.is_some(),
-            ai: if state.core.is_running() { ai_line(&state) } else { String::new() },
+            ai: if state.core.is_running() {
+                ai_line(&state)
+            } else {
+                String::new()
+            },
             exits,
         }
     }

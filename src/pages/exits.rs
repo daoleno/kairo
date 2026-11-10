@@ -128,7 +128,9 @@ pub fn subtitle(exit: Exit) -> String {
         .unwrap_or_else(|| "—".into());
     match exit {
         Exit::Ai => {
-            let pinned = store.state.with(|s| s.settings.ai.exit.as_ref().map(|e| e.since));
+            let pinned = store
+                .state
+                .with(|s| s.settings.ai.exit.as_ref().map(|e| e.since));
             match pinned {
                 Some(since) => format!("{node} · pinned {}", pinned_for(since)),
                 None => format!("{node} · follows Everything else"),
@@ -156,12 +158,12 @@ pub fn pinned_for(since: i64) -> String {
     }
 }
 
-fn health_of(exit: Exit) -> Health {
-    Health::of(place_of(exit).and_then(|p| p.delay))
-}
-
 /// An exit's card: used on Home and on Exits.
-pub fn card(exit: Exit, selected: impl Fn() -> bool + Copy + 'static, press: impl Fn() + 'static) -> impl IntoElement {
+pub fn card(
+    exit: Exit,
+    selected: impl Fn() -> bool + Copy + 'static,
+    press: impl Fn() + 'static,
+) -> impl IntoElement {
     let store = store();
     let place = computed(move || {
         // Follow what the place is made of.
@@ -169,9 +171,7 @@ pub fn card(exit: Exit, selected: impl Fn() -> bool + Copy + 'static, press: imp
         store.proxies.with(|_| ());
         place_of(exit)
     });
-    let health = move || {
-        place.with(|p| Health::of(p.as_ref().and_then(|p| p.delay)))
-    };
+    let health = move || place.with(|p| Health::of(p.as_ref().and_then(|p| p.delay)));
     nsh_base::button()
         .w_full()
         .accessibility_label(exit.title())
@@ -199,12 +199,7 @@ pub fn card(exit: Exit, selected: impl Fn() -> bool + Copy + 'static, press: imp
                         .flex_1()
                         .number_of_lines(1),
                 )
-                .child(when(
-                    move || exit == Exit::Ai,
-                    move || {
-                        ui::badge("stable")
-                    },
-                ))
+                .child(when(move || exit == Exit::Ai, move || ui::badge("stable")))
                 .child(ui::dot(move || health().tone()))
                 .child(
                     ui::muted(move || -> SharedString { health().word().into() })
@@ -269,7 +264,11 @@ pub fn page() -> impl IntoElement {
     effect(move || SELECTED.with(|s| s.set(which.get())));
     view()
         .flex_1()
-        .child(toolbar::floating(Page::Exits, || "Where traffic leaves".to_owned(), vec![]))
+        .child(toolbar::floating(
+            Page::Exits,
+            || "Where traffic leaves".to_owned(),
+            vec![],
+        ))
         .child(
             scroll().flex_1().child(
                 view()
@@ -282,16 +281,11 @@ pub fn page() -> impl IntoElement {
                     .flex_row()
                     .items_start()
                     .gap_4()
-                    .child(
-                        view()
-                            .w(px(280.0))
-                            .flex_shrink_0()
-                            .gap_3()
-                            .children(Exit::ALL.into_iter().map(move |e| {
-                                card(e, move || which.get() == e, move || which.set(e))
-                                    .into_element()
-                            })),
-                    )
+                    .child(view().w(px(280.0)).flex_shrink_0().gap_3().children(
+                        Exit::ALL.into_iter().map(move |e| {
+                            card(e, move || which.get() == e, move || which.set(e)).into_element()
+                        }),
+                    ))
                     .child(
                         view()
                             .flex_1()
@@ -301,10 +295,7 @@ pub fn page() -> impl IntoElement {
                                 let e = which.get();
                                 untracked(move || picker(e).into_element())
                             }))
-                            .child(when(
-                                move || which.get() == Exit::Downloads,
-                                mirror_card,
-                            )),
+                            .child(when(move || which.get() == Exit::Downloads, mirror_card)),
                     ),
             ),
         )
@@ -317,13 +308,28 @@ pub fn mirror_text(test: &kairo_core::downloads::MirrorTest) -> String {
     use kairo_core::downloads::MirrorTest as T;
     let secs = |ms: u64| format!("{:.1} s", ms as f64 / 1000.0);
     match test {
-        T::Untested => "Off. Test the mirror first: Kairo turns it on only if it is not slower.".into(),
-        T::Running => "Testing…".into(),
-        T::Passed { mirror_ms, direct_ms: Some(d) } => {
-            format!("Mirror {} · original {}. Not slower, so it can be on.", secs(*mirror_ms), secs(*d))
+        T::Untested => {
+            "Off. Test the mirror first: Kairo turns it on only if it is not slower.".into()
         }
-        T::Passed { mirror_ms, direct_ms: None } => {
-            format!("Mirror {} · the original did not answer. It can be on.", secs(*mirror_ms))
+        T::Running => "Testing…".into(),
+        T::Passed {
+            mirror_ms,
+            direct_ms: Some(d),
+        } => {
+            format!(
+                "Mirror {} · original {}. Not slower, so it can be on.",
+                secs(*mirror_ms),
+                secs(*d)
+            )
+        }
+        T::Passed {
+            mirror_ms,
+            direct_ms: None,
+        } => {
+            format!(
+                "Mirror {} · the original did not answer. It can be on.",
+                secs(*mirror_ms)
+            )
         }
         T::Failed { why } => format!("The test did not pass: {why}"),
     }
@@ -333,9 +339,8 @@ pub fn mirror_text(test: &kairo_core::downloads::MirrorTest) -> String {
 fn mirror_card() -> impl IntoElement {
     let store = store();
     let info = computed(move || store.state.with(|s| s.downloads.clone()));
-    let running = move || {
-        info.with(|d| matches!(d.mirror_test, kairo_core::downloads::MirrorTest::Running))
-    };
+    let running =
+        move || info.with(|d| matches!(d.mirror_test, kairo_core::downloads::MirrorTest::Running));
     let can_switch = move || info.with(|d| d.mirror_test.passed());
     ui::card()
         .rounded(px(22.0))
@@ -365,7 +370,7 @@ fn mirror_card() -> impl IntoElement {
                         .on_press(move || store.run(store.svc().test_mirror())),
                 )
                 .child(
-                    view().opacity(move || if can_switch() || info.with(|d| d.mirror) { 1.0 } else { 0.4 }).child(
+                    view().opacity(move || if can_switch() || info.with(|d| d.mirror) { 1.0_f32 } else { 0.4_f32 }).child(
                         ui::toggle(
                             move || info.with(|d| d.mirror),
                             "Use mirrors",
@@ -526,11 +531,7 @@ fn picker(exit: Exit) -> impl IntoElement {
                 .px_4()
                 .py_3()
                 .child(ui::body(exit.title()).font_weight(FontWeight::SEMIBOLD))
-                .child(
-                    ui::muted(exit.about())
-                        .flex_1()
-                        .number_of_lines(1),
-                )
+                .child(ui::muted(exit.about()).flex_1().number_of_lines(1))
                 .child(
                     ui::btn_icon(Icon::Bolt, "Test Again", Variant::Secondary)
                         .disabled(testing)
@@ -546,7 +547,9 @@ fn picker(exit: Exit) -> impl IntoElement {
                 row_button(
                     move || on_fastest(exit),
                     move || use_fastest(exit),
-                    icon(Icon::Bolt, 15.0).text_color(move || theme().primary).into_element(),
+                    icon(Icon::Bolt, 15.0)
+                        .text_color(move || theme().primary)
+                        .into_element(),
                     ui::body("Fastest").font_weight(FontWeight::MEDIUM),
                     ui::muted(move || -> SharedString {
                         store.state.with(|_| ());
@@ -567,7 +570,9 @@ fn picker(exit: Exit) -> impl IntoElement {
                 row_button(
                     move || false,
                     move || store.run(store.svc().ai_follow_location()),
-                    icon(Icon::Globe, 15.0).text_color(move || theme().muted_foreground).into_element(),
+                    icon(Icon::Globe, 15.0)
+                        .text_color(move || theme().muted_foreground)
+                        .into_element(),
                     ui::body("Follow Everything else"),
                     ui::muted("unpin"),
                     None,
@@ -598,7 +603,11 @@ fn picker(exit: Exit) -> impl IntoElement {
                             .child(row_button(
                                 move || holds_now && !is_open,
                                 move || {
-                                    open.set(if is_open && !expand_all { None } else { Some(region) })
+                                    open.set(if is_open && !expand_all {
+                                        None
+                                    } else {
+                                        Some(region)
+                                    })
                                 },
                                 ui::flag(c.flag.clone(), size::large()),
                                 ui::body(region).font_weight(FontWeight::MEDIUM),
@@ -606,15 +615,20 @@ fn picker(exit: Exit) -> impl IntoElement {
                                 Some(is_open),
                                 Some(move || health),
                             ))
-                            .child(when(move || is_open, move || {
-                                let servers = servers.clone();
-                                let now = now.clone();
-                                view().pb_1().children(servers.into_iter().map(move |s| {
-                                    let chosen = manual && now.as_deref() == Some(s.name.as_str());
-                                    let name = s.name.clone();
-                                    server_row(s, chosen).on_press(move || pick(exit, name.clone()))
-                                }))
-                            }))
+                            .child(when(
+                                move || is_open,
+                                move || {
+                                    let servers = servers.clone();
+                                    let now = now.clone();
+                                    view().pb_1().children(servers.into_iter().map(move |s| {
+                                        let chosen =
+                                            manual && now.as_deref() == Some(s.name.as_str());
+                                        let name = s.name.clone();
+                                        server_row(s, chosen)
+                                            .on_press(move || pick(exit, name.clone()))
+                                    }))
+                                },
+                            ))
                             .into_element()
                     }))
                     .into_element()
@@ -630,7 +644,11 @@ fn picker(exit: Exit) -> impl IntoElement {
                 .cursor_pointer()
                 .hover(|s| s.bg(move || theme().accent))
                 .child(ui::muted(move || -> SharedString {
-                    if all.get() { "Fewer servers".into() } else { "All servers…".into() }
+                    if all.get() {
+                        "Fewer servers".into()
+                    } else {
+                        "All servers…".into()
+                    }
                 })),
         )
 }
@@ -673,8 +691,15 @@ fn row_button(
                 )
         }))
         .child(chevron.map(|open| {
-            icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, 12.0)
-                .text_color(move || theme().muted_foreground)
+            icon(
+                if open {
+                    Icon::ChevronDown
+                } else {
+                    Icon::ChevronRight
+                },
+                12.0,
+            )
+            .text_color(move || theme().muted_foreground)
         }))
 }
 
@@ -693,9 +718,11 @@ fn server_row(p: Place, chosen: bool) -> nsh_base::ButtonElement {
         .cursor_pointer()
         .hover(|s| s.bg(move || theme().accent))
         .style_when(move || chosen, |s| s.bg(ui::selection))
-        .child(view().w(px(16.0)).child(
-            chosen.then(|| icon(Icon::Check, 14.0).text_color(move || theme().primary)),
-        ))
+        .child(
+            view()
+                .w(px(16.0))
+                .child(chosen.then(|| icon(Icon::Check, 14.0).text_color(move || theme().primary))),
+        )
         .child(ui::body(p.title.clone()).number_of_lines(1))
         .child(view().flex_1())
         .child(

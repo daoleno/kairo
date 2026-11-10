@@ -100,7 +100,9 @@ fn core_footer() -> impl IntoElement {
         )
         // A newer Kairo: Download, its progress, then Restart to Update.
         .child(dynamic(move || {
-            let b = store.state.with(|s| crate::chrome::update_button(&s.update));
+            let b = store
+                .state
+                .with(|s| crate::chrome::update_button(&s.update));
             untracked(move || match b {
                 Some(b) => ui::btn_icon(Icon::Download, b.label, ui::Variant::Primary)
                     .disabled(!b.enabled)

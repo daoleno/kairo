@@ -150,6 +150,7 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
         .collect()
 }
 
+#[cfg(test)]
 /// The line under the board's title.
 pub fn summary(tiles: &[Tile], checking: bool) -> String {
     let look = tiles
@@ -368,17 +369,29 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
             });
             let (status, sees_flag, sees, tone) = match t.tone {
                 Tone::Idle => (t.line1.clone(), "◎".to_owned(), "—".to_owned(), Tone::Idle),
-                Tone::Bad => ("Unreachable".to_owned(), "◎".to_owned(), "—".to_owned(), Tone::Bad),
-                Tone::Look if !check.is_some_and(|c| c.reachable) => {
-                    ("Unreachable".to_owned(), "◎".to_owned(), "—".to_owned(), Tone::Bad)
-                }
+                Tone::Bad => (
+                    "Unreachable".to_owned(),
+                    "◎".to_owned(),
+                    "—".to_owned(),
+                    Tone::Bad,
+                ),
+                Tone::Look if !check.is_some_and(|c| c.reachable) => (
+                    "Unreachable".to_owned(),
+                    "◎".to_owned(),
+                    "—".to_owned(),
+                    Tone::Bad,
+                ),
                 _ => {
                     let api_trouble = matches!(
                         check.map(|c| &c.api),
                         Some(Api::Unexpected { .. } | Api::Unreachable { .. })
                     );
                     (
-                        if api_trouble { "API not answering".to_owned() } else { "Reachable".to_owned() },
+                        if api_trouble {
+                            "API not answering".to_owned()
+                        } else {
+                            "Reachable".to_owned()
+                        },
                         t.flag.clone(),
                         country.clone().unwrap_or_else(|| "—".into()),
                         if api_trouble { Tone::Look } else { Tone::Ok },
@@ -413,7 +426,12 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
                 sees,
                 odd: is_odd,
                 goes,
-                used_by: if t.line2 == "Not where the others are" || t.line2.starts_with("Its API") || t.line2 == "No answer" || t.line2 == "Estimated" || t.line2 == "Not in use" {
+                used_by: if t.line2 == "Not where the others are"
+                    || t.line2.starts_with("Its API")
+                    || t.line2 == "No answer"
+                    || t.line2 == "Estimated"
+                    || t.line2 == "Not in use"
+                {
                     String::new()
                 } else {
                     t.line2.clone()
@@ -432,13 +450,24 @@ pub fn table_summary(rows: &[Row], checking: bool) -> (String, bool) {
         .count();
     if problems > 0 {
         return (
-            if problems == 1 { "1 problem".into() } else { format!("{problems} problems") },
+            if problems == 1 {
+                "1 problem".into()
+            } else {
+                format!("{problems} problems")
+            },
             true,
         );
     }
     let ok = rows.iter().filter(|r| r.tone == Tone::Ok).count();
     if ok == 0 {
-        return (if checking { "Checking…".into() } else { "Not checked yet".into() }, false);
+        return (
+            if checking {
+                "Checking…".into()
+            } else {
+                "Not checked yet".into()
+            },
+            false,
+        );
     }
     // What was measured: where they answered and what they see.
     let flags: std::collections::BTreeSet<&str> = rows
@@ -458,69 +487,66 @@ pub fn table_summary(rows: &[Row], checking: bool) -> (String, bool) {
 pub fn board() -> impl IntoElement {
     let store = store();
     let selected = signal(None::<&'static str>);
-    let rows = computed(move || {
-        store
-            .state
-            .with(|s| store.activity.with(|a| rows(s, &a.0)))
-    });
+    let rows = computed(move || store.state.with(|s| store.activity.with(|a| rows(s, &a.0))));
     let checking = move || store.state.with(|s| s.ai.checking);
     when(on, move || {
-        view()
-            .gap_3()
-            .child(alerts())
-            .child(
-                crate::ui::card_soft()
-                    .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap_3()
-                            .px_5()
-                            .pt_4()
-                            .pb_2()
-                            .child(ui::body("AI").font_weight(FontWeight::SEMIBOLD))
-                            .child(
-                                text(move || -> SharedString {
-                                    table_summary(&rows.get(), checking()).0.into()
-                                })
-                                .text_size(px(size::body()))
-                                .text_color(move || {
-                                    if table_summary(&rows.get(), checking()).1 {
-                                        ui::warning()
+        view().gap_3().child(alerts()).child(
+            crate::ui::card_soft()
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_3()
+                        .px_5()
+                        .pt_4()
+                        .pb_2()
+                        .child(ui::body("AI").font_weight(FontWeight::SEMIBOLD))
+                        .child(
+                            text(move || -> SharedString {
+                                table_summary(&rows.get(), checking()).0.into()
+                            })
+                            .text_size(px(size::body()))
+                            .text_color(move || {
+                                if table_summary(&rows.get(), checking()).1 {
+                                    ui::warning()
+                                } else {
+                                    theme().muted_foreground
+                                }
+                            })
+                            .flex_1(),
+                        )
+                        .child(
+                            ui::capsule(
+                                move || -> SharedString {
+                                    if checking() {
+                                        "Checking…".into()
                                     } else {
-                                        theme().muted_foreground
+                                        "Check Now".into()
                                     }
-                                })
-                                .flex_1(),
+                                },
+                                false,
                             )
-                            .child(
-                                ui::capsule(
-                                    move || -> SharedString {
-                                        if checking() { "Checking…".into() } else { "Check Now".into() }
-                                    },
-                                    false,
-                                )
-                                .h(px(30.0))
-                                .px_4()
-                                .disabled(checking)
-                                .on_press(move || store.run(store.svc().check_ai())),
-                            ),
-                    )
-                    .child(header_row())
-                    .child(dynamic(move || {
-                        let rows = rows.get();
-                        untracked(move || {
-                            view()
-                                .children(rows.into_iter().map(move |r| table_row(r, selected)))
-                                .into_element()
-                        })
-                    }))
-                    .child(when(
-                        move || selected.get().is_some(),
-                        move || view().p_4().child(detail(selected)),
-                    ))
-                    .child(lanes()),
-            )
+                            .h(px(30.0))
+                            .px_4()
+                            .disabled(checking)
+                            .on_press(move || store.run(store.svc().check_ai())),
+                        ),
+                )
+                .child(header_row())
+                .child(dynamic(move || {
+                    let rows = rows.get();
+                    untracked(move || {
+                        view()
+                            .children(rows.into_iter().map(move |r| table_row(r, selected)))
+                            .into_element()
+                    })
+                }))
+                .child(when(
+                    move || selected.get().is_some(),
+                    move || view().p_4().child(detail(selected)),
+                ))
+                .child(lanes()),
+        )
     })
 }
 
@@ -564,9 +590,16 @@ fn table_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement
     let store = store();
     nsh_base::button()
         .w_full()
-        .accessibility_label(format!("{}: {} · sees {} · {}", r.name, r.status, r.sees, r.goes))
+        .accessibility_label(format!(
+            "{}: {} · sees {} · {}",
+            r.name, r.status, r.sees, r.goes
+        ))
         .on_press(move || {
-            selected.set(if selected.get_untracked() == Some(id) { None } else { Some(id) })
+            selected.set(if selected.get_untracked() == Some(id) {
+                None
+            } else {
+                Some(id)
+            })
         })
         .flex_row()
         .items_center()
@@ -599,13 +632,27 @@ fn table_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement
                 .child(
                     ui::body(r.sees.clone())
                         .number_of_lines(1)
-                        .font_weight(if r.odd { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                        .font_weight(if r.odd {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
                         .text_color(move || {
-                            if r.odd { ui::warning() } else { theme().foreground }
+                            if r.odd {
+                                ui::warning()
+                            } else {
+                                theme().foreground
+                            }
                         }),
                 ),
         )
-        .child(cell(3).child(ui::muted(r.goes.clone()).text_size(px(size::body())).number_of_lines(1)))
+        .child(
+            cell(3).child(
+                ui::muted(r.goes.clone())
+                    .text_size(px(size::body()))
+                    .number_of_lines(1),
+            ),
+        )
         .child(
             cell(4).justify_end().child(match r.fix {
                 Some(fix) => ui::capsule(
@@ -640,9 +687,12 @@ fn use_ai_exit(store: crate::store::Store, id: &'static str) {
     let Some(service) = ai::SERVICES.iter().find(|s| s.id == id) else {
         return;
     };
-    let ids: Vec<String> = store
-        .state
-        .with_untracked(|s| site_routes(s, service).into_iter().map(|r| r.id.clone()).collect());
+    let ids: Vec<String> = store.state.with_untracked(|s| {
+        site_routes(s, service)
+            .into_iter()
+            .map(|r| r.id.clone())
+            .collect()
+    });
     for rid in ids {
         store.run(store.svc().remove_route(rid));
     }

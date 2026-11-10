@@ -41,7 +41,9 @@ pub fn exit_title(exit: &RouteExit) -> String {
                 is_group: false,
             })
             .region;
-            let flag = p.0.or_else(|| places::region_flag(country)).unwrap_or_default();
+            let flag =
+                p.0.or_else(|| places::region_flag(country))
+                    .unwrap_or_default();
             if country == "Other" {
                 format!("{flag} {}", p.1.trim()).trim().to_owned()
             } else {
@@ -67,7 +69,9 @@ fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
         ),
         (Choice::Exit(RouteExit::Direct), "Direct".into()),
     ];
-    let preferred = store.state.with_untracked(|s| s.settings.tray_group.clone());
+    let preferred = store
+        .state
+        .with_untracked(|s| s.settings.tray_group.clone());
     store.proxies.with_untracked(|p| {
         if let Some(g) = places::main_group(&p.0.groups, &preferred) {
             let all = places::places(&p.0.groups, g);
@@ -84,7 +88,10 @@ fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
                         .clone()
                         .or_else(|| places::region_flag(region))
                         .unwrap_or_default();
-                    out.push((Choice::Exit(exit), format!("{flag} {region}").trim().to_owned()));
+                    out.push((
+                        Choice::Exit(exit),
+                        format!("{flag} {region}").trim().to_owned(),
+                    ));
                 }
             }
         }
@@ -292,7 +299,10 @@ fn subscription_row() -> impl IntoElement {
             } else {
                 format!("{} and {more} more groups", names.join(", "))
             };
-            (title, format!("{profile}'s own choices · used for anything above set to “usual”"))
+            (
+                title,
+                format!("{profile}'s own choices · used for anything above set to “usual”"),
+            )
         })
     };
     when(
@@ -307,8 +317,14 @@ fn subscription_row() -> impl IntoElement {
                             view()
                                 .flex_1()
                                 .min_w(px(0.0))
-                                .child(ui::body(move || -> SharedString { summary().0.into() }).number_of_lines(1))
-                                .child(ui::muted(move || -> SharedString { summary().1.into() }).number_of_lines(1)),
+                                .child(
+                                    ui::body(move || -> SharedString { summary().0.into() })
+                                        .number_of_lines(1),
+                                )
+                                .child(
+                                    ui::muted(move || -> SharedString { summary().1.into() })
+                                        .number_of_lines(1),
+                                ),
                         )
                         .child(
                             ui::capsule("Show", false)
@@ -481,6 +497,9 @@ mod tests {
         assert_eq!(exit_title(&RouteExit::Ai), "AI exit");
         assert_eq!(exit_title(&RouteExit::Everything), "Everything else");
         assert_eq!(exit_title(&RouteExit::Block), "Block");
-        assert_eq!(exit_title(&RouteExit::Node("🇺🇸 Seattle 02".into())), "🇺🇸 United States");
+        assert_eq!(
+            exit_title(&RouteExit::Node("🇺🇸 Seattle 02".into())),
+            "🇺🇸 United States"
+        );
     }
 }

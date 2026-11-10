@@ -145,7 +145,9 @@ fn commands(store: Store) -> Vec<Command> {
         })
     }));
     // Every place, by delay.
-    let ai_on = store.state.with(|s| s.settings.ai.enabled && !s.ai.group.is_empty());
+    let ai_on = store
+        .state
+        .with(|s| s.settings.ai.enabled && !s.ai.group.is_empty());
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
     let mut list = store.proxies.with(|p| {
         places::main_group(&p.0.groups, &preferred)
@@ -182,12 +184,9 @@ fn commands(store: Store) -> Vec<Command> {
             move |s| s.run(s.svc().set_location(Some(name.clone()))),
         ));
         if ai_on {
-            out.push(cmd(
-                title,
-                detail("AI exit"),
-                Icon::Globe,
-                move |s| s.run(s.svc().set_ai_exit(for_ai.clone())),
-            ));
+            out.push(cmd(title, detail("AI exit"), Icon::Globe, move |s| {
+                s.run(s.svc().set_ai_exit(for_ai.clone()))
+            }));
         }
     }
     out

@@ -103,9 +103,7 @@ pub fn page() -> impl IntoElement {
     let all = store.all_connections;
     let apps = computed(move || {
         let q = query.get();
-        store
-            .activity
-            .with(|a| app_rows(&a.0.apps(), &q))
+        store.activity.with(|a| app_rows(&a.0.apps(), &q))
     });
     let total = move || store.connections.with(|c| c.0.list.len());
     view()
@@ -365,30 +363,32 @@ fn app_row(r: AppRow) -> impl IntoElement {
         .border_t_1()
         .border_color(move || theme().border.opacity(0.7))
         .child(
-            cell(0)
-                .child(letter(&name))
-                .child(
-                    view()
-                        .min_w(px(0.0))
-                        .child(ui::body(r.name.clone()).number_of_lines(1))
-                        .child(ui::muted(r.open.clone()).text_size(px(size::small()))),
-                ),
+            cell(0).child(letter(&name)).child(
+                view()
+                    .min_w(px(0.0))
+                    .child(ui::body(r.name.clone()).number_of_lines(1))
+                    .child(ui::muted(r.open.clone()).text_size(px(size::small()))),
+            ),
         )
         .child(
             cell(1).flex_wrap().gap_1p5().children(
                 r.talks
                     .iter()
                     .map(|(t, ai)| pill(t.clone(), *ai).into_element())
-                    .chain((r.more > 0).then(|| {
-                        ui::muted(format!("+{}", r.more)).into_element()
-                    })),
+                    .chain((r.more > 0).then(|| ui::muted(format!("+{}", r.more)).into_element())),
             ),
         )
         .child(cell(2).child(ui::muted(r.goes.clone()).text_size(px(size::body()))))
-        .child(cell(3).child(
-            ui::body(if r.local || r.total == 0 { "—".to_owned() } else { bytes(r.total) })
+        .child(
+            cell(3).child(
+                ui::body(if r.local || r.total == 0 {
+                    "—".to_owned()
+                } else {
+                    bytes(r.total)
+                })
                 .tabular_nums(),
-        ))
+            ),
+        )
         .child(
             cell(4).justify_end().child(
                 ui::btn("⋯", Variant::Secondary)
@@ -399,7 +399,10 @@ fn app_row(r: AppRow) -> impl IntoElement {
                         let app = |exit: RouteExit, n: String| {
                             move || {
                                 store.run_then(
-                                    store.svc().set_route(RouteKind::App { name: n.clone() }, exit.clone()),
+                                    store.svc().set_route(
+                                        RouteKind::App { name: n.clone() },
+                                        exit.clone(),
+                                    ),
                                     move |r| {
                                         if r.is_ok() {
                                             store.info("Saved in Apps & Sites");
@@ -420,8 +423,10 @@ fn app_row(r: AppRow) -> impl IntoElement {
                             }
                         };
                         let items = vec![
-                            MenuItem::new("Always Direct").on_select(app(RouteExit::Direct, n.clone())),
-                            MenuItem::new("Always AI Exit").on_select(app(RouteExit::Ai, n.clone())),
+                            MenuItem::new("Always Direct")
+                                .on_select(app(RouteExit::Direct, n.clone())),
+                            MenuItem::new("Always AI Exit")
+                                .on_select(app(RouteExit::Ai, n.clone())),
                             MenuItem::new("Block").on_select(app(RouteExit::Block, n.clone())),
                             MenuItem::separator(),
                             MenuItem::new("Show Connections").on_select(show),
@@ -493,8 +498,20 @@ mod tests {
         t.ingest(
             &[
                 conn("1", "chatgpt.com", "Safari", &["Tokyo 03", "Kairo AI"], 900),
-                conn("2", "www.youtube.com", "Safari", &["Hong Kong 01", "Proxy"], 4000),
-                conn("3", "github.com", "git", &["Hong Kong 02", "Kairo Downloads"], 700),
+                conn(
+                    "2",
+                    "www.youtube.com",
+                    "Safari",
+                    &["Hong Kong 01", "Proxy"],
+                    4000,
+                ),
+                conn(
+                    "3",
+                    "github.com",
+                    "git",
+                    &["Hong Kong 02", "Kairo Downloads"],
+                    700,
+                ),
             ],
             now,
         );
@@ -509,14 +526,18 @@ mod tests {
         let safari = rows.iter().find(|r| r.name == "Safari").unwrap();
         assert_eq!(
             safari.talks,
-            vec![("ChatGPT".to_owned(), true), ("youtube.com".to_owned(), false)]
+            vec![
+                ("ChatGPT".to_owned(), true),
+                ("youtube.com".to_owned(), false)
+            ]
         );
         assert_eq!(safari.goes, "Everything else · AI exit");
         assert_eq!(safari.total, 4900);
         assert_eq!(safari.open, "2 open");
-        let git = rows.iter().find(|r| r.name == "Git").unwrap_or_else(|| {
-            rows.iter().find(|r| r.name != "Safari").unwrap()
-        });
+        let git = rows
+            .iter()
+            .find(|r| r.name == "Git")
+            .unwrap_or_else(|| rows.iter().find(|r| r.name != "Safari").unwrap());
         assert_eq!(git.goes, "Downloads");
     }
 
@@ -534,7 +555,15 @@ mod tests {
         let mut t = Tally::default();
         let now = parse_time("2026-11-09T15:00:00Z").unwrap() + 5;
         let conns: Vec<Connection> = (0..7)
-            .map(|i| conn(&i.to_string(), &format!("site{i}.com"), "Safari", &["n", "Proxy"], 10 + i))
+            .map(|i| {
+                conn(
+                    &i.to_string(),
+                    &format!("site{i}.com"),
+                    "Safari",
+                    &["n", "Proxy"],
+                    10 + i,
+                )
+            })
             .collect();
         t.ingest(&conns, now);
         let rows = app_rows(&t.apps(), "");
@@ -552,7 +581,11 @@ mod tests {
             since: 0,
         };
         assert_eq!(
-            bypassing_tools(&[b("Cursor", "1.1.1.1:443"), b("Cursor", "2.2.2.2:443"), b("claude", "3.3.3.3:443")]),
+            bypassing_tools(&[
+                b("Cursor", "1.1.1.1:443"),
+                b("Cursor", "2.2.2.2:443"),
+                b("claude", "3.3.3.3:443")
+            ]),
             vec!["Cursor".to_owned(), "claude".to_owned()]
         );
     }

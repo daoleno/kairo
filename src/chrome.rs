@@ -307,19 +307,41 @@ mod update_tests {
         let b = |u: U| update_button(&u);
         assert_eq!(b(U::Idle), None);
         assert_eq!(b(U::Checking), None);
-        assert_eq!(b(U::UpToDate { checked: "10:00".into() }), None);
         assert_eq!(
-            b(U::Available { version: v() }),
-            Some(UpdateButton { label: "Download Kairo 0.3.1".into(), enabled: true })
+            b(U::UpToDate {
+                checked: "10:00".into()
+            }),
+            None
         );
         assert_eq!(
-            b(U::Downloading { version: v(), progress: Some(0.42) }),
-            Some(UpdateButton { label: "Downloading… 42%".into(), enabled: false })
+            b(U::Available { version: v() }),
+            Some(UpdateButton {
+                label: "Download Kairo 0.3.1".into(),
+                enabled: true
+            })
+        );
+        assert_eq!(
+            b(U::Downloading {
+                version: v(),
+                progress: Some(0.42)
+            }),
+            Some(UpdateButton {
+                label: "Downloading… 42%".into(),
+                enabled: false
+            })
         );
         assert_eq!(
             b(U::Ready { version: v() }),
-            Some(UpdateButton { label: "Restart to Update to 0.3.1".into(), enabled: true })
+            Some(UpdateButton {
+                label: "Restart to Update to 0.3.1".into(),
+                enabled: true
+            })
         );
-        assert_eq!(b(U::Failed { message: "x".into() }), None);
+        assert_eq!(
+            b(U::Failed {
+                message: "x".into()
+            }),
+            None
+        );
     }
 }

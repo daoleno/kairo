@@ -210,7 +210,10 @@ pub fn site_of(host: &str) -> String {
     }
     let n = labels.len();
     let second_level = labels[n - 1].len() == 2
-        && matches!(labels[n - 2], "co" | "com" | "org" | "net" | "gov" | "edu" | "ac");
+        && matches!(
+            labels[n - 2],
+            "co" | "com" | "org" | "net" | "gov" | "edu" | "ac"
+        );
     labels[n - if second_level { 3 } else { 2 }..].join(".")
 }
 
@@ -581,14 +584,41 @@ mod tests {
     #[test]
     fn every_app_is_counted_with_its_sites_and_exits() {
         let mut t = Tally::default();
-        t.names = ExitNames { ai: "Kairo AI".into(), downloads: "Kairo Downloads".into() };
+        t.names = ExitNames {
+            ai: "Kairo AI".into(),
+            downloads: "Kairo Downloads".into(),
+        };
         let s = "2026-11-09T15:00:00Z";
         let now = parse_time(s).unwrap();
-        let mut ai = conn("1", "chatgpt.com", "Safari", "/Applications/Safari.app/x", 10, 900, s);
+        let mut ai = conn(
+            "1",
+            "chatgpt.com",
+            "Safari",
+            "/Applications/Safari.app/x",
+            10,
+            900,
+            s,
+        );
         ai.chains = vec!["Tokyo 03".into(), "Kairo AI".into()];
-        let mut video = conn("2", "www.youtube.com", "Safari", "/Applications/Safari.app/x", 5, 4000, s);
+        let mut video = conn(
+            "2",
+            "www.youtube.com",
+            "Safari",
+            "/Applications/Safari.app/x",
+            5,
+            4000,
+            s,
+        );
         video.chains = vec!["Hong Kong 01".into(), "Proxy".into()];
-        let mut direct = conn("3", "www.bilibili.com", "Safari", "/Applications/Safari.app/x", 1, 100, s);
+        let mut direct = conn(
+            "3",
+            "www.bilibili.com",
+            "Safari",
+            "/Applications/Safari.app/x",
+            1,
+            100,
+            s,
+        );
         direct.chains = vec!["DIRECT".into()];
         t.ingest(&[ai, video, direct], now + 5);
         let apps = t.apps();
@@ -610,7 +640,10 @@ mod tests {
 
     #[test]
     fn names_the_exit_by_the_group_in_the_chain() {
-        let names = ExitNames { ai: "Kairo AI".into(), downloads: "Kairo Downloads".into() };
+        let names = ExitNames {
+            ai: "Kairo AI".into(),
+            downloads: "Kairo Downloads".into(),
+        };
         let mut c = conn("1", "x.com", "a", "", 0, 0, "");
         c.chains = vec!["n".into(), "Proxy".into()];
         assert_eq!(exit_of(&c, &names), ExitKind::Rest);
