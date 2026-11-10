@@ -145,7 +145,12 @@ fn route_row(r: Route) -> impl IntoElement {
         .child(
             view()
                 .flex_1()
-                .min_w(px(if ui::phone() { size::body() * 7.0 } else { 0.0 }))
+                .min_w(px(if ui::phone() {
+                    // Seven characters' width at the system font size: never a word cut in the middle.
+                    size::body() * 7.0 * nsh_core::prelude::font_scale().max(1.0)
+                } else {
+                    0.0
+                }))
                 .child(ui::body(name).number_of_lines(1))
                 .child(detail.map(ui::muted)),
         )

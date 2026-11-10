@@ -112,10 +112,11 @@ pub fn page() -> impl IntoElement {
             Page::Activity,
             move || {
                 let n = apps.with(|a| a.len());
+                let c = total();
                 format!(
-                    "{n} {} · {} connections",
+                    "{n} {} · {c} {}",
                     if n == 1 { "app" } else { "apps" },
-                    total()
+                    if c == 1 { "connection" } else { "connections" }
                 )
             },
             vec![

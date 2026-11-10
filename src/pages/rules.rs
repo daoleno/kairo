@@ -106,7 +106,7 @@ pub fn page() -> impl IntoElement {
             move || {
                 let (n, all) = (shown.with(|s| s.len()), rules.with(|r| r.len()));
                 if n == all {
-                    format!("{all} rules")
+                    format!("{all} {}", if all == 1 { "rule" } else { "rules" })
                 } else {
                     format!("{n} of {all}")
                 }
@@ -424,8 +424,9 @@ fn provider_list(
                                                         ];
                                                         parts.retain(|s| !s.is_empty());
                                                         parts.push(format!(
-                                                            "{} rules",
-                                                            p.rule_count
+                                                            "{} {}",
+                                                            p.rule_count,
+                                                            if p.rule_count == 1 { "rule" } else { "rules" }
                                                         ));
                                                         if let Some(at) = p.updated_at.as_deref() {
                                                             parts.push(format!(
