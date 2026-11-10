@@ -2217,6 +2217,16 @@ impl Service {
         self.run(async move { crate::update::check(&svc).await })
     }
 
+    /// Downloads the update on offer ([`crate::UpdateStatus::Available`]):
+    /// `Available` → `Downloading` → `Ready`. A failure puts it back to
+    /// `Available` and tells the person in a notice; the future still
+    /// resolves `Ok` then (read the state). Asked again meanwhile, it does
+    /// nothing.
+    pub fn download_update(&self) -> impl Future<Output = Result<(), String>> + 'static {
+        let svc = self.clone();
+        self.run(async move { crate::update::download(&svc).await })
+    }
+
     /// Installs the downloaded update and restarts into it.
     pub fn restart_to_update(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();

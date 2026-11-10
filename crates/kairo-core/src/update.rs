@@ -6,10 +6,11 @@
 //! public key is compiled in below. Kairo:
 //!
 //! 1. fetches the latest manifest (on launch, then every few hours) and
-//!    checks its signature;
-//! 2. if it names a newer version, downloads this installation's package and
-//!    checks its SHA-256 against the signed manifest and the release's
-//!    `SHA256SUMS`;
+//!    checks its signature; if it names a newer version, the state is
+//!    [`UpdateStatus::Available`] and nothing more happens by itself;
+//! 2. on "Download" ([`Service::download_update`]), downloads this
+//!    installation's package and checks its SHA-256 against the signed
+//!    manifest and the release's `SHA256SUMS`;
 //! 3. keeps it under `<home>/update/` and offers "Restart to Update". That
 //!    tap installs it and starts the new Kairo.
 //!
@@ -82,6 +83,11 @@ pub enum UpdateStatus {
     /// When the last check found nothing newer (`HH:MM`, local time).
     UpToDate {
         checked: String,
+    },
+    /// A newer Kairo exists (its manifest is signed and checked); nothing is
+    /// downloaded until [`Service::download_update`] is asked.
+    Available {
+        version: String,
     },
     Downloading {
         version: String,
@@ -333,7 +339,7 @@ fn host(url: &str) -> String {
 
 /// What is waiting in `<home>/update/`.
 #[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
-struct Staged {
+pub(crate) struct Staged {
     version: String,
     file: String,
     sha256: String,
@@ -386,8 +392,103 @@ pub fn spawn_checks(svc: Service) {
     });
 }
 
-/// Looks for a newer Kairo and downloads it. `Ok(Some(version))` when one is
-/// ready (or can only be downloaded by hand), `Ok(None)` when up to date.
+/// What a verified manifest means for this installation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Found {
+    /// Nothing newer than this Kairo.
+    Nothing,
+    /// A newer one, already downloaded and verified.
+    Staged(String),
+    /// A newer one this installation can download and install by itself.
+    Downloadable(String),
+    /// A newer one this installation cannot install by itself.
+    Manual { version: String, url: String },
+}
+
+impl Found {
+    fn version(&self) -> Option<&str> {
+        match self {
+            Found::Nothing => None,
+            Found::Staged(v) | Found::Downloadable(v) => Some(v),
+            Found::Manual { version, .. } => Some(version),
+        }
+    }
+}
+
+/// Reads a manifest: whether it is newer, whether its package is already on
+/// disk, and whether this installation can install it. Pure.
+pub(crate) fn classify(
+    manifest: &Manifest,
+    current: &str,
+    staged: Option<&Staged>,
+    staged_file_present: bool,
+    package: Option<&Package>,
+) -> Found {
+    let version = &manifest.version;
+    if !is_newer(version, current) {
+        return Found::Nothing;
+    }
+    if staged_file_present && staged.is_some_and(|s| &s.version == version) {
+        return Found::Staged(version.clone());
+    }
+    if package.is_none() {
+        return Found::Manual {
+            version: version.clone(),
+            url: format!("{RELEASES}/tag/v{version}"),
+        };
+    }
+    Found::Downloadable(version.clone())
+}
+
+/// The status after a check that `found` something, given the one before.
+/// What is already on offer at that version (or a newer one) is not flipped
+/// back or restarted; a download in progress is never interrupted. A newer
+/// version than the one downloaded replaces `Ready` with `Available` (the
+/// older file stays on disk until the new download replaces it).
+pub(crate) fn after_check(previous: &UpdateStatus, found: Found, checked: &str) -> UpdateStatus {
+    use UpdateStatus::*;
+    if matches!(previous, Installing { .. } | Downloading { .. }) {
+        return previous.clone();
+    }
+    // Already offering `v` or something newer.
+    let offered = |v: &str| match previous {
+        Available { version } | Manual { version, .. } => !is_newer(v, version),
+        // A download of a newer version than the manifest names (a release
+        // taken back): kept. The same version with no file left is not.
+        Ready { version } => is_newer(version, v),
+        _ => false,
+    };
+    match found {
+        Found::Nothing => match previous {
+            // The download stays offered even if the manifest moved on.
+            Ready { .. } => previous.clone(),
+            _ => UpToDate {
+                checked: checked.to_owned(),
+            },
+        },
+        Found::Staged(version) => Ready { version },
+        Found::Downloadable(v) if offered(&v) => previous.clone(),
+        Found::Downloadable(version) => Available { version },
+        Found::Manual { version, .. } if offered(&version) => previous.clone(),
+        Found::Manual { version, url } => Manual { version, url },
+    }
+}
+
+/// Whether a check shows no "Checking…" over this status: something is
+/// already on offer, and a check only looks for something newer.
+fn quiet(status: &UpdateStatus) -> bool {
+    matches!(
+        status,
+        UpdateStatus::Ready { .. }
+            | UpdateStatus::Available { .. }
+            | UpdateStatus::Manual { .. }
+            | UpdateStatus::Downloading { .. }
+    )
+}
+
+/// Looks for a newer Kairo (the signed manifest only: nothing is downloaded;
+/// see [`download`]). `Ok(Some(version))` when one is on offer, `Ok(None)`
+/// when up to date.
 pub async fn check(svc: &Service) -> Result<Option<String>, String> {
     let _busy = match svc.update_lock().try_lock() {
         Ok(g) => g,
@@ -397,38 +498,55 @@ pub async fn check(svc: &Service) -> Result<Option<String>, String> {
     if matches!(previous, UpdateStatus::Installing { .. }) {
         return Ok(None);
     }
-    // With an update waiting, a check only looks for something newer, quietly.
-    let quiet = matches!(previous, UpdateStatus::Ready { .. });
-    if !quiet {
+    let silent = quiet(&previous);
+    if !silent {
         svc.set_update(UpdateStatus::Checking);
     }
     let result = check_inner(svc).await;
     match &result {
-        Ok(None) if quiet => svc.set_update(previous),
-        Ok(None) => svc.set_update(UpdateStatus::UpToDate {
-            checked: crate::service::clock()[..5].to_owned(),
-        }),
-        Ok(Some(_)) => {}
-        Err(e) if quiet => {
+        Ok(found) => {
+            let checked = crate::service::clock()[..5].to_owned();
+            svc.set_update(after_check(&previous, found.clone(), &checked));
+        }
+        Err(e) if silent => {
             log::warn!("update: {e}");
             svc.set_update(previous);
         }
         Err(e) => svc.set_update(UpdateStatus::Failed { message: e.clone() }),
     }
-    result
+    result.map(|f| f.version().map(str::to_owned))
 }
 
-async fn check_inner(svc: &Service) -> Result<Option<String>, String> {
+async fn check_inner(svc: &Service) -> Result<Found, String> {
     let routes = svc.download_routes();
     let mut last_err = String::new();
     for proxy in &routes {
-        match fetch_and_stage(svc, proxy.as_deref()).await {
-            Ok(r) => return Ok(r),
+        match fetch_manifest(proxy.as_deref()).await {
+            Ok(m) => {
+                let dir = svc.paths().update_dir();
+                let staged = staged_info(&dir);
+                let present = staged.as_ref().is_some_and(|s| dir.join(&s.file).is_file());
+                let package = package_of(&m);
+                return Ok(classify(
+                    &m,
+                    VERSION,
+                    staged.as_ref(),
+                    present,
+                    package.as_ref(),
+                ));
+            }
             Err(Fetch::Network(e)) => last_err = e,
             Err(Fetch::Fatal(e)) => return Err(e),
         }
     }
     Err(last_err)
+}
+
+/// This installation's package in a manifest.
+fn package_of(manifest: &Manifest) -> Option<Package> {
+    Install::detect()
+        .package_key()
+        .and_then(|k| manifest.packages.get(&k).cloned())
 }
 
 enum Fetch {
@@ -437,7 +555,8 @@ enum Fetch {
     Fatal(String),
 }
 
-async fn fetch_and_stage(svc: &Service, proxy: Option<&str>) -> Result<Option<String>, Fetch> {
+/// The latest manifest, its signature checked.
+async fn fetch_manifest(proxy: Option<&str>) -> Result<Manifest, Fetch> {
     let base = base_url();
     let base = base.trim_end_matches('/');
     let bytes = get(&format!("{base}/{MANIFEST}"), proxy, |_, _| {})
@@ -446,30 +565,99 @@ async fn fetch_and_stage(svc: &Service, proxy: Option<&str>) -> Result<Option<St
     let sig = get(&format!("{base}/{MANIFEST}.sig"), proxy, |_, _| {})
         .await
         .map_err(Fetch::Network)?;
-    let manifest = verify_manifest(&bytes, &String::from_utf8_lossy(&sig))
-        .map_err(|e| Fetch::Fatal(e.to_string()))?;
+    verify_manifest(&bytes, &String::from_utf8_lossy(&sig)).map_err(|e| Fetch::Fatal(e.to_string()))
+}
+
+/// Downloads the update on offer ([`UpdateStatus::Available`]): fetches the
+/// manifest again (signed), then the package, checks it, and keeps it. On
+/// failure the status goes back to `Available`, the person is told in plain
+/// words (a notice) and the call returns `Ok`: the state and the notice are
+/// the report, so a caller that shows errors itself does not say it twice.
+/// Asked again while a download runs or is done, it does nothing.
+pub async fn download(svc: &Service) -> Result<(), String> {
+    let _busy = match svc.update_lock().try_lock() {
+        Ok(g) => g,
+        // A check or a download is running: nothing to start.
+        Err(_) => return Ok(()),
+    };
+    let version = match svc.snapshot().update {
+        UpdateStatus::Available { version } => version,
+        UpdateStatus::Ready { .. } | UpdateStatus::Downloading { .. } => return Ok(()),
+        UpdateStatus::Manual { .. } => {
+            return Err("This copy of Kairo cannot update itself: use the release page".into());
+        }
+        _ => return Err("No update is waiting to be downloaded".into()),
+    };
+    svc.set_update(UpdateStatus::Downloading {
+        version: version.clone(),
+        progress: None,
+    });
+    match download_inner(svc).await {
+        Ok(ready) => svc.set_update(UpdateStatus::Ready { version: ready }),
+        Err(e) => {
+            log::warn!("update download: {}", e.detail());
+            svc.set_update(UpdateStatus::Available {
+                version: version.clone(),
+            });
+            svc.notify(failure_words(&version, &e), true);
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+enum DownloadError {
+    Network(String),
+    Verify(String),
+}
+
+impl DownloadError {
+    /// What went wrong, for the log.
+    fn detail(&self) -> &str {
+        match self {
+            DownloadError::Network(m) | DownloadError::Verify(m) => m,
+        }
+    }
+}
+
+/// What the person reads when a download did not work out.
+fn failure_words(version: &str, why: &DownloadError) -> String {
+    match why {
+        DownloadError::Network(_) => {
+            format!("Kairo {version} could not be downloaded. Check the connection and try again.")
+        }
+        DownloadError::Verify(_) => {
+            format!("Kairo {version} did not download correctly and was thrown away. Try again.")
+        }
+    }
+}
+
+async fn download_inner(svc: &Service) -> Result<String, DownloadError> {
+    let routes = svc.download_routes();
+    let mut last_err = String::new();
+    for proxy in &routes {
+        match stage(svc, proxy.as_deref()).await {
+            Ok(v) => return Ok(v),
+            Err(Fetch::Network(e)) => last_err = e,
+            Err(Fetch::Fatal(e)) => return Err(DownloadError::Verify(e)),
+        }
+    }
+    Err(DownloadError::Network(last_err))
+}
+
+/// Fetches, checks and keeps the package of the latest manifest.
+async fn stage(svc: &Service, proxy: Option<&str>) -> Result<String, Fetch> {
+    let manifest = fetch_manifest(proxy).await?;
     if !is_newer(&manifest.version, VERSION) {
-        return Ok(None);
+        return Err(Fetch::Fatal("The update is no longer on offer".to_owned()));
     }
     let version = manifest.version.clone();
     let dir = svc.paths().update_dir();
     if staged_info(&dir).is_some_and(|s| s.version == version && dir.join(&s.file).is_file()) {
-        svc.set_update(UpdateStatus::Ready {
-            version: version.clone(),
-        });
-        return Ok(Some(version));
+        return Ok(version);
     }
-    let install = Install::detect();
-    let package = install
-        .package_key()
-        .and_then(|k| manifest.packages.get(&k).cloned());
-    let Some(package) = package else {
-        svc.set_update(UpdateStatus::Manual {
-            version: version.clone(),
-            url: format!("{RELEASES}/tag/v{version}"),
-        });
-        return Ok(Some(version));
-    };
+    let package = package_of(&manifest)
+        .ok_or_else(|| Fetch::Fatal("This copy of Kairo cannot update itself".to_owned()))?;
     svc.set_update(UpdateStatus::Downloading {
         version: version.clone(),
         progress: None,
@@ -517,10 +705,7 @@ async fn fetch_and_stage(svc: &Service, proxy: Option<&str>) -> Result<Option<St
     )
     .map_err(io)?;
     log::info!("Kairo {version} downloaded and verified");
-    svc.set_update(UpdateStatus::Ready {
-        version: version.clone(),
-    });
-    Ok(Some(version))
+    Ok(version)
 }
 
 /// Installs the waiting update. Returns the executable to start: the caller
@@ -879,6 +1064,167 @@ mod tests {
         assert!(verify_package(b"other", &p, &format!("{sum}  k.tar.gz\n")).is_err());
         assert!(verify_package(bytes, &p, "ff  k.tar.gz\n").is_err());
         assert!(verify_package(bytes, &p, "").is_err());
+    }
+
+    fn manifest(version: &str) -> Manifest {
+        Manifest {
+            version: version.into(),
+            packages: Default::default(),
+        }
+    }
+
+    fn pkg() -> Package {
+        Package {
+            name: "k.tar.gz".into(),
+            sha256: "ab".into(),
+        }
+    }
+
+    fn staged(version: &str) -> Staged {
+        Staged {
+            version: version.into(),
+            file: "k.tar.gz".into(),
+            sha256: "ab".into(),
+        }
+    }
+
+    #[test]
+    fn a_manifest_is_classified_without_any_download() {
+        let p = pkg();
+        // Not newer: nothing (the same version, or an older one).
+        assert_eq!(
+            classify(&manifest("0.2.0"), "0.2.0", None, false, Some(&p)),
+            Found::Nothing
+        );
+        assert_eq!(
+            classify(&manifest("0.1.9"), "0.2.0", None, false, Some(&p)),
+            Found::Nothing
+        );
+        // Newer, can install itself: on offer, not downloaded.
+        assert_eq!(
+            classify(&manifest("0.3.0"), "0.2.0", None, false, Some(&p)),
+            Found::Downloadable("0.3.0".into())
+        );
+        // Newer, cannot: the release page.
+        assert_eq!(
+            classify(&manifest("0.3.0"), "0.2.0", None, false, None),
+            Found::Manual {
+                version: "0.3.0".into(),
+                url: format!("{RELEASES}/tag/v0.3.0"),
+            }
+        );
+        // Newer and already on disk (and still there): ready.
+        let s = staged("0.3.0");
+        assert_eq!(
+            classify(&manifest("0.3.0"), "0.2.0", Some(&s), true, Some(&p)),
+            Found::Staged("0.3.0".into())
+        );
+        // The file is gone, or it is another version: offered again.
+        assert_eq!(
+            classify(&manifest("0.3.0"), "0.2.0", Some(&s), false, Some(&p)),
+            Found::Downloadable("0.3.0".into())
+        );
+        assert_eq!(
+            classify(&manifest("0.3.1"), "0.2.0", Some(&s), true, Some(&p)),
+            Found::Downloadable("0.3.1".into())
+        );
+    }
+
+    #[test]
+    fn checks_move_the_status_only_forward() {
+        use UpdateStatus::*;
+        let avail = |v: &str| Available { version: v.into() };
+        let ready = |v: &str| Ready { version: v.into() };
+        let down = |v: &str| Found::Downloadable(v.into());
+        let up_to_date = UpToDate {
+            checked: "10:00".into(),
+        };
+        // First sight of a newer version.
+        assert_eq!(after_check(&Idle, down("0.3.0"), "10:00"), avail("0.3.0"));
+        assert_eq!(
+            after_check(&UpToDate { checked: "09:00".into() }, down("0.3.0"), "10:00"),
+            avail("0.3.0")
+        );
+        // The same again: not flipped, not restarted.
+        assert_eq!(
+            after_check(&avail("0.3.0"), down("0.3.0"), "10:00"),
+            avail("0.3.0")
+        );
+        assert_eq!(
+            after_check(&ready("0.3.0"), Found::Staged("0.3.0".into()), "10:00"),
+            ready("0.3.0")
+        );
+        // Nothing newer: what was downloaded stays offered; an offer that
+        // vanished is not one any more.
+        assert_eq!(after_check(&ready("0.3.0"), Found::Nothing, "10:00"), ready("0.3.0"));
+        assert_eq!(after_check(&avail("0.3.0"), Found::Nothing, "10:00"), up_to_date);
+        assert_eq!(after_check(&Idle, Found::Nothing, "10:00"), up_to_date);
+        // A newer one than the one on offer or downloaded replaces it.
+        assert_eq!(
+            after_check(&avail("0.3.0"), down("0.3.1"), "10:00"),
+            avail("0.3.1")
+        );
+        assert_eq!(
+            after_check(&ready("0.3.0"), down("0.3.1"), "10:00"),
+            avail("0.3.1")
+        );
+        // An older manifest (a re-published release) never takes the place of a newer offer.
+        assert_eq!(
+            after_check(&avail("0.3.1"), down("0.3.0"), "10:00"),
+            avail("0.3.1")
+        );
+        // A download in progress, or an install, is never touched.
+        let busy = Downloading {
+            version: "0.3.0".into(),
+            progress: Some(0.4),
+        };
+        assert_eq!(after_check(&busy, down("0.3.0"), "10:00"), busy);
+        assert_eq!(after_check(&busy, Found::Nothing, "10:00"), busy);
+        let installing = Installing {
+            version: "0.3.0".into(),
+        };
+        assert_eq!(after_check(&installing, down("0.3.1"), "10:00"), installing);
+        // A file left from an earlier run is found by the manifest: ready.
+        assert_eq!(
+            after_check(&avail("0.3.0"), Found::Staged("0.3.0".into()), "10:00"),
+            ready("0.3.0")
+        );
+        // Manual stays one, and is not repeated.
+        let manual = Manual {
+            version: "0.3.0".into(),
+            url: "u".into(),
+        };
+        assert_eq!(
+            after_check(
+                &manual,
+                Found::Manual {
+                    version: "0.3.0".into(),
+                    url: "u".into()
+                },
+                "10:00"
+            ),
+            manual
+        );
+    }
+
+    #[test]
+    fn checks_over_an_offer_are_quiet() {
+        use UpdateStatus::*;
+        assert!(quiet(&Available { version: "1".into() }));
+        assert!(quiet(&Ready { version: "1".into() }));
+        assert!(quiet(&Downloading { version: "1".into(), progress: None }));
+        assert!(!quiet(&Idle));
+        assert!(!quiet(&UpToDate { checked: "10:00".into() }));
+        assert!(!quiet(&Failed { message: "x".into() }));
+    }
+
+    #[test]
+    fn a_failed_download_says_what_to_do_in_plain_words() {
+        let net = failure_words("0.3.0", &DownloadError::Network("dns error".into()));
+        assert!(net.contains("0.3.0") && net.contains("connection"));
+        assert!(!net.contains("dns error"));
+        let bad = failure_words("0.3.0", &DownloadError::Verify("expected ab".into()));
+        assert!(bad.contains("thrown away") && !bad.contains("expected"));
     }
 
     #[cfg(target_os = "linux")]
