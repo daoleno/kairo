@@ -210,8 +210,14 @@ pub fn tool_of(name: &str, path: &str, home: Option<&str>) -> Option<&'static Ai
 /// proxy: one line, upper and lower case (tools read either).
 pub fn terminal_env(mixed_port: u16) -> String {
     if cfg!(windows) {
-        return terminal_env_powershell(mixed_port);
+        terminal_env_powershell(mixed_port)
+    } else {
+        terminal_env_posix(mixed_port)
     }
+}
+
+/// The same for sh, bash and zsh.
+pub fn terminal_env_posix(mixed_port: u16) -> String {
     let proxy = format!("http://127.0.0.1:{mixed_port}");
     let skip = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local";
     format!(
@@ -739,7 +745,7 @@ n192.168.1.20:52401->1.1.1.1:443
 
     #[test]
     fn the_terminal_block_is_one_line_with_both_cases() {
-        let t = terminal_env(7897);
+        let t = terminal_env_posix(7897);
         assert!(!t.contains('\n'));
         for var in [
             "HTTP_PROXY",
@@ -760,6 +766,7 @@ n192.168.1.20:52401->1.1.1.1:443
             );
         }
         assert!(t.starts_with("export "));
+        assert!(terminal_env_posix(1234).contains("127.0.0.1:1234"));
         assert!(terminal_env(1234).contains("127.0.0.1:1234"));
     }
 
