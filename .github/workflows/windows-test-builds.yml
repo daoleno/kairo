@@ -2,25 +2,19 @@ name: Windows test builds
 
 # For testing the updater end to end on a Windows machine: two builds of the
 # installer and zip, the second with a higher version, both trusting the
-# public key given here instead of the release key (the matching private key
-# signs the update manifest on the tester's machine). Nothing is released.
+# throwaway public key in windows-test/update-key.hex instead of the release
+# key (the matching private key signs the update manifest on the tester's
+# machine). Runs on pushes to windows-testbuild/* branches, which carry that
+# file; nothing is released.
 on:
-  workflow_dispatch:
-    inputs:
-      test_key_hex:
-        description: "Public half of the throwaway update key (64 hex characters)"
-        required: true
-      newer_version:
-        description: "Version of the second build"
-        required: true
-        default: "0.3.1"
+  push:
+    branches: ["windows-testbuild/**"]
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  KAIRO_TEST_UPDATE_KEY_HEX: ${{ inputs.test_key_hex }}
 
 jobs:
   build:
@@ -30,6 +24,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: choco install innosetup -y --no-progress
+      - name: The throwaway update key
+        shell: pwsh
+        run: |
+          $key = (Get-Content windows-test/update-key.hex -Raw).Trim()
+          if ($key -notmatch '^[0-9a-f]{64}$') { throw "windows-test/update-key.hex is not a public key" }
+          "KAIRO_TEST_UPDATE_KEY_HEX=$key" | Add-Content $env:GITHUB_ENV
       - name: The first build (the version in the repository)
         shell: pwsh
         run: |
@@ -37,11 +37,12 @@ jobs:
           scripts\package-windows.ps1
           New-Item -ItemType Directory -Force out\a | Out-Null
           Move-Item dist\Kairo-* out\a\
-      - name: The second build (a newer version)
+      - name: The second build (the next patch version)
         shell: pwsh
         run: |
-          $v = "${{ inputs.newer_version }}"
-          (Get-Content Cargo.toml) -replace '^version = ".*"', "version = `"$v`"" | Set-Content Cargo.toml
+          $v = [version](Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $next = "{0}.{1}.{2}" -f $v.Major, $v.Minor, ($v.Build + 1)
+          (Get-Content Cargo.toml) -replace '^version = ".*"', "version = `"$next`"" | Set-Content Cargo.toml
           $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
           scripts\package-windows.ps1
           New-Item -ItemType Directory -Force out\b | Out-Null
