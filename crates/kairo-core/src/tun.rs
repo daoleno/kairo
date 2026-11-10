@@ -24,6 +24,10 @@ pub enum Privilege {
 }
 
 pub fn status(core: &Path) -> Privilege {
+    // Android: the VPN permission, asked for when connecting, is all it takes.
+    if cfg!(target_os = "android") {
+        return Privilege::Granted;
+    }
     if !core.exists() {
         return Privilege::Needed;
     }

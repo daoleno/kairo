@@ -462,6 +462,21 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
         set(dns, "enhanced-mode", "redir-host");
         set(dns, "nameserver", Value::Sequence(vec!["system".into()]));
     }
+    // Android: the tun device is the VPN service's, handed over as a
+    // descriptor; the core must not touch routes or look for an interface.
+    #[cfg(target_os = "android")]
+    if s.tun
+        && let Some(fd) = crate::android::tun_fd()
+    {
+        let tun = sub(config, "tun");
+        set(tun, "file-descriptor", fd as i64);
+        set(tun, "auto-route", false);
+        set(tun, "auto-detect-interface", false);
+        set(tun, "stack", "gvisor");
+        set(tun, "inet4-address", Value::Sequence(vec!["172.19.0.1/30".into()]));
+        set(tun, "dns-hijack", Value::Sequence(vec!["any:53".into(), "tcp://any:53".into()]));
+        set(config, "find-process-mode", "off");
+    }
 }
 
 /// Asks the core whether `config` (a file in `dir`) is valid. The error is the

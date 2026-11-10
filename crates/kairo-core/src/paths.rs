@@ -40,6 +40,11 @@ impl Paths {
         if let Some(home) = std::env::var_os("KAIRO_HOME") {
             return PathBuf::from(home);
         }
+        // Android: the app's own files directory (the Java side tells us).
+        #[cfg(target_os = "android")]
+        if let Some(files) = crate::android::files_dir() {
+            return files;
+        }
         let user_home = std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from)
@@ -79,6 +84,12 @@ impl Paths {
         self.home.join("core")
     }
     pub fn core_bin(&self) -> PathBuf {
+        // Android: the core runs where the APK installer put it (an app may
+        // not execute a file from its data directory).
+        #[cfg(target_os = "android")]
+        if let Some(core) = crate::android::core() {
+            return core;
+        }
         self.core_dir().join(if cfg!(windows) {
             "mihomo.exe"
         } else {
@@ -138,6 +149,9 @@ impl Paths {
 ///   .deb, `~/.local` for the tarball's install.sh);
 /// - a development build: `target/mihomo/mihomo` (`scripts/fetch-mihomo.sh`).
 pub fn bundled_core() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    return crate::android::core();
+    #[cfg(not(target_os = "android"))]
     bundled_core_for(&current_exe()?)
 }
 
