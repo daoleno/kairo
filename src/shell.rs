@@ -5,6 +5,7 @@ use kairo_core::CoreStatus;
 use nsh_base::{button, theme};
 use nsh_core::GlassEffect;
 use nsh_core::element::desktop::title_bar;
+use nsh_core::platform::{Idiom, Os};
 use nsh_core::prelude::*;
 
 use crate::pages;
@@ -226,7 +227,128 @@ fn toast() -> impl IntoElement {
     )
 }
 
+/// The page the sidebar or tab bar selected.
+fn current_page(store: crate::store::Store) -> impl IntoElement {
+    dynamic(move || {
+        let page = store.page.get();
+        untracked(|| match page {
+            Page::Overview => pages::home::page().into_element(),
+            Page::Exits => pages::exits::page().into_element(),
+            Page::Activity => pages::activity::page().into_element(),
+            Page::Apps => pages::apps::page().into_element(),
+            Page::Proxies => pages::proxies::page().into_element(),
+            Page::Profiles => pages::profiles::page().into_element(),
+            Page::Rules => pages::rules::page().into_element(),
+            Page::Logs => pages::logs::page().into_element(),
+            Page::Dns => pages::dns::page().into_element(),
+            Page::AiService => pages::stats::ai_service().into_element(),
+            Page::Settings => pages::settings::page().into_element(),
+        })
+    })
+}
+
+/// A phone: the page above, the destinations as tabs below (the sidebar's
+/// half of the screen is not affordable), clear of the status bar, the
+/// gesture bar and the keyboard.
+fn phone_shell() -> impl IntoElement {
+    let store = store();
+    let tabs = [
+        Page::Overview,
+        Page::Exits,
+        Page::Activity,
+        Page::Apps,
+        Page::Profiles,
+        Page::Settings,
+    ];
+    view()
+        .flex_1()
+        .bg(move || theme().background)
+        .text_color(move || theme().foreground)
+        .pt(move || safe_area().top)
+        .child(
+            view()
+                .flex_1()
+                .min_h(px(0.0))
+                .child(current_page(store)),
+        )
+        // A newer Kairo: the download beside the tabs, where the sidebar had it.
+        .child(dynamic(move || {
+            let b = store
+                .state
+                .with(|s| crate::chrome::update_button(&s.update));
+            untracked(move || match b {
+                Some(b) => view()
+                    .px_3()
+                    .py_2()
+                    .child(
+                        ui::btn_icon(Icon::Download, b.label, ui::Variant::Primary)
+                            .disabled(!b.enabled)
+                            .on_press(move || crate::chrome::update_pressed(&store.svc())),
+                    )
+                    .into_element(),
+                None => view().into_element(),
+            })
+        }))
+        .child(
+            view()
+                .flex_row()
+                .flex_shrink_0()
+                .bg(move || theme().sidebar)
+                .border_t_1()
+                .border_color(move || theme().sidebar_border)
+                .pb(move || {
+                    // The gesture bar, unless the keyboard is up (it covers it).
+                    if keyboard_height() > px(0.0) {
+                        px(0.0)
+                    } else {
+                        safe_area().bottom
+                    }
+                })
+                .children(tabs.into_iter().map(tab)),
+        )
+        .child(toast())
+}
+
+/// One tab of the phone's bar: the icon over a small label.
+fn tab(page: Page) -> impl IntoElement {
+    let store = store();
+    let selected = move || store.page.get().sidebar() == page;
+    button()
+        .selected(selected)
+        .role(AccessibilityRole::Tab)
+        .accessibility_label(page.title())
+        .on_press(move || store.page.set(page))
+        .flex_1()
+        .min_w(px(0.0))
+        .items_center()
+        .gap_0p5()
+        .py_2()
+        .child(icon(page_icon(page), 22.0).text_color(move || {
+            if selected() {
+                theme().sidebar_primary
+            } else {
+                theme().muted_foreground
+            }
+        }))
+        .child(
+            text(page.tab_title())
+                .text_size(px(10.0))
+                .number_of_lines(1)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || {
+                    if selected() {
+                        theme().sidebar_primary
+                    } else {
+                        theme().muted_foreground
+                    }
+                }),
+        )
+}
+
 pub fn shell() -> impl IntoElement {
+    if os() == Os::Android && idiom() == Idiom::Phone {
+        return phone_shell().into_element();
+    }
     let store = store();
     view()
         .flex_1()
@@ -240,23 +362,9 @@ pub fn shell() -> impl IntoElement {
                 .min_w(px(0.0))
                 // Clear of a sidebar floating over the content (macOS).
                 .pl(move || px(store.insets.get().left))
-                .child(dynamic(move || {
-                    let page = store.page.get();
-                    untracked(|| match page {
-                        Page::Overview => pages::home::page().into_element(),
-                        Page::Exits => pages::exits::page().into_element(),
-                        Page::Activity => pages::activity::page().into_element(),
-                        Page::Apps => pages::apps::page().into_element(),
-                        Page::Proxies => pages::proxies::page().into_element(),
-                        Page::Profiles => pages::profiles::page().into_element(),
-                        Page::Rules => pages::rules::page().into_element(),
-                        Page::Logs => pages::logs::page().into_element(),
-                        Page::Dns => pages::dns::page().into_element(),
-                        Page::AiService => pages::stats::ai_service().into_element(),
-                        Page::Settings => pages::settings::page().into_element(),
-                    })
-                })),
+                .child(current_page(store)),
         )
         .child(toast())
         .child(crate::palette::palette())
+        .into_element()
 }

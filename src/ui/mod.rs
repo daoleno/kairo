@@ -109,6 +109,12 @@ pub mod size {
 
 /// The height of a toolbar / page header.
 pub const HEADER_HEIGHT: f32 = 52.0;
+
+/// Whether this is a phone (Android): one column, tabs, no hover.
+pub fn phone() -> bool {
+    use nsh_core::platform::{Idiom, Os};
+    try_os() == Some(Os::Android) && idiom() == Idiom::Phone
+}
 /// The least height of a row in a group (System Settings' and libadwaita's
 /// rows are about this tall).
 pub const ROW_MIN: f32 = 48.0;

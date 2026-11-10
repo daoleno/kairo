@@ -94,6 +94,15 @@ impl Page {
         }
     }
 
+    /// The short name for a phone's tab bar.
+    pub fn tab_title(self) -> &'static str {
+        match self {
+            Page::Apps => "Apps",
+            Page::Profiles => "Subs",
+            other => other.title(),
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Page::Overview => "Home",
