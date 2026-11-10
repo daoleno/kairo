@@ -122,6 +122,41 @@ pub fn establish() -> Result<i32, String> {
     }
 }
 
+/// Gives the APK at `path` to Android's package installer (a session the user
+/// confirms). Returns once the session is committed.
+pub fn install_apk(path: &std::path::Path) -> Result<(), String> {
+    let bridge = BRIDGE
+        .get()
+        .ok_or("Kairo's Android bridge is not set up")?;
+    let mut env = bridge
+        .vm
+        .attach_current_thread()
+        .map_err(|e| format!("JNI: {e}"))?;
+    let class: &JClass<'_> = bridge.class.as_obj().into();
+    let path = env
+        .new_string(path.to_string_lossy().as_ref())
+        .map_err(|e| format!("JNI: {e}"))?;
+    let result = env
+        .call_static_method(
+            class,
+            "installApk",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            &[(&path).into()],
+        )
+        .and_then(|v| v.l());
+    match result {
+        Ok(msg) if msg.is_null() => Ok(()),
+        Ok(msg) => Err(env
+            .get_string(&JString::from(msg))
+            .map(Into::into)
+            .unwrap_or_else(|_| "The installer failed".into())),
+        Err(e) => {
+            let _ = env.exception_clear();
+            Err(format!("JNI: {e}"))
+        }
+    }
+}
+
 /// Takes the VPN down and closes our copy of its descriptor.
 pub fn teardown() {
     let fd = TUN_FD.swap(-1, Ordering::SeqCst);

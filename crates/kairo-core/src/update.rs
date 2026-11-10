@@ -147,6 +147,9 @@ pub enum Install {
     WindowsDir { dir: PathBuf },
     /// `/usr/bin/kairo` from the .deb.
     Deb,
+    /// The Android app: the APK is handed to the system's installer, which asks
+    /// the user and replaces the app.
+    Android,
     /// Anything else (a development build, a system-wide copy made with sudo).
     Other,
 }
@@ -156,6 +159,9 @@ impl Install {
         let Some(exe) = crate::paths::current_exe() else {
             return Install::Other;
         };
+        if cfg!(target_os = "android") {
+            return Install::Android;
+        }
         if cfg!(windows) {
             return Self::detect_windows(&exe);
         }
@@ -221,6 +227,14 @@ impl Install {
             Install::Prefix { .. } => Some(format!("linux-{arch}-tar")),
             Install::Deb => Some(format!("linux-{arch}-deb")),
             Install::WindowsDir { .. } => Some(format!("windows-{arch}-zip")),
+            Install::Android => Some(
+                match std::env::consts::ARCH {
+                    "aarch64" => "android-arm64-apk",
+                    "x86_64" => "android-x86_64-apk",
+                    _ => "android-unsupported-apk",
+                }
+                .into(),
+            ),
             Install::Other => None,
         }
     }
@@ -297,19 +311,23 @@ pub fn verify_package(bytes: &[u8], package: &Package, sums: &str) -> Result<(),
     }
 }
 
-fn base_url() -> String {
+/// The update server: `KAIRO_UPDATE_URL` at run time; a build made for tests of
+/// the updater can carry one (`KAIRO_TEST_UPDATE_URL` at build time, for Android,
+/// where an app has no environment of its own). Else GitHub's latest release.
+fn override_url() -> Option<String> {
     std::env::var("KAIRO_UPDATE_URL")
         .ok()
+        .or_else(|| option_env!("KAIRO_TEST_UPDATE_URL").map(str::to_owned))
         .filter(|u| !u.is_empty())
-        .unwrap_or_else(|| LATEST.into())
+}
+
+fn base_url() -> String {
+    override_url().unwrap_or_else(|| LATEST.into())
 }
 
 /// Where a release's files are.
 fn file_url(version: &str, name: &str) -> String {
-    match std::env::var("KAIRO_UPDATE_URL")
-        .ok()
-        .filter(|u| !u.is_empty())
-    {
+    match override_url() {
         Some(base) => format!("{}/{name}", base.trim_end_matches('/')),
         None => format!("{RELEASES}/download/v{version}/{name}"),
     }
@@ -775,6 +793,7 @@ pub async fn install(svc: &Service) -> Result<PathBuf, String> {
         Install::Prefix { prefix } => install_prefix(&prefix, &bytes, &work),
         Install::Deb => install_deb(&file),
         Install::WindowsDir { dir } => install_windows(&dir, &bytes, &work),
+        Install::Android => install_android(&file),
         Install::Other => Err("This copy of Kairo cannot update itself".into()),
     })
     .await
@@ -1023,6 +1042,22 @@ pub fn remove_leftovers(dir: &Path) {
 
 /// `pkexec apt-get install <deb>`: one password prompt, dependencies resolved.
 #[allow(unused_variables)]
+/// Hands the APK to Android's installer; the system asks the user (and the
+/// first time, to allow installs from Kairo) and replaces the app, which then
+/// stops. Nothing to relaunch: the returned path is not started.
+fn install_android(apk: &Path) -> Result<PathBuf, String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::install_apk(apk)?;
+        return Ok(apk.to_path_buf());
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = apk;
+        Err("not Android".into())
+    }
+}
+
 fn install_deb(deb: &Path) -> Result<PathBuf, String> {
     #[cfg(target_os = "linux")]
     {
