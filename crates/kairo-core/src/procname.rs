@@ -52,13 +52,17 @@ pub fn parse(text: &str) -> HashMap<u16, (u32, String)> {
     out
 }
 
+/// Where `lsof` is.
+pub(crate) fn lsof_binary() -> Option<&'static str> {
+    ["/usr/sbin/lsof", "/usr/bin/lsof"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+}
+
 /// Runs `lsof` and returns the owner of every established local socket.
 /// Blocking, so call it off the async threads.
 pub fn lookup() -> HashMap<u16, (u32, String)> {
-    let lsof = ["/usr/sbin/lsof", "/usr/bin/lsof"]
-        .into_iter()
-        .find(|p| std::path::Path::new(p).exists());
-    let Some(lsof) = lsof else {
+    let Some(lsof) = lsof_binary() else {
         return HashMap::new();
     };
     std::process::Command::new(lsof)

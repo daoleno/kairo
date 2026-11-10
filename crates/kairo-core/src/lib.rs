@@ -6,6 +6,7 @@ pub mod activity;
 pub mod ai;
 pub mod ai_check;
 pub mod autostart;
+pub mod bypass;
 pub mod config;
 pub mod controller;
 pub mod core_bin;

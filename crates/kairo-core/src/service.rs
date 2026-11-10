@@ -12,6 +12,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 mod ai_ops;
+mod bypass_ops;
 mod downloads_ops;
 mod route_ops;
 
@@ -143,6 +144,9 @@ pub struct State {
     /// Routes (ids) the running config leaves out because their exit is not
     /// in it (a node the subscription no longer has).
     pub routes_skipped: Vec<String>,
+    /// AI tools whose connections go around the proxy (system-proxy mode
+    /// only; empty with TUN, or when the core is not running).
+    pub bypass: Vec<crate::bypass::Bypass>,
 }
 
 impl State {
@@ -337,6 +341,8 @@ impl Service {
         rt.spawn(async move { places.location_loop().await });
         let checks = svc.clone();
         rt.spawn(async move { checks.ai_loop().await });
+        let bypass = svc.clone();
+        rt.spawn(async move { bypass.bypass_loop().await });
         svc
     }
 
@@ -420,7 +426,13 @@ impl Service {
     }
 
     fn set_core(&self, status: CoreStatus) {
-        self.modify(|s| s.core = status);
+        let running = status.is_running();
+        self.modify(|s| {
+            s.core = status;
+            if !running {
+                s.bypass.clear();
+            }
+        });
     }
 
     /// Shows `text` to the user once.
@@ -1296,6 +1308,9 @@ impl Service {
             }
             if prev.system_proxy != next.system_proxy {
                 svc.apply_sysproxy(next.system_proxy && svc.running());
+            }
+            if next.tun || !next.system_proxy {
+                svc.clear_bypass();
             }
             if prev.downloads.exit != next.downloads.exit
                 || prev.downloads.fastest != next.downloads.fastest
