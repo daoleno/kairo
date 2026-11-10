@@ -8,50 +8,53 @@ Mac, GTK 4 and libadwaita on Linux, written in Rust on [NSH](https://nsh.dev).
 
 ## What it does
 
-- **AI work**: Claude, ChatGPT, Gemini, Cursor, Copilot, Perplexity and Grok go through one **AI exit**. It
-  is pinned to a server (the same server, even if the provider renames it), and it stays there when the
-  Location changes by itself. Kimi, DeepSeek, Doubao, Tongyi and the other domestic AI go direct, and local
-  models (Ollama, LM Studio, your LAN) are never proxied. Hugging Face, PyPI, Ollama, Docker and GitHub
-  downloads follow the Location. Home shows a tile per service with what Kairo measured: whether it is
-  reachable, whether its API answers (without a key), the country it sees (from Cloudflare's trace when the
-  service sits behind it, otherwise a marked estimate), and whether a connection stays open for 90 seconds.
-  The checks run when you connect and every ten minutes. If the pinned server leaves your subscription,
-  Kairo says so and AI follows the Location until you pick another. **Activity** draws which tools talk to
-  which services, as lines as thick as the traffic. Kairo shows what a service sees; where you are and the
-  service's own terms still apply. Settings → AI turns each part off.
-- **Core**: the official mihomo build is inside every package, pinned and checked against its published
-  SHA-256 when the package is built. It starts with Kairo (all traffic goes direct until you add a profile)
-  and comes back if it crashes. A custom core binary also works.
-- **Updates**: Kairo checks for a new release on launch and every six hours, downloads it in the
-  background and verifies it (an Ed25519-signed manifest, plus `SHA256SUMS`). **Restart to Update** installs
-  it, core included: the app bundle on macOS, the files of a `~/.local` install, or the `.deb` through
-  `pkexec apt-get` (one password prompt).
-- **Subscriptions**: add a subscription URL or a YAML file. Kairo validates each one with the core before using it.
-  Subscriptions update on a schedule (the provider's interval or your own) or by hand. You can see usage and
-  expiry, switch profiles with one click, and keep per-profile overrides in a YAML editor. Overrides merge
-  into the profile, `prepend-rules` and friends are supported, and the core checks the result before Kairo
-  applies it.
-- **Locations**: Home picks the fastest place on its own (it skips the provider's info entries), or you pick one, grouped by region and sorted by delay. **Apps & Sites** holds the subscription's per-app groups.
-- **Groups** (under Advanced): see groups in config order, pick a node, and run delay tests for one node or a whole group.
-  Nodes can be sorted by delay or name and filtered. Proxy providers support update and health check.
-- **Route**: Smart, All Traffic and Direct (mihomo's Rule, Global and Direct). Switch from Home, the menu bar or the tray.
-- **System proxy**: works on macOS (`networksetup`), GNOME (gsettings) and KDE (kioslaverc). The previous
-  settings are put back on quit, on SIGTERM or SIGINT, on a panic, and even after a SIGKILL or crash, thanks to
-  a small guardian process. The next start also recovers any leftover state. Kairo only puts back what it
-  changed: if its System Proxy was never on, another app's proxy settings are left alone.
-- **TUN**: one switch. The core alone gets the one-time privilege it needs: `cap_net_admin` through
-  `pkexec setcap` on Linux, setuid through the administrator prompt on macOS. Kairo itself never runs
-  privileged. See [TUN and privileges](#tun-and-privileges).
-- **Live views**: speeds, totals and memory. The connections table (sortable and searchable, with an
-  inspector and close or close-all) stays smooth with thousands of rows. You also get the rules and rule
-  providers, and the logs (live level, search, pause).
-- **DNS tool**: query the core's resolver for A, AAAA, CNAME, MX, TXT or NS records, and flush the fake-IP cache
-  (⌘K → Go to DNS).
-- **Settings**: appearance, launch at login, start minimized, keep running in the tray, the AI switches, the
-  system proxy and TUN. **Advanced** holds ports, LAN, IPv6, the bypass list, the TUN stack, controller and
-  secret, the delay test and the core.
-- **Tray / menu bar**: status and speeds, mode, system proxy, TUN, node quick switch, start/stop the core,
-  show the window, and quit.
+Five pages in a sidebar: **Home**, **Exits**, **Activity**, **Apps & Sites** and **Subscriptions**, with
+Settings below them.
+
+- **Three exits.** Traffic leaves through one of three places, each with a country, a server and a word for
+  how it is doing (Good, OK, Slow): **AI**, **Everything else** and **Downloads**. The AI exit is pinned to a
+  server (the same server, even if the provider renames it) and stays there when Everything else changes.
+  Everything else is the fastest place by default, or the one you pick. Downloads (Hugging Face, PyPI,
+  Ollama, Docker, GitHub) follow Everything else unless you pick another; a mirror switch, off until a
+  throughput test passes, can shorten them. Pick a country, then a server, in **Exits**.
+- **AI work.** Claude, ChatGPT, Gemini, Cursor, Copilot, Perplexity and Grok go through the AI exit. Kimi,
+  DeepSeek, Doubao, Tongyi and the other domestic AI go direct, and local models (Ollama, LM Studio, your
+  LAN) are never proxied. Home shows a row per service with what Kairo measured: whether it is reachable,
+  whether its API answers (without a key), the country it sees (from Cloudflare's trace when the service sits
+  behind it, otherwise a marked estimate), and whether a connection stays open for 90 seconds. The checks run
+  when you connect and every ten minutes. When something is wrong, Home says so with one button: **Use AI
+  Exit** or **Use Every App**. Kairo shows what a service sees; where you are and the service's own terms
+  still apply. Settings → AI turns each part off.
+- **Activity.** By app: what each one talks to (AI services first, then sites), where it goes through, and how
+  much. A row's menu sets **Always Direct**, **Always AI Exit** or **Block** for that app, or shows its raw
+  connections (with close). When an AI tool such as Claude Code goes around Kairo (it ignores the system
+  proxy), a banner says so, with **Use Every App** (TUN) and **Copy for terminal** (an `export` line, with
+  `NO_PROXY`). It reads the socket table of the current user only; no root.
+- **Apps & Sites.** One list of choices: an app or a site goes through the AI exit, another country, direct,
+  or is blocked. Everything not listed uses its usual exit.
+- **Subscriptions.** Add a link or a YAML file; Kairo checks each one with the core before using it. Usage
+  and expiry show on the row, and when a provider answers with an error or a notice, Kairo says it in plain
+  words with a Retry. Updates run on a schedule (the provider's interval or your own) or by hand.
+- **Updates.** Kairo checks for a new release at launch and every six hours. When there is one, the sidebar's
+  foot shows **Download**; it downloads and verifies the release (an Ed25519-signed manifest, plus
+  `SHA256SUMS`), then offers **Restart**. The app bundle on macOS, the files of a `~/.local` install, or the
+  `.deb` through `pkexec apt-get` (one password prompt) are replaced, core included.
+- **Core.** The official mihomo build is inside every package, pinned and checked against its published
+  SHA-256 when the package is built. It starts with Kairo (all traffic goes direct until you add a
+  subscription) and comes back if it crashes. A custom core binary also works.
+- **System proxy and TUN.** Apps follow the system settings (macOS `networksetup`, GNOME gsettings, KDE
+  kioslaverc), or **Every app** takes everything in through TUN. The previous settings are put back on quit,
+  on SIGTERM or SIGINT, on a panic, and even after a SIGKILL or crash, thanks to a small guardian process.
+  The core alone gets the one-time privilege TUN needs (`cap_net_admin` through `pkexec setcap` on Linux,
+  setuid through the administrator prompt on macOS). Kairo itself never runs privileged. See
+  [TUN and privileges](#tun-and-privileges).
+- **Settings.** General: appearance, launch at login, start minimized, keep running in the tray, how apps
+  follow, AI. **Advanced**: the port, other devices on the network, IPv6, the bypass list, the controller and
+  secret, the core, the delay test, and **Inspect**: the subscription's groups, the running rules
+  (read-only), Diagnostics (the core's log and a report to copy) and DNS (ask the core's resolver; flush
+  the fake-IP cache).
+- **Menu bar / tray.** Status and speeds, mode, the AI line, Everything else and AI exit by country, start or
+  stop, open a page, and quit. ⌘K finds pages, actions and places.
 
 ## Install
 
@@ -107,15 +110,15 @@ On first run Kairo takes ports 7897 and 9097, or the next free ones if another c
 - `tun_in_a_network_namespace` turns TUN on and off for real, under `unshare -rn`. That gives a user and
   network namespace with uid 0 inside, so no root is needed and the host's network is not touched.
 - `tests/app.test.tsx` runs headless under `nsh test` with the real core and `scripts/fixture.py`. It covers
-  the first run, adding a subscription, proxies and delay tests, modes, rules, logs, DNS, settings
-  (Apply/Revert) and dark mode.
+  the first run, adding a subscription, the exits, modes, the double press on the connect switch, apps &
+  sites, groups, rules, logs, DNS, settings (Apply/Revert) and dark mode.
 
 ## Architecture
 
 ```
 src/main.rs          the launcher: window, tray, single instance, signals, guardian process
 src/lib.rs           the NSH root component (App) and the sidebar shell
-src/pages/*.rs       Home, Apps & Sites, Groups, Subscriptions, Connections, Rules, Logs, DNS, Settings
+src/pages/*.rs       Home, Exits, Activity, Apps & Sites, Subscriptions, Settings (and its Inspect views)
 src/ui/              the small design system: tokens, rows, groups, segmented controls, icons
 crates/kairo-core    everything that is not UI:
   service.rs           the state (a tokio watch channel the UI subscribes to) and every action

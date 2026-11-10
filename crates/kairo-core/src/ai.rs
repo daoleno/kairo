@@ -129,8 +129,8 @@ pub const SERVICES: &[AiService] = &[
         name: "Grok",
         mono: "X",
         suffixes: &["grok.com", "x.ai"],
-        api: None,
-        trace_host: None,
+        api: Some(("api.x.ai", "/v1/models", &[401])),
+        trace_host: Some("grok.com"),
         tools: &["grok"],
     },
 ];
