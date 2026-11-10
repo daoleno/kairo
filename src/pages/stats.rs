@@ -261,7 +261,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
                 bytes_f,
                 labels,
                 170.0,
-                "Move over a column for exact values".into(),
+                charts::hint("a column for exact values"),
                 unit_of(series.buckets.iter().map(|b| b.total()).max().unwrap_or(0)),
                 0.0,
             )
@@ -701,7 +701,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
         vec![],
         None,
         170.0,
-        "Move over the line for the hour's median".into(),
+        charts::hint("the line for the hour's median"),
     );
     let goes = {
         let g = crate::pages::ai::goes_through(state, s);
@@ -789,7 +789,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                 ]))
                 .child(charts::grid(
                     grid_rows,
-                    "Move over a square for its hour".into(),
+                    charts::hint("a square for its hour"),
                 )),
         )
         .child(
@@ -946,7 +946,7 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         marks,
         None,
         150.0,
-        "Move over the line for the hour's median".into(),
+        charts::hint("the line for the hour's median"),
     );
     let fail_cols: Vec<Col> = data
         .iter()
@@ -1199,7 +1199,7 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
         marks,
         Some(gb(last.total as f64)),
         170.0,
-        "Move over the line for the day's use".into(),
+        charts::hint("the line for the day's use"),
     );
     view()
         .gap_2()

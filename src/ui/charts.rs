@@ -17,6 +17,18 @@ pub struct Ser {
     pub color: fn() -> AdaptiveColor,
 }
 
+/// What a chart says it will show: "Move over ..." with a mouse, "Tap ..." on a phone.
+pub fn hint(what: &str) -> String {
+    format!("{} {what}", if ui::phone() { "Tap" } else { "Move over" })
+}
+
+/// A finger lifting is not a mouse leaving: on a phone the reading stays until another is tapped.
+fn leave(hover: Signal<Option<usize>>) {
+    if !ui::phone() {
+        hover.set(None);
+    }
+}
+
 /// One column: a value per series, what the bucket is called when hovered,
 /// and whether it is still to come.
 #[derive(Clone)]
@@ -276,7 +288,13 @@ pub fn columns(
             let i = ((e.position.x.0 / w) * n as f32).floor() as isize;
             hover.set((i >= 0 && (i as usize) < n).then_some(i as usize));
         })
-        .on_mouse_leave(move |_: &MouseEvent| hover.set(None));
+        // A tap picks the column under the finger (there is no hovering on a phone).
+        .on_press(move |e: &PressEvent| {
+            let w = width.get_untracked().max(1.0);
+            let i = ((e.position.x.0 / w) * n as f32).floor() as isize;
+            hover.set((i >= 0 && (i as usize) < n).then_some(i as usize));
+        })
+        .on_mouse_leave(move |_: &MouseEvent| leave(hover));
     view()
         .gap_1()
         .child(readout(read))
@@ -458,7 +476,13 @@ pub fn lines(
             let i = ((e.position.x.0 / w) * n as f32).floor() as isize;
             hover.set((i >= 0 && (i as usize) < n).then_some(i as usize));
         })
-        .on_mouse_leave(move |_: &MouseEvent| hover.set(None));
+        // A tap picks the column under the finger (there is no hovering on a phone).
+        .on_press(move |e: &PressEvent| {
+            let w = width.get_untracked().max(1.0);
+            let i = ((e.position.x.0 / w) * n as f32).floor() as isize;
+            hover.set((i >= 0 && (i as usize) < n).then_some(i as usize));
+        })
+        .on_mouse_leave(move |_: &MouseEvent| leave(hover));
     view()
         .gap_1()
         .child(readout(read))
@@ -561,7 +585,8 @@ pub fn ribbon(cells: Vec<(Tone, String)>, height: f32, idle: String) -> impl Int
                         }
                     })
                     .on_mouse_enter(move |_: &MouseEvent| hover.set(Some(i)))
-                    .on_mouse_leave(move |_: &MouseEvent| hover.set(None))
+                    .on_press(move || hover.set(Some(i)))
+                    .on_mouse_leave(move |_: &MouseEvent| leave(hover))
             })),
     )
 }
@@ -616,8 +641,11 @@ pub fn grid(rows: Vec<(String, Vec<(Tone, String)>)>, idle: String) -> impl Into
                                                 .on_mouse_enter(move |_: &MouseEvent| {
                                                     hover.set(Some((r, c)))
                                                 })
+                                                .on_press(move || hover.set(Some((r, c))))
                                                 .on_mouse_leave(move |_: &MouseEvent| {
-                                                    hover.set(None)
+                                                    if !ui::phone() {
+                                                        hover.set(None)
+                                                    }
                                                 })
                                         },
                                     )),

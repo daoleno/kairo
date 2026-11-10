@@ -82,7 +82,13 @@ fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
                     .min_by_key(|p| p.delay)
                     .or(list.first());
                 if let Some(best) = best {
-                    let exit = RouteExit::Node(best.name.clone());
+                    // The country the current node is in stands for it, so its line carries the check.
+                    let exit = match current {
+                        RouteExit::Node(n) if list.iter().any(|p| p.name == *n) => {
+                            RouteExit::Node(n.clone())
+                        }
+                        _ => RouteExit::Node(best.name.clone()),
+                    };
                     let flag = best
                         .flag
                         .clone()
