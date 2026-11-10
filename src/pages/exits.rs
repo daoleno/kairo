@@ -570,17 +570,16 @@ fn picker(exit: Exit) -> impl IntoElement {
             }
         });
     });
+    // On a phone the title and the button wrap instead of pushing the button off the card,
+    // and the one-line description (no room for it) is left out.
+    let phone = ui::phone();
+    let head = view().flex_row().items_center().gap_2().px_4().py_3();
+    let head = if phone { head.flex_wrap() } else { head };
     ui::card()
         .rounded(px(22.0))
         .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .px_4()
-                .py_3()
-                .child(ui::body(exit.title()).font_weight(FontWeight::SEMIBOLD))
-                .child(ui::muted(exit.about()).flex_1().number_of_lines(1))
+            head.child(ui::body(exit.title()).font_weight(FontWeight::SEMIBOLD))
+                .child((!phone).then(|| ui::muted(exit.about()).flex_1().number_of_lines(1)))
                 .child(
                     ui::btn_icon(Icon::Bolt, "Test Again", Variant::Secondary)
                         .disabled(testing)
