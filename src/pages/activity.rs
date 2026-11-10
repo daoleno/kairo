@@ -190,12 +190,15 @@ pub fn bypassing_tools(list: &[kairo_core::bypass::Bypass]) -> Vec<String> {
 
 fn bypass_banner() -> impl IntoElement {
     let store = store();
-    let tools = computed(move || store.state.with(|s| bypassing_tools(&s.bypass)));
+    // Read from the store (it outlives every page), not from a memo of this page:
+    // the banner comes and goes with the list, and a binding that runs while the
+    // page is being left must not read a handle the page already disposed.
+    let tools = move || store.state.with(|s| bypassing_tools(&s.bypass));
     when(
-        move || tools.with(|t| !t.is_empty()),
+        move || !tools().is_empty(),
         move || {
             let headline = move || -> SharedString {
-                let t = tools.get();
+                let t = tools();
                 match t.len() {
                     0 => "".into(),
                     1 => format!("{} goes around Kairo", t[0]).into(),
@@ -398,9 +401,7 @@ fn phone_app(r: AppRow) -> impl IntoElement {
                 r.talks
                     .iter()
                     .map(|(t, ai)| pill(t.clone(), *ai).into_element())
-                    .chain(
-                        (r.more > 0).then(|| ui::muted(format!("+{}", r.more)).into_element()),
-                    ),
+                    .chain((r.more > 0).then(|| ui::muted(format!("+{}", r.more)).into_element())),
             )
         }))
         .child(

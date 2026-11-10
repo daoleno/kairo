@@ -19,6 +19,13 @@ impl Service {
         });
     }
 
+    /// Puts `list` where the look puts what it found, so a test of the UI can show the banner
+    /// without a real tool going around the proxy.
+    #[doc(hidden)]
+    pub fn inject_bypass(&self, list: Vec<Bypass>) {
+        self.0.state.send_modify(|s| s.bypass = list);
+    }
+
     /// Every ten seconds.
     pub(super) async fn bypass_loop(&self) {
         let mut tick = tokio::time::interval(Duration::from_secs(10));

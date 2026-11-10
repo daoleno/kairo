@@ -230,14 +230,17 @@ impl Store {
         }
         self.toast.set(Some((id, text.into(), error)));
         let toast = self.toast;
-        set_timeout(
-            std::time::Duration::from_secs(if error { 6 } else { 3 }),
-            move || {
-                if toast.get_untracked().is_some_and(|t| t.0 == id) {
-                    toast.set(None);
-                }
-            },
-        );
+        // Under no owner: a notice raised by a page must still go when that page is left.
+        Owner::detached().run(|| {
+            set_timeout(
+                std::time::Duration::from_secs(if error { 6 } else { 3 }),
+                move || {
+                    if toast.get_untracked().is_some_and(|t| t.0 == id) {
+                        toast.set(None);
+                    }
+                },
+            )
+        });
     }
 
     /// Runs a service command; a failure becomes a message.

@@ -246,6 +246,19 @@ enum Handler {
     Choose(Rc<dyn Fn(usize)>),
 }
 
+impl Handler {
+    /// Runs under `owner` (the page's): what a tool starts (a task that ends by
+    /// writing the page's signals) ends with the page. The chrome's events come
+    /// in under the store's owner, which outlives every page.
+    fn under(self, owner: Owner) -> Self {
+        match self {
+            Handler::Search(s) => Handler::Search(s),
+            Handler::Press(f) => Handler::Press(Rc::new(move || owner.run(|| f()))),
+            Handler::Choose(f) => Handler::Choose(Rc::new(move |i| owner.run(|| f(i)))),
+        }
+    }
+}
+
 thread_local! {
     /// The shown page's tools, by id.
     static HANDLERS: RefCell<(Option<Page>, HashMap<&'static str, Handler>)> = RefCell::new((None, HashMap::new()));
@@ -310,10 +323,14 @@ fn toolbar_with(
     }
     if chrome::native() {
         let specs = Rc::new(tools);
+        let owner = Owner::current();
         HANDLERS.with(|h| {
             let mut h = h.borrow_mut();
             h.0 = Some(page);
-            h.1 = specs.iter().map(|s| (s.id(), s.handler())).collect();
+            h.1 = specs
+                .iter()
+                .map(|s| (s.id(), s.handler().under(owner)))
+                .collect();
         });
         {
             let specs = specs.clone();
@@ -402,11 +419,7 @@ fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
             Spec::Button { .. } => buttons.push(tool.element()),
             Spec::Search {
                 placeholder, value, ..
-            } => lines.push(
-                search_field(value, placeholder)
-                    .w_full()
-                    .into_element(),
-            ),
+            } => lines.push(search_field(value, placeholder).w_full().into_element()),
             Spec::Choice { .. } => lines.push(view().w_full().child(tool.element()).into_element()),
         }
     }
@@ -462,5 +475,7 @@ fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
             },
         ))
         .children(lines)
-        .child((!buttons.is_empty()).then(|| view().flex_row().flex_wrap().gap_2().children(buttons)))
+        .child(
+            (!buttons.is_empty()).then(|| view().flex_row().flex_wrap().gap_2().children(buttons)),
+        )
 }
