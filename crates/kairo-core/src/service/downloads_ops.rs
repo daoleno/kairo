@@ -111,7 +111,15 @@ impl Service {
             let known = places::places(&self.0.proxies.borrow().groups, &main)
                 .iter()
                 .any(|p| p.delay.is_some_and(|x| x > 0));
-            if retest || !known {
+            // Nothing goes to the group without its rules (and no route of
+            // the person's names it): no tests on its account.
+            let used = self.settings().ai.downloads
+                || self
+                    .settings()
+                    .routes
+                    .iter()
+                    .any(|r| r.exit == crate::routes::RouteExit::Downloads);
+            if used && (retest || !known) {
                 let _ = self.test_places().await;
             }
         }
@@ -237,6 +245,13 @@ impl Service {
             }
             if svc.downloads_group().is_none() {
                 return Err("Downloads have no exit of their own while the AI layer is off".into());
+            }
+            // Without its rules the test would measure whatever way the
+            // subscription sends these sites, not the Downloads exit.
+            if !svc.settings().ai.downloads {
+                return Err(
+                    "Downloads are not sent to their own exit while that switch is off".into(),
+                );
             }
             if svc.0.mirror_busy.swap(true, Ordering::SeqCst) {
                 return Ok(());

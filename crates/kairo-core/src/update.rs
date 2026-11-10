@@ -573,20 +573,30 @@ async fn fetch_manifest(proxy: Option<&str>) -> Result<Manifest, Fetch> {
 /// failure the status goes back to `Available`, the person is told in plain
 /// words (a notice) and the call returns `Ok`: the state and the notice are
 /// the report, so a caller that shows errors itself does not say it twice.
-/// Asked again while a download runs or is done, it does nothing.
+/// Asked again while a download runs or is done, it does nothing; asked
+/// while a check runs, it waits for the check.
 pub async fn download(svc: &Service) -> Result<(), String> {
-    let _busy = match svc.update_lock().try_lock() {
-        Ok(g) => g,
-        // A check or a download is running: nothing to start.
-        Err(_) => return Ok(()),
-    };
-    let version = match svc.snapshot().update {
-        UpdateStatus::Available { version } => version,
-        UpdateStatus::Ready { .. } | UpdateStatus::Downloading { .. } => return Ok(()),
-        UpdateStatus::Manual { .. } => {
-            return Err("This copy of Kairo cannot update itself: use the release page".into());
+    // What is on offer, if a download is wanted at all.
+    fn wanted(status: UpdateStatus) -> Result<Option<String>, String> {
+        match status {
+            UpdateStatus::Available { version } => Ok(Some(version)),
+            UpdateStatus::Ready { .. } | UpdateStatus::Downloading { .. } => Ok(None),
+            UpdateStatus::Manual { .. } => {
+                Err("This copy of Kairo cannot update itself: use the release page".into())
+            }
+            _ => Err("No update is waiting to be downloaded".into()),
         }
-        _ => return Err("No update is waiting to be downloaded".into()),
+    }
+    if wanted(svc.snapshot().update)?.is_none() {
+        return Ok(());
+    }
+    // A check may be running (it holds the lock for as long as the network
+    // takes): wait for it rather than drop the person's click, then look
+    // again, since it may have found something else or nothing. Only now is
+    // the status changed: a check would otherwise write over it.
+    let _busy = svc.update_lock().lock().await;
+    let Some(version) = wanted(svc.snapshot().update)? else {
+        return Ok(());
     };
     svc.set_update(UpdateStatus::Downloading {
         version: version.clone(),
@@ -606,6 +616,7 @@ pub async fn download(svc: &Service) -> Result<(), String> {
 }
 
 #[derive(Debug)]
+
 enum DownloadError {
     Network(String),
     Verify(String),
