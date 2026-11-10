@@ -220,17 +220,28 @@ fn bypass_banner() -> impl IntoElement {
                         .gap_0p5()
                         .child(ui::body(headline).font_weight(FontWeight::SEMIBOLD))
                         .child(ui::muted(
-                            "It does not follow the system's proxy settings, so its traffic leaves directly. Every app takes it in; so does a proxy line in a terminal.",
+                            if cfg!(windows) {
+                                "It does not follow the system's proxy settings, so its traffic leaves directly. A proxy line in the terminal it starts from takes it in."
+                            } else {
+                                "It does not follow the system's proxy settings, so its traffic leaves directly. Every app takes it in; so does a proxy line in a terminal."
+                            },
                         )),
                 )
-                .child(
-                    ui::capsule("Use Every App", true)
-                        .h(px(30.0))
-                        .px_4()
-                        .on_press(move || {
-                            crate::pages::home::set_via(crate::pages::home::Via::Tun)
-                        }),
-                )
+                .child(when(
+                    move || {
+                        store.state.with(|s| {
+                            s.tun_privilege != Some(kairo_core::tun::Privilege::Unsupported)
+                        })
+                    },
+                    move || {
+                        ui::capsule("Use Every App", true)
+                            .h(px(30.0))
+                            .px_4()
+                            .on_press(move || {
+                                crate::pages::home::set_via(crate::pages::home::Via::Tun)
+                            })
+                    },
+                ))
                 .child(
                     ui::capsule("Copy for terminal", false)
                         .h(px(30.0))
