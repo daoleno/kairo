@@ -291,18 +291,23 @@ pub fn page() -> impl IntoElement {
             vec![],
         ))
         .child(
-            scroll().flex_1().child(
-                view()
-                    .px_6()
+            scroll().flex_1().child({
+                let phone = ui::phone();
+                let page = view()
+                    .px(px(if phone { 16.0 } else { 24.0 }))
                     .pt(toolbar::scroll_top(20.0))
                     .pb_8()
                     .w_full()
                     .max_w(px(1040.0))
                     .self_center()
-                    .flex_row()
-                    .items_start()
-                    .gap_4()
-                    .child(view().w(px(280.0)).flex_shrink_0().gap_3().children(
+                    .gap_4();
+                // Cards beside the picker; on a phone, the cards above it.
+                let page = if phone { page } else { page.flex_row().items_start() };
+                page
+                    .child({
+                        let cards = view().flex_shrink_0().gap_3();
+                        if phone { cards.w_full() } else { cards.w(px(280.0)) }
+                    }.children(
                         Exit::ALL.into_iter().map(move |e| {
                             card(e, move || which.get() == e, move || which.set(e)).into_element()
                         }),
@@ -321,8 +326,8 @@ pub fn page() -> impl IntoElement {
                                 let e = which.get();
                                 untracked(move || quality_card(e).into_element())
                             })),
-                    ),
-            ),
+                    )
+            }),
         )
 }
 

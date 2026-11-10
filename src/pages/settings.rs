@@ -248,12 +248,22 @@ enum Follow {
 }
 
 fn general(settings: Memo<Settings>) -> impl IntoElement {
-    let store = store();
     let mac = cfg!(target_os = "macos");
     view()
         .gap_5()
         .child(ui::group(
             Some("General"),
+            general_rows(settings, mac),
+        ))
+        .child(connection_group(settings))
+        .child(ai_group(settings))
+        .child(about_group())
+}
+
+fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
+    let store = store();
+    let phone = ui::phone();
+    let rows: Vec<AnyElement> = 
             vec![
                 ui::setting_row(
                     "Appearance",
@@ -318,11 +328,13 @@ fn general(settings: Memo<Settings>) -> impl IntoElement {
                     ),
                 )
                 .into_element(),
-            ],
-        ))
-        .child(connection_group(settings))
-        .child(ai_group(settings))
-        .child(about_group())
+            ];
+    // A phone has no login items, tray or window to close: only the look.
+    if phone {
+        rows.into_iter().take(1).collect()
+    } else {
+        rows
+    }
 }
 
 /// How apps reach the proxy: the system's proxy settings, or every app through
@@ -361,6 +373,10 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
             None => store.error("Install the core to use Every app (TUN)"),
         },
     };
+    // On Android every app is in the VPN: there is nothing to follow or grant.
+    if ui::phone() {
+        return view().into_element();
+    }
     ui::group(
         Some("Connection"),
         vec![
@@ -412,7 +428,7 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
             )
             .into_element(),
         ],
-    )
+    ).into_element()
 }
 
 /// What Kairo does for AI tools; each switch rebuilds the rules (open

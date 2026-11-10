@@ -2350,6 +2350,12 @@ impl Service {
                     return Err(e);
                 }
             };
+            // Android: the system's installer has the APK; it asks the user and
+            // replaces the app itself. If the user declines, Kairo goes on.
+            if cfg!(target_os = "android") {
+                svc.set_update(previous);
+                return Ok(());
+            }
             crate::update::relaunch(&exe)?;
             let quit = svc.0.quit.lock().expect("quit hook").clone();
             match quit {
