@@ -1,5 +1,7 @@
-//! Proxies: groups (and providers) on the left; the selected one's nodes on the
-//! right, picked with a click, tested one by one or all at once.
+//! Groups (Settings › Advanced › Inspect): the subscription's own groups (and
+//! providers) on the left; the selected one's nodes on the right, picked with a
+//! click, tested one by one or all at once. Delays show here, in the expanded
+//! list, and nowhere on the main pages.
 
 use kairo_core::model::{Group, Node};
 use nsh_base::{button, theme};
@@ -55,6 +57,7 @@ pub fn page() -> impl IntoElement {
                 None => String::new(),
             },
             vec![
+                crate::pages::settings::back(),
                 toolbar::search("proxies.filter", "Filter nodes", query),
                 toolbar::choice(
                     "proxies.sort",

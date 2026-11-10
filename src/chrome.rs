@@ -68,6 +68,9 @@ pub enum Glyph {
     Restart,
     Stop,
     Start,
+    Back,
+    Copy,
+    Sliders,
 }
 
 impl Glyph {
@@ -86,6 +89,9 @@ impl Glyph {
             Glyph::Restart => "arrow.counterclockwise",
             Glyph::Stop => "stop",
             Glyph::Start => "play",
+            Glyph::Back => "chevron.backward",
+            Glyph::Copy => "doc.on.doc",
+            Glyph::Sliders => "slider.horizontal.3",
         }
     }
 
@@ -115,6 +121,9 @@ impl Glyph {
             ],
             Glyph::Restart => &["view-refresh-symbolic"],
             Glyph::Stop => &["media-playback-stop-symbolic", "process-stop-symbolic"],
+            Glyph::Back => &["go-previous-symbolic"],
+            Glyph::Copy => &["edit-copy-symbolic"],
+            Glyph::Sliders => &["preferences-system-symbolic", "emblem-system-symbolic"],
         }
     }
 }
