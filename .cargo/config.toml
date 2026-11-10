@@ -1,0 +1,4 @@
+# Windows: link the C runtime statically, so kairo.exe runs on a machine that
+# has no Visual C++ Redistributable installed (a fresh Windows has none).
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -47,6 +47,10 @@ jobs:
           scripts\package-windows.ps1
           New-Item -ItemType Directory -Force out\b | Out-Null
           Move-Item dist\Kairo-* out\b\
+      - name: Only what the test needs: the first installer and the second zip
+        shell: pwsh
+        run: |
+          Remove-Item out\a\*.zip, out\b\*-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows-test-builds
