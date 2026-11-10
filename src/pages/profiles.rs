@@ -1,32 +1,340 @@
-//! Profiles: the subscriptions and files Kairo can run. Add one from a URL or
-//! a file, update them, switch between them, and edit the overrides Kairo
-//! merges over the active one.
+//! Subscriptions: the links (and files) Kairo gets its locations from. Add one,
+//! update them, switch between them, and see how much of the plan is used.
+//!
+//! The text on this page (usage lines, "updated 2 h ago", the allowance per
+//! day, plain-words provider errors) is made by pure functions that take the
+//! time as an argument, so they are tested without a window.
 
-use kairo_core::profile::{Profile, Source};
-use nsh_base::{alert_dialog, button, editor, theme};
+use std::rc::Rc;
+
+use kairo_core::profile::{Profile, Source, Usage};
+use nsh_base::{alert_dialog, button, theme};
+use nsh_core::element::desktop::{MenuItem, popup_menu};
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
-use crate::pages::overview::expiry_text;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, icon, size};
 
-pub fn page() -> impl IntoElement {
-    let editing = signal(None::<String>);
-    view().flex_1().child(dynamic(move || match editing.get() {
-        Some(id) => untracked(move || detail(id, editing)).into_element(),
-        None => untracked(move || list(editing)).into_element(),
-    }))
+// --- The words -----------------------------------------------------------------------
+
+const DAY: i64 = 86_400;
+
+/// The host of a link, and nothing else: a link carries the account's token.
+pub fn host_of(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "Subscription".to_owned())
 }
 
-// --- The list ------------------------------------------------------------------------
+/// Where a subscription comes from, for its row: the host, or "Imported file".
+pub fn source_label(source: &Source) -> String {
+    match source {
+        Source::Remote { url, .. } => host_of(url),
+        Source::Local { .. } => "Imported file".to_owned(),
+    }
+}
 
-fn list(editing: Signal<Option<String>>) -> impl IntoElement {
+/// "Updated 2 h ago".
+pub fn updated_ago(at: Option<i64>, now: i64) -> String {
+    let Some(at) = at else {
+        return "Never updated".into();
+    };
+    match now - at {
+        i64::MIN..=59 => "Updated just now".into(),
+        s @ 60..=3599 => format!("Updated {} min ago", s / 60),
+        s @ 3600..=86399 => format!("Updated {} h ago", s / 3600),
+        s => format!("Updated {} d ago", s / DAY),
+    }
+}
+
+/// "Every 12 hours", "Every day", "Only by hand".
+pub fn interval_label(hours: u32) -> String {
+    match hours {
+        0 => "Only by hand".into(),
+        1 => "Every hour".into(),
+        24 => "Every day".into(),
+        168 => "Every week".into(),
+        h if h % 24 == 0 => format!("Every {} days", h / 24),
+        h => format!("Every {h} hours"),
+    }
+}
+
+/// "Updated 2 h ago · every 12 h"; a file is not updated by itself.
+pub fn schedule_line(source: &Source, updated_at: Option<i64>, now: i64) -> String {
+    match source {
+        Source::Remote { interval_hours, .. } => {
+            let ago = updated_ago(updated_at, now);
+            match interval_hours {
+                0 => format!("{ago} · by hand"),
+                h => format!("{ago} · every {h} h"),
+            }
+        }
+        Source::Local { .. } => "Not updated automatically".into(),
+    }
+}
+
+/// `Dec 2`, in the local time of `offset` seconds from UTC.
+pub fn month_day(t: i64, offset: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    // Civil from days (Howard Hinnant).
+    let z = (t + offset).div_euclid(DAY) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    format!("{} {day}", MONTHS[(month - 1) as usize])
+}
+
+/// A size with at most one decimal, none when whole: "37 GB", "2.9 GB".
+pub fn size_text(n: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        return format!("{n} B");
+    }
+    let number = if v >= 100.0 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.1}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    };
+    format!("{number} {}", UNITS[i])
+}
+
+/// "37 of 100 GB": the unit once when both share it.
+pub fn used_of(used: u64, total: u64) -> String {
+    let (a, b) = (size_text(used), size_text(total));
+    match (a.split_once(' '), b.split_once(' ')) {
+        (Some((number, unit)), Some((_, unit_b))) if unit == unit_b => format!("{number} of {b}"),
+        _ => format!("{a} of {b}"),
+    }
+}
+
+/// Whole days until `expire`, a started day counting as one; `None` when there
+/// is no expiry or it has passed.
+pub fn days_left(expire: Option<i64>, now: i64) -> Option<i64> {
+    let left = expire? - now;
+    (left > 0).then(|| (left + DAY - 1) / DAY)
+}
+
+/// What is left of the plan; `None` without a limit.
+pub fn left_bytes(usage: &Usage) -> Option<u64> {
+    (usage.total > 0).then(|| usage.total.saturating_sub(usage.used()))
+}
+
+/// How much can be used each day for the rest to last until the plan expires.
+pub fn allowance_per_day(left: u64, days: i64) -> Option<u64> {
+    (days > 0).then(|| left / days as u64)
+}
+
+/// "37 of 100 GB · expires Dec 2".
+pub fn usage_line(usage: Option<&Usage>, now: i64, offset: i64) -> String {
+    let Some(u) = usage else {
+        return "No usage data".into();
+    };
+    let amount = if u.total > 0 {
+        used_of(u.used(), u.total)
+    } else {
+        format!("{} used", size_text(u.used()))
+    };
+    let expiry = match u.expire {
+        None => "no expiry".to_owned(),
+        Some(t) if t <= now => format!("expired {}", month_day(t, offset)),
+        Some(t) => format!("expires {}", month_day(t, offset)),
+    };
+    format!("{amount} · {expiry}")
+}
+
+/// One of the four tiles of the usage section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tile {
+    pub title: String,
+    pub value: String,
+    pub detail: String,
+}
+
+fn tile(title: impl Into<String>, value: impl Into<String>, detail: impl Into<String>) -> Tile {
+    Tile {
+        title: title.into(),
+        value: value.into(),
+        detail: detail.into(),
+    }
+}
+
+/// The tiles of a subscription's usage, from what the provider's header says:
+/// Used, Left, Recent pace (measured later: "—" until then) and what to use per
+/// day to last until the plan expires. No projection is made without a measured
+/// pace.
+pub fn usage_tiles(u: &Usage, now: i64, offset: i64) -> [Tile; 4] {
+    let days = days_left(u.expire, now);
+    let left = left_bytes(u);
+    let used = tile(
+        "Used",
+        size_text(u.used()),
+        if u.total > 0 {
+            format!("of {}", size_text(u.total))
+        } else {
+            "no limit".to_owned()
+        },
+    );
+    let until = match (u.expire, days) {
+        (None, _) => "no expiry".to_owned(),
+        (Some(t), None) => format!("expired {}", month_day(t, offset)),
+        (Some(t), Some(1)) => format!("1 day to {}", month_day(t, offset)),
+        (Some(t), Some(d)) => format!("{d} days to {}", month_day(t, offset)),
+    };
+    let left_tile = tile(
+        "Left",
+        left.map_or_else(|| "No limit".to_owned(), size_text),
+        until,
+    );
+    let pace = tile("Recent pace", "—", "not measured yet");
+    let allowance = match (left, days, u.expire) {
+        (Some(left), Some(d), Some(t)) => {
+            let per_day = allowance_per_day(left, d).unwrap_or(0);
+            tile(
+                format!("To last until {}", month_day(t, offset)),
+                format!("≤ {}/day", size_text(per_day)),
+                format!(
+                    "{} over {d} day{}",
+                    size_text(left),
+                    if d == 1 { "" } else { "s" }
+                ),
+            )
+        }
+        _ => tile("To last until expiry", "—", ""),
+    };
+    [used, left_tile, pace, allowance]
+}
+
+/// Replaces every link in `text` (and `url`, the subscription's own) by its
+/// host: an error message must never carry a token.
+pub fn scrub(text: &str, url: Option<&str>) -> String {
+    let mut text = text.to_owned();
+    if let Some(url) = url.filter(|u| !u.is_empty()) {
+        text = text.replace(url, &host_of(url));
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(at) = ["http://", "https://"]
+        .iter()
+        .filter_map(|p| rest.find(p))
+        .min()
+    {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        let end = tail
+            .find(|c: char| c.is_whitespace() || matches!(c, ')' | '"' | '\'' | '”' | ',' | '>'))
+            .unwrap_or(tail.len());
+        out.push_str(&host_of(&tail[..end]));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn reason(code: u16) -> &'static str {
+    match code {
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Server Error",
+    }
+}
+
+/// An update's failure in the user's words: the headline and a hint, with no
+/// link in either. (The engine says "The server answered HTTP 503"; the rest is
+/// `home::explain`.)
+pub fn plain_error(err: &str, url: Option<&str>) -> (String, Option<String>) {
+    let e = scrub(err, url);
+    let code = e
+        .strip_prefix("The server answered HTTP ")
+        .and_then(|n| n.trim().parse::<u16>().ok());
+    if let Some(code) = code.filter(|c| *c >= 500 || *c == 429) {
+        return (
+            format!("Your provider says: “{code} {}”", reason(code)),
+            Some(
+                "Its server is having trouble. This usually passes: try again in a little while."
+                    .into(),
+            ),
+        );
+    }
+    crate::pages::home::explain(&e)
+}
+
+/// The rest of the banner after the subscription's name:
+/// "couldn't update · Your provider says: “503 Service Unavailable”. Using the saved copy."
+pub fn banner_text(headline: &str) -> String {
+    format!(
+        "couldn't update · {}. Using the saved copy.",
+        headline.trim().trim_end_matches('.')
+    )
+}
+
+/// How often a subscription updates, the choices of its menu: the usual
+/// ones, and the current when it is another.
+fn interval_choices(current: u32) -> Vec<u32> {
+    let mut v = vec![6, 12, 24, 72, 168, 0];
+    if !v.contains(&current) {
+        v.insert(0, current);
+    }
+    v
+}
+
+fn now() -> i64 {
+    kairo_core::profile::now()
+}
+
+fn offset() -> i64 {
+    kairo_core::service::local_offset_seconds()
+}
+
+// --- The page ------------------------------------------------------------------------
+
+/// What the dialog over the page is for.
+#[derive(Debug, Clone, PartialEq)]
+enum Dialog {
+    Add,
+    Rename { id: String, name: String },
+    Link { id: String, host: String },
+}
+
+/// The "as the provider says" choice of the update interval when adding.
+const PROVIDER_CHOICE: u32 = u32::MAX;
+
+pub fn page() -> impl IntoElement {
     let store = store();
-    let adding = signal(false);
+    let dialog = signal(None::<Dialog>);
+    let expanded = signal(None::<String>);
     let profiles = computed(move || store.state.with(|s| s.profiles.profiles.clone()));
+    let failing = computed(move || {
+        store.state.with(|s| {
+            s.profiles
+                .profiles
+                .iter()
+                .filter(|p| p.last_error.is_some())
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    });
     let any_remote =
         move || profiles.with(|p| p.iter().any(|p| matches!(p.source, Source::Remote { .. })));
     let updating_all = move || store.state.with(|s| !s.updating.is_empty());
@@ -36,20 +344,26 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
             Page::Profiles,
             move || {
                 let n = store.state.with(|s| s.profiles.profiles.len());
-                match n {
-                    0 => String::new(),
-                    1 => "1 profile".to_owned(),
-                    n => format!("{n} profiles"),
-                }
+                if n == 0 { String::new() } else { n.to_string() }
             },
             vec![
-                toolbar::button("profiles.update-all", "Update All", Glyph::Refresh, Icon::Refresh, move || {
-                    store.run(store.svc().update_all_profiles())
-                })
+                toolbar::button(
+                    "profiles.update-all",
+                    "Update All",
+                    Glyph::Refresh,
+                    Icon::Refresh,
+                    move || store.run(store.svc().update_all_profiles()),
+                )
                 .enabled(move || any_remote() && !updating_all()),
-                toolbar::button("profiles.add", "Add Subscription", Glyph::Add, Icon::Plus, move || adding.set(true))
-                    .enabled(move || !adding.get())
-                    .prominent(),
+                toolbar::button(
+                    "profiles.add",
+                    "Add…",
+                    Glyph::Add,
+                    Icon::Plus,
+                    move || dialog.set(Some(Dialog::Add)),
+                )
+                .enabled(move || dialog.with(|d| d.is_none()))
+                .prominent(),
             ],
         ))
         .child(
@@ -58,45 +372,499 @@ fn list(editing: Signal<Option<String>>) -> impl IntoElement {
                     .px_6()
                     .pt(toolbar::scroll_top(20.0))
                     .pb_6()
-                    .gap_4()
+                    .gap_3()
                     .w_full()
                     .max_w(px(900.0))
                     .self_center()
-                    .child(when(move || adding.get(), move || add_panel(adding)))
+                    .child(each(
+                        move || failing.get(),
+                        |p: &Profile| p.id.clone(),
+                        move |p, _| banner(p),
+                    ))
                     .child(
-                        when(move || profiles.with(|p| !p.is_empty()), move || {
-                            ui::card().child(each(
-                                move || profiles.get(),
-                                |p: &Profile| p.id.clone(),
-                                move |p, i| {
-                                    let first = i.get_untracked() == 0;
-                                    view()
-                                        .child((!first).then(|| ui::divider().ml(px(44.0))))
-                                        .child(profile_row(p, editing))
-                                },
-                            ))
-                        })
+                        when(
+                            move || profiles.with(|p| !p.is_empty()),
+                            move || {
+                                ui::card().child(each(
+                                    move || profiles.get(),
+                                    |p: &Profile| p.id.clone(),
+                                    move |p, i| {
+                                        let first = i.get_untracked() == 0;
+                                        view()
+                                            .child((!first).then(|| ui::divider().ml(px(44.0))))
+                                            .child(row(p, expanded, dialog))
+                                    },
+                                ))
+                            },
+                        )
                         .otherwise(move || {
                             ui::empty_state(
                                 Icon::Profiles,
                                 "No subscriptions yet",
-                                "A subscription link from your provider, or a Clash / mihomo config file.",
-                                (!adding.get_untracked()).then(|| {
-                                    ui::btn_icon(Icon::Plus, "Add Subscription", Variant::Primary).on_press(move || adding.set(true)).into_element()
-                                }),
+                                "The link from your provider, or a Clash / mihomo config file.",
+                                Some(
+                                    ui::btn_icon(Icon::Plus, "Add…", Variant::Primary)
+                                        .on_press(move || dialog.set(Some(Dialog::Add)))
+                                        .into_element(),
+                                ),
                             )
                         }),
                     ),
             ),
         )
+        .child(dynamic(move || match dialog.get() {
+            None => view().into_element(),
+            Some(d) => untracked(move || sheet(d, dialog)).into_element(),
+        }))
 }
 
-fn add_panel(adding: Signal<bool>) -> impl IntoElement {
+// --- Provider errors -----------------------------------------------------------------
+
+/// "Backup couldn't update · Your provider says: “503 Service Unavailable”.
+/// Using the saved copy." with Retry.
+fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
+    let store = store();
+    let id = p.get_untracked().id.clone();
+    let updating = {
+        let id = id.clone();
+        let m = computed(move || store.state.with(|s| s.updating.contains(&id)));
+        move || m.get()
+    };
+    let said =
+        move || p.with(|p| plain_error(p.last_error.as_deref().unwrap_or_default(), p.url()));
+    view()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .px_4()
+        .py_3()
+        .rounded(move || theme().radius)
+        .bg(move || ui::warning().opacity(0.14))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap_0p5()
+                .child(
+                    view()
+                        .flex_row()
+                        .gap_1()
+                        .child(
+                            text(move || -> SharedString { p.with(|p| p.name.clone()).into() })
+                                .text_size(px(size::body()))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .number_of_lines(1),
+                        )
+                        .child(
+                            text(move || -> SharedString { banner_text(&said().0).into() })
+                                .text_size(px(size::body()))
+                                .flex_1(),
+                        ),
+                )
+                .child(when(
+                    move || said().1.is_some(),
+                    move || ui::muted(move || said().1.unwrap_or_default()),
+                )),
+        )
+        .child(
+            ui::btn(
+                move || -> SharedString {
+                    if updating() {
+                        "Retrying…".into()
+                    } else {
+                        "Retry".into()
+                    }
+                },
+                Variant::Secondary,
+            )
+            .disabled(updating)
+            .on_press(move || {
+                // The banner says why; no second message.
+                let f = store.svc().update_profile(id.clone());
+                spawn(async move {
+                    let _ = f.await;
+                });
+            }),
+        )
+}
+
+// --- The list ------------------------------------------------------------------------
+
+fn row(
+    p: ReadSignal<Profile>,
+    expanded: Signal<Option<String>>,
+    dialog: Signal<Option<Dialog>>,
+) -> impl IntoElement {
+    let store = store();
+    let id = p.get_untracked().id.clone();
+    let active = {
+        let id = id.clone();
+        let m = computed(move || {
+            store
+                .state
+                .with(|s| s.profiles.active.as_deref() == Some(id.as_str()))
+        });
+        move || m.get()
+    };
+    let updating = {
+        let id = id.clone();
+        let m = computed(move || store.state.with(|s| s.updating.contains(&id)));
+        move || m.get()
+    };
+    let open = {
+        let id = id.clone();
+        let m = computed(move || expanded.with(|e| e.as_deref() == Some(id.as_str())));
+        move || m.get()
+    };
+    let remote = move || p.with(|p| p.is_remote());
+    let has_usage = move || p.with(|p| p.usage.is_some());
+    let limited = move || p.with(|p| p.usage.is_some_and(|u| u.total > 0));
+    let toggle = {
+        let id = id.clone();
+        move || {
+            if open() {
+                expanded.set(None)
+            } else {
+                expanded.set(Some(id.clone()))
+            }
+        }
+    };
+    let id_use = id.clone();
+    let id_update = id.clone();
+    let id_menu = id.clone();
+
+    view()
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .px_4()
+                .py_3()
+                .min_h(px(66.0))
+                .child(
+                    view().w(px(16.0)).items_center().child(
+                        icon(Icon::Check, 14.0)
+                            .text_color(move || theme().primary)
+                            .style_when(move || !active(), |s| s.invisible()),
+                    ),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap_0p5()
+                        .child(
+                            view()
+                                .flex_row()
+                                .items_baseline()
+                                .gap_1p5()
+                                .child(
+                                    text(move || -> SharedString {
+                                        p.with(|p| p.name.clone()).into()
+                                    })
+                                    .text_size(px(size::body()))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .number_of_lines(1),
+                                )
+                                .child(
+                                    ui::muted(move || -> SharedString {
+                                        p.with(|p| source_label(&p.source)).into()
+                                    })
+                                    .number_of_lines(1),
+                                ),
+                        )
+                        .child(ui::muted(move || -> SharedString {
+                            p.with(|p| usage_line(p.usage.as_ref(), now(), offset()))
+                                .into()
+                        }))
+                        .child(ui::muted(move || -> SharedString {
+                            if updating() {
+                                return "Updating…".into();
+                            }
+                            p.with(|p| schedule_line(&p.source, p.updated_at, now()))
+                                .into()
+                        })),
+                )
+                .child(when(limited, move || {
+                    view().w(px(120.0)).child(ui::meter(move || {
+                        p.with(|p| p.usage.and_then(|u| u.fraction()).unwrap_or(0.0) as f32)
+                    }))
+                }))
+                .child(when(active, || in_use_tag()).otherwise(move || {
+                    let id = id_use.clone();
+                    ui::btn("Use", Variant::Secondary)
+                        .h(px(26.0))
+                        .on_press(move || store.run(store.svc().activate(id.clone())))
+                }))
+                .child(when(remote, move || {
+                    let id = id_update.clone();
+                    ui::btn("Update", Variant::Secondary)
+                        .h(px(26.0))
+                        .disabled(updating)
+                        .on_press(move || store.run(store.svc().update_profile(id.clone())))
+                }))
+                .child(when(has_usage, move || {
+                    let toggle = toggle.clone();
+                    button()
+                        .accessibility_label("Subscription usage")
+                        .on_press(move || toggle())
+                        .items_center()
+                        .justify_center()
+                        .size(px(26.0))
+                        .rounded(ui::radius_control())
+                        .cursor_pointer()
+                        .text_color(move || theme().muted_foreground)
+                        .hover(|s| s.bg(move || theme().accent))
+                        .child(
+                            icon(Icon::ChevronDown, 14.0)
+                                .rotate(move || if open() { deg(180.0) } else { deg(0.0) }),
+                        )
+                }))
+                .child(
+                    ui::btn("···", Variant::Secondary)
+                        .accessibility_label("More")
+                        .h(px(26.0))
+                        .on_press(move || menu(id_menu.clone(), p, dialog)),
+                ),
+        )
+        .child(when(
+            move || open() && has_usage(),
+            move || usage_section(p),
+        ))
+}
+
+fn in_use_tag() -> View {
+    view()
+        .px_2()
+        .h(px(22.0))
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(move || theme().primary.opacity(0.12))
+        .child(
+            text("In use")
+                .text_size(px(size::small()))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || theme().primary),
+        )
+}
+
+/// ⋯: Rename, Change Link, Update Interval, Remove.
+fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
+    let store = store();
+    let (name, source) = p.with_untracked(|p| (p.name.clone(), p.source.clone()));
+    let mut items = Vec::new();
+    items.push(MenuItem::new("Rename…").on_select({
+        let (id, name) = (id.clone(), name.clone());
+        move || {
+            dialog.set(Some(Dialog::Rename {
+                id: id.clone(),
+                name: name.clone(),
+            }))
+        }
+    }));
+    if let Source::Remote {
+        url,
+        interval_hours,
+    } = &source
+    {
+        let host = host_of(url);
+        items.push(MenuItem::new("Change Link…").on_select({
+            let id = id.clone();
+            move || {
+                dialog.set(Some(Dialog::Link {
+                    id: id.clone(),
+                    host: host.clone(),
+                }))
+            }
+        }));
+        items.push(MenuItem::submenu(
+            "Update Interval",
+            interval_choices(*interval_hours).into_iter().map(|h| {
+                let id = id.clone();
+                MenuItem::new(interval_label(h))
+                    .checked(h == *interval_hours)
+                    .on_select(move || {
+                        store
+                            .svc()
+                            .rename_profile(id.clone(), String::new(), Some(h), None)
+                    })
+            }),
+        ));
+    }
+    items.push(MenuItem::separator());
+    items.push(MenuItem::new("Remove…").on_select({
+        let id = id.clone();
+        move || remove(id.clone(), name.clone())
+    }));
+    spawn(async move {
+        popup_menu(items).await;
+    });
+}
+
+fn remove(id: String, name: String) {
+    let store = store();
+    let active = store
+        .state
+        .with_untracked(|s| s.profiles.active.as_deref() == Some(id.as_str()));
+    let description = if active {
+        "Kairo deletes its saved copy. It is the one in use: Kairo switches to another subscription, or disconnects when there is none."
+    } else {
+        "Kairo deletes its saved copy. You can add it again later."
+    };
+    spawn(async move {
+        let answer = alert_dialog()
+            .title(format!("Remove “{name}”?"))
+            .description(description)
+            .destructive("remove", "Remove")
+            .cancel("cancel", "Cancel")
+            .show()
+            .await;
+        if answer.is_ok_and(|a| a.action.as_deref() == Some("remove")) {
+            store.run(store.svc().delete_profile(id));
+        }
+    });
+}
+
+// --- Usage ---------------------------------------------------------------------------
+
+/// "Subscription usage": what the provider's header says. The history and the
+/// pace come later, from what Kairo records.
+fn usage_section(p: ReadSignal<Profile>) -> impl IntoElement {
+    let tiles = computed(move || p.with(|p| p.usage.map(|u| usage_tiles(&u, now(), offset()))));
+    let one = move |i: usize| {
+        let get = move |f: fn(&Tile) -> &String| -> SharedString {
+            tiles
+                .with(|t| t.as_ref().map(|t| f(&t[i]).clone()).unwrap_or_default())
+                .into()
+        };
+        view()
+            .flex_1()
+            .min_w(px(0.0))
+            .gap_0p5()
+            .p_3()
+            .rounded(px(10.0))
+            .bg(move || ui::subtle())
+            .child(ui::muted(move || get(|t| &t.title)).number_of_lines(1))
+            .child(
+                ui::figure(move || get(|t| &t.value), 20.0)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .number_of_lines(1),
+            )
+            .child(ui::muted(move || get(|t| &t.detail)).number_of_lines(1))
+    };
+    view()
+        .px_4()
+        .pb_4()
+        .gap_2()
+        .child(ui::section_label("Subscription usage"))
+        .child(
+            view()
+                .flex_row()
+                .gap_3()
+                .child(one(0))
+                .child(one(1))
+                .child(one(2))
+                .child(one(3)),
+        )
+        .child(ui::muted("As your provider reported at the last update."))
+}
+
+// --- The dialog ----------------------------------------------------------------------
+
+/// The dialog over the page: a dimmed backdrop (a press on it, or Escape,
+/// closes) and the card in the middle.
+fn sheet(d: Dialog, dialog: Signal<Option<Dialog>>) -> impl IntoElement {
+    let close = move || dialog.set(None);
+    let card = match d {
+        Dialog::Add => add_card(dialog).into_element(),
+        Dialog::Rename { id, name } => rename_card(id, name, dialog).into_element(),
+        Dialog::Link { id, host } => link_card(id, host, dialog).into_element(),
+    };
+    view()
+        .child(
+            overlay()
+                .absolute()
+                .inset_0()
+                .bg(move || theme().foreground.opacity(0.28))
+                .on_press(close),
+        )
+        .child(
+            overlay()
+                .absolute()
+                .inset_0()
+                .items_center()
+                .justify_center()
+                .pointer_events(nsh_core::PointerEvents::BoxNone)
+                .on_cancel(close)
+                .child(card),
+        )
+}
+
+fn card_frame(title: &'static str, detail: impl IntoReactive<SharedString>) -> View {
+    view()
+        .w_full()
+        .max_w(px(480.0))
+        .p_5()
+        .gap_3()
+        .rounded(px(16.0))
+        .bg(move || theme().background)
+        .border_1()
+        .border_color(move || theme().border)
+        .child(
+            text(title)
+                .text_size(px(size::large() + 3.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .role(AccessibilityRole::Header),
+        )
+        .child(ui::muted(detail))
+}
+
+fn form_row(label: &'static str, control: impl IntoElement) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .child(ui::muted(label).w(px(52.0)))
+        .child(view().flex_1().min_w(px(0.0)).items_end().child(control))
+}
+
+/// A failure, in the provider's words.
+fn problem_box(problem: Signal<Option<String>>, url: Signal<String>) -> impl IntoElement {
+    let said = move || {
+        plain_error(
+            &problem.get().unwrap_or_default(),
+            Some(url.get_untracked().trim()),
+        )
+    };
+    when(
+        move || problem.with(|p| p.is_some()),
+        move || {
+            view()
+                .gap_1()
+                .p_3()
+                .rounded(px(10.0))
+                .bg(move || theme().destructive.opacity(0.08))
+                .child(
+                    text(move || said().0)
+                        .text_size(px(size::body()))
+                        .font_weight(FontWeight::MEDIUM),
+                )
+                .child(when(
+                    move || said().1.is_some(),
+                    move || ui::muted(move || said().1.unwrap_or_default()),
+                ))
+        },
+    )
+}
+
+fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
     let store = store();
     let url = signal(String::new());
     let name = signal(String::new());
+    let hours = signal(PROVIDER_CHOICE);
     let busy = signal(false);
-    // Why the last try failed, until the next: in the provider's words, with Retry.
     let problem = signal(None::<String>);
     let valid = move || {
         url.with(|u| {
@@ -104,7 +872,7 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
             u.starts_with("http://") || u.starts_with("https://")
         })
     };
-    let submit = move || {
+    let submit = Rc::new(move || {
         if !valid() || busy.get_untracked() {
             return;
         }
@@ -119,14 +887,18 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
             let r = f.await;
             busy.set(false);
             match r {
-                Ok(_) => {
+                Ok(id) => {
+                    let h = hours.get_untracked();
+                    if h != PROVIDER_CHOICE {
+                        store.svc().rename_profile(id, String::new(), Some(h), None);
+                    }
                     store.info("Subscription added");
-                    adding.set(false);
+                    dialog.set(None);
                 }
                 Err(e) => problem.set(Some(e)),
             }
         });
-    };
+    });
     let import = move || {
         let svc = store.svc();
         spawn(async move {
@@ -145,7 +917,7 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
                         store.run_then(svc.add_file(path), move |r| {
                             if r.is_ok() {
                                 store.info("Config imported");
-                                adding.set(false);
+                                dialog.set(None);
                             }
                         });
                     }
@@ -155,579 +927,369 @@ fn add_panel(adding: Signal<bool>) -> impl IntoElement {
             }
         });
     };
-    ui::card()
-        .p_4()
-        .gap_3()
-        .child(ui::section_label("New Subscription"))
-        .child(
-            view().gap_1().child(ui::muted("Subscription URL")).child(
-                ui::field(url, "https://example.com/subscribe?token=…")
-                    .on_submit(move |_: &str| submit()),
-            ),
-        )
-        .child(
-            view()
-                .gap_1()
-                .child(ui::muted(
-                    "Name (optional; the provider's name is used otherwise)",
-                ))
-                .child(
-                    ui::field(name, "My Provider")
-                        .w(px(320.0))
-                        .on_submit(move |_: &str| submit()),
-                ),
-        )
-        .child(when(
-            move || problem.with(|p| p.is_some()),
+    let on_submit = submit.clone();
+    let on_press = submit.clone();
+    card_frame(
+        "Add a Subscription",
+        "Paste the link from your provider, or import a config file.",
+    )
+    .child(form_row(
+        "Link",
+        ui::field(url, "https://example.com/subscribe?token=…")
+            .w_full()
+            .on_submit(move |_: &str| on_submit()),
+    ))
+    .child(form_row("Name", {
+        let on_submit = submit.clone();
+        ui::field(name, "From the provider")
+            .w_full()
+            .on_submit(move |_: &str| on_submit())
+    }))
+    .child(form_row(
+        "Update",
+        ui::popup_button(
             move || {
-                let said = move || crate::pages::home::explain(&problem.get().unwrap_or_default());
-                view()
-                    .gap_2()
-                    .p_3()
-                    .rounded(px(14.0))
-                    .bg(move || theme().destructive.opacity(0.08))
-                    .child(
-                        text(move || said().0)
-                            .text_size(px(size::body()))
-                            .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(when(
-                        move || said().1.is_some(),
-                        move || ui::muted(move || said().1.unwrap_or_default()),
-                    ))
-                    .child(
-                        view()
-                            .flex_row()
-                            .child(ui::capsule("Retry", false).on_press(move || submit())),
-                    )
+                let mut v = vec![(PROVIDER_CHOICE, "As the provider says".to_owned())];
+                v.extend([6, 12, 24, 72, 168, 0].map(|h| (h, interval_label(h))));
+                v
             },
-        ))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .mt_1()
-                .child(ui::btn_icon(Icon::File, "Import File…", Variant::Ghost).on_press(import))
-                .child(view().flex_1())
-                .child(ui::muted(move || -> SharedString {
-                    if busy.get() {
-                        "Downloading…".into()
-                    } else {
-                        "".into()
-                    }
-                }))
-                .child(ui::btn("Cancel", Variant::Secondary).on_press(move || adding.set(false)))
-                .child(
-                    ui::btn("Add", Variant::Primary)
-                        .disabled(move || !valid() || busy.get())
-                        .on_press(submit),
-                ),
-        )
-}
-
-fn source_text(p: &Profile) -> String {
-    match &p.source {
-        Source::Remote {
-            url,
-            interval_hours,
-        } => {
-            let host = url::Url::parse(url)
-                .ok()
-                .and_then(|u| u.host_str().map(str::to_owned))
-                .unwrap_or_else(|| url.clone());
-            match interval_hours {
-                0 => format!("{host} · updated by hand"),
-                h => format!("{host} · every {h} h"),
-            }
-        }
-        Source::Local { .. } => "Local file".to_owned(),
-    }
-}
-
-pub fn ago(at: Option<i64>) -> String {
-    let Some(at) = at else {
-        return "never updated".into();
-    };
-    let ago = kairo_core::profile::now() - at;
-    match ago {
-        i64::MIN..=59 => "updated just now".into(),
-        60..=3599 => format!("updated {} min ago", ago / 60),
-        3600..=86399 => format!("updated {} h ago", ago / 3600),
-        _ => format!("updated {} d ago", ago / 86400),
-    }
-}
-
-fn stats_text(p: &Profile) -> String {
-    let s = &p.stats;
-    let mut parts = vec![format!("{} proxies", s.proxies)];
-    if s.providers > 0 {
-        parts.push(format!("{} providers", s.providers));
-    }
-    parts.push(format!("{} groups", s.groups));
-    parts.push(format!("{} rules", s.rules));
-    parts.join(" · ")
-}
-
-fn profile_row(p: ReadSignal<Profile>, editing: Signal<Option<String>>) -> impl IntoElement {
-    let store = store();
-    let id = p.get_untracked().id.clone();
-    let active = {
-        let id = id.clone();
-        let m = computed(move || {
-            store
-                .state
-                .with(|s| s.profiles.active.as_deref() == Some(id.as_str()))
-        });
-        move || m.get()
-    };
-    let updating = {
-        let id = id.clone();
-        let m = computed(move || store.state.with(|s| s.updating.contains(&id)));
-        move || m.get()
-    };
-    let remote = move || p.with(|p| matches!(p.source, Source::Remote { .. }));
-    let id_activate = id.clone();
-    let id_update = id.clone();
-    let id_edit = id.clone();
-    let id_delete = id.clone();
-    button()
-        .selected(active)
-        .accessibility_label(move || -> SharedString { p.with(|p| p.name.clone()).into() })
-        .on_press(move || {
-            if !active() {
-                store.run(store.svc().activate(id_activate.clone()));
-            }
-        })
-        .flex_row()
-        .items_start()
-        .gap_3()
-        .px_4()
-        .py_3()
-        .cursor_pointer()
-        .hover(|s| s.bg(move || theme().accent))
-        .child(
-            view().w(px(16.0)).pt(px(2.0)).items_center().child(
-                view()
-                    .size(px(14.0))
-                    .rounded_full()
-                    .border(px(1.5))
-                    .border_color(move || {
-                        if active() {
-                            theme().primary
+            move || hours.get(),
+            move |h| hours.set(h),
+        ),
+    ))
+    .child(problem_box(problem, url))
+    .child(
+        view()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .mt_1()
+            .child(ui::btn("Import a File…", Variant::Secondary).on_press(import))
+            .child(view().flex_1())
+            .child(ui::muted(move || -> SharedString {
+                if busy.get() {
+                    "Downloading…".into()
+                } else {
+                    "".into()
+                }
+            }))
+            .child(ui::btn("Cancel", Variant::Secondary).on_press(move || dialog.set(None)))
+            .child(
+                ui::btn(
+                    move || -> SharedString {
+                        if problem.with(|p| p.is_some()) {
+                            "Try Again".into()
                         } else {
-                            theme().input
+                            "Add".into()
                         }
-                    })
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        view()
-                            .size(px(6.0))
-                            .rounded_full()
-                            .bg(move || theme().primary)
-                            .style_when(move || !active(), |s| s.invisible()),
-                    ),
+                    },
+                    Variant::Primary,
+                )
+                .disabled(move || !valid() || busy.get())
+                .on_press(move || on_press()),
             ),
-        )
-        .child(
-            view()
-                .flex_1()
-                .min_w(px(0.0))
-                .gap_1()
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            text(move || -> SharedString { p.with(|p| p.name.clone()).into() })
-                                .text_size(px(size::body()))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .number_of_lines(1),
-                        )
-                        .child(when(active, || ui::badge("Active"))),
-                )
-                .child(ui::muted(move || -> SharedString {
-                    p.with(|p| {
-                        format!(
-                            "{} · {}",
-                            source_text(p),
-                            if updating() {
-                                "updating…".to_owned()
-                            } else {
-                                ago(p.updated_at)
-                            }
-                        )
-                    })
-                    .into()
-                }))
-                .child(when(
-                    move || p.with(|p| p.usage.is_some()),
-                    move || {
-                        view()
-                            .gap_1()
-                            .pt_1()
-                            .max_w(px(420.0))
-                            .child(ui::meter(move || {
-                                p.with(|p| {
-                                    p.usage.as_ref().and_then(|u| u.fraction()).unwrap_or(0.0)
-                                        as f32
-                                })
-                            }))
-                            .child(ui::muted(move || -> SharedString {
-                                p.with(|p| {
-                                    let Some(u) = &p.usage else {
-                                        return String::new();
-                                    };
-                                    let used = kairo_core::bytes(u.used());
-                                    let amount = if u.total > 0 {
-                                        format!("{used} of {}", kairo_core::bytes(u.total))
-                                    } else {
-                                        format!("{used} used")
-                                    };
-                                    format!("{amount} · {}", expiry_text(u.expire))
-                                })
-                                .into()
-                            }))
-                    },
-                ))
-                .child(ui::muted(move || -> SharedString {
-                    p.with(stats_text).into()
-                }))
-                .child(when(
-                    move || p.with(|p| p.last_error.is_some()),
-                    move || {
-                        text(move || -> SharedString {
-                            p.with(|p| {
-                                format!(
-                                    "Couldn't update — using the saved copy. {}",
-                                    crate::pages::home::explain(
-                                        p.last_error.as_deref().unwrap_or_default()
-                                    )
-                                    .0
-                                )
-                            })
-                            .into()
-                        })
-                        .text_size(px(size::small()))
-                        .text_color(move || theme().muted_foreground)
-                        .number_of_lines(2)
-                    },
-                )),
-        )
-        .child(
-            view()
-                .flex_row()
-                .gap_0p5()
-                .child(when(remote, move || {
-                    let id = id_update.clone();
-                    ui::icon_btn(Icon::Refresh, "Update")
-                        .disabled(updating)
-                        .on_press(move || store.run(store.svc().update_profile(id.clone())))
-                }))
-                .child(
-                    ui::icon_btn(Icon::Edit, "Edit")
-                        .on_press(move || editing.set(Some(id_edit.clone()))),
-                )
-                .child(ui::icon_btn(Icon::Trash, "Delete").on_press(move || {
-                    let id = id_delete.clone();
-                    let name = p.with_untracked(|p| p.name.clone());
-                    spawn(async move {
-                        let answer = alert_dialog()
-                            .title(format!("Delete “{name}”?"))
-                            .description("Its downloaded configuration and overrides are removed.")
-                            .destructive("delete", "Delete")
-                            .cancel("cancel", "Cancel")
-                            .show()
-                            .await;
-                        if answer.is_ok_and(|a| a.action.as_deref() == Some("delete")) {
-                            store.run(store.svc().delete_profile(id));
-                        }
-                    });
-                })),
-        )
+    )
 }
 
-// --- One profile: details and overrides ----------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    Overrides,
-    Profile,
-}
-
-const OVERRIDE_HELP: &str = "YAML merged over the profile each time it loads: keys here replace the profile's, maps merge, \
-and prepend-rules / append-rules, prepend-proxies / append-proxies and prepend-proxy-groups / append-proxy-groups add to those lists. \
-Ports, the controller and TUN always come from Settings.";
-
-const OVERRIDE_EXAMPLE: &str = "# Example\n# prepend-rules:\n#   - DOMAIN-SUFFIX,example.com,DIRECT\n# dns:\n#   enable: true\n";
-
-fn detail(id: String, editing: Signal<Option<String>>) -> impl IntoElement {
+fn rename_card(id: String, current: String, dialog: Signal<Option<Dialog>>) -> impl IntoElement {
     let store = store();
-    let profile = {
-        let id = id.clone();
-        computed(move || {
-            store
-                .state
-                .with(|s| s.profiles.profiles.iter().find(|p| p.id == id).cloned())
-        })
-    };
-    let initial = untracked(|| profile.get()).unwrap_or_else(|| Profile {
-        id: id.clone(),
-        name: String::new(),
-        source: Source::Local { origin: None },
-        updated_at: None,
-        usage: None,
-        web_page: None,
-        last_error: None,
-        failed_at: None,
-        stats: Default::default(),
+    let name = signal(current);
+    let valid = move || name.with(|n| !n.trim().is_empty());
+    let submit = Rc::new(move || {
+        if !valid() {
+            return;
+        }
+        store.svc().rename_profile(
+            id.clone(),
+            name.get_untracked().trim().to_owned(),
+            None,
+            None,
+        );
+        dialog.set(None);
     });
-    let (url0, hours0) = match &initial.source {
-        Source::Remote {
-            url,
-            interval_hours,
-        } => (Some(url.clone()), *interval_hours),
-        Source::Local { .. } => (None, 0),
-    };
-    let remote = url0.is_some();
-    let name = signal(initial.name.clone());
-    let url = signal(url0.clone().unwrap_or_default());
-    let hours = signal(hours0.to_string());
-    let details_changed = move || {
-        profile.with(|p| {
-            let Some(p) = p else { return false };
-            let (u0, h0) = match &p.source {
-                Source::Remote {
-                    url,
-                    interval_hours,
-                } => (url.clone(), *interval_hours),
-                Source::Local { .. } => (String::new(), 0),
-            };
-            name.with(|n| n.trim() != p.name)
-                || (remote
-                    && (url.with(|u| u.trim() != u0) || hours.with(|h| h.trim() != h0.to_string())))
+    let on_submit = submit.clone();
+    card_frame(
+        "Rename",
+        "The name shown in Kairo; your provider is not told.",
+    )
+    .child(form_row(
+        "Name",
+        ui::field(name, "Name")
+            .w_full()
+            .on_submit(move |_: &str| on_submit()),
+    ))
+    .child(
+        view()
+            .flex_row()
+            .gap_2()
+            .mt_1()
+            .child(view().flex_1())
+            .child(ui::btn("Cancel", Variant::Secondary).on_press(move || dialog.set(None)))
+            .child(
+                ui::btn("Save", Variant::Primary)
+                    .disabled(move || !valid())
+                    .on_press(move || submit()),
+            ),
+    )
+}
+
+fn link_card(id: String, host: String, dialog: Signal<Option<Dialog>>) -> impl IntoElement {
+    let store = store();
+    // Empty on purpose: the current link carries the account's token.
+    let url = signal(String::new());
+    let valid = move || {
+        url.with(|u| {
+            let u = u.trim();
+            u.starts_with("http://") || u.starts_with("https://")
         })
     };
-    let details_valid = move || {
-        name.with(|n| !n.trim().is_empty())
-            && (!remote
-                || (url.with(|u| u.trim().starts_with("http"))
-                    && hours.with(|h| h.trim().parse::<u32>().is_ok())))
-    };
-
-    let svc = store.svc();
-    let saved = signal(svc.override_text(&id));
-    let draft = signal(saved.get_untracked());
-    let profile_text = svc.profile_text(&id);
-    let tab = signal(Tab::Overrides);
-    let checking = signal(false);
-    let status = signal(None::<(bool, String)>);
-    let dirty = move || draft.with(|d| saved.with(|s| d != s));
-
-    let check = {
-        let profile_text = profile_text.clone();
-        move || {
-            checking.set(true);
-            status.set(None);
-            store.run_then(
-                store
-                    .svc()
-                    .check_config(profile_text.clone(), draft.get_untracked()),
-                move |r| {
-                    checking.set(false);
-                    status.set(Some(match r {
-                        Ok(()) => (true, "The core accepts this configuration.".to_owned()),
-                        Err(e) => (false, e),
-                    }));
-                },
-            );
+    let submit = Rc::new(move || {
+        if !valid() {
+            return;
         }
-    };
-    let save = {
-        let id = id.clone();
-        move || {
-            checking.set(true);
-            status.set(None);
-            let text = draft.get_untracked();
-            store.run_then(
-                store.svc().save_override(id.clone(), text.clone()),
-                move |r| {
-                    checking.set(false);
-                    match r {
-                        Ok(()) => {
-                            saved.set(text);
-                            status.set(Some((true, "Saved and applied.".to_owned())));
-                        }
-                        Err(e) => status.set(Some((false, e))),
-                    }
-                },
-            );
-        }
-    };
-    let save_details = {
-        let id = id.clone();
-        move || {
-            let svc = store.svc();
-            svc.rename_profile(
-                id.clone(),
-                name.get_untracked().trim().to_owned(),
-                remote.then(|| hours.get_untracked().trim().parse().unwrap_or(0)),
-                remote.then(|| url.get_untracked().trim().to_owned()),
-            );
-            store.info("Profile details saved");
-        }
-    };
+        let svc = store.svc();
+        svc.rename_profile(
+            id.clone(),
+            String::new(),
+            None,
+            Some(url.get_untracked().trim().to_owned()),
+        );
+        // Fetch from the new link at once, to see that it works.
+        let f = svc.update_profile(id.clone());
+        dialog.set(None);
+        spawn(async move {
+            let _ = f.await;
+        });
+    });
+    let on_submit = submit.clone();
+    card_frame(
+        "Change Link",
+        format!("Now: {host}. Paste the new link from your provider."),
+    )
+    .child(form_row(
+        "Link",
+        ui::field(url, "https://example.com/subscribe?token=…")
+            .w_full()
+            .on_submit(move |_: &str| on_submit()),
+    ))
+    .child(
+        view()
+            .flex_row()
+            .gap_2()
+            .mt_1()
+            .child(view().flex_1())
+            .child(ui::btn("Cancel", Variant::Secondary).on_press(move || dialog.set(None)))
+            .child(
+                ui::btn("Save and Update", Variant::Primary)
+                    .disabled(move || !valid())
+                    .on_press(move || submit()),
+            ),
+    )
+}
 
-    view()
-        .flex_1()
-        .child(
-            view()
-                .h(px(ui::HEADER_HEIGHT))
-                .flex_shrink_0()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .px_3()
-                .border_b_1()
-                .border_color(move || theme().border)
-                .window_drag(true)
-                .child(
-                    button()
-                        .accessibility_label("Back to Subscriptions")
-                        .on_press(move || editing.set(None))
-                        .flex_row()
-                        .items_center()
-                        .gap_1()
-                        .h(px(28.0))
-                        .px_2()
-                        .rounded(ui::radius_control())
-                        .cursor_pointer()
-                        .text_color(move || theme().primary)
-                        .hover(|s| s.bg(move || theme().accent))
-                        .child(icon(Icon::ChevronLeft, 14.0))
-                        .child(text("Profiles").text_size(px(size::body())).font_weight(FontWeight::MEDIUM)),
-                )
-                .child(
-                    ui::title(move || -> SharedString { profile.with(|p| p.as_ref().map(|p| p.name.clone()).unwrap_or_default()).into() })
-                        .text_size(px(size::large() + 2.0))
-                        .flex_1()
-                        .number_of_lines(1),
-                ),
-        )
-        .child(
-            view()
-                .flex_1()
-                .min_h(px(0.0))
-                .p_5()
-                .gap_4()
-                .child(ui::group(
-                    Some("Details"),
-                    {
-                        let mut rows = vec![ui::setting_row("Name", None, ui::field(name, "Name").w(px(320.0))).into_element()];
-                        if remote {
-                            rows.push(ui::setting_row("Subscription URL", None, ui::field(url, "https://…").w(px(420.0))).into_element());
-                            rows.push(
-                                ui::setting_row(
-                                    "Update every",
-                                    Some("Hours between automatic updates; 0 updates only by hand."),
-                                    view()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(ui::field(hours, "24").w(px(72.0)).text_right())
-                                        .child(ui::muted("hours")),
-                                )
-                                .into_element(),
-                            );
-                        }
-                        rows.push(
-                            view()
-                                .flex_row()
-                                .justify_end()
-                                .px_4()
-                                .py_2()
-                                .child(ui::btn("Save Details", Variant::Secondary).disabled(move || !details_changed() || !details_valid()).on_press(save_details))
-                                .into_element(),
-                        );
-                        rows
-                    },
-                ))
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_3()
-                        .child(ui::segmented(vec![(Tab::Overrides, "Overrides"), (Tab::Profile, "Profile")], move || tab.get(), move |t| tab.set(t)))
-                        .child(view().flex_1())
-                        .child(when(
-                            move || tab.get() == Tab::Overrides,
-                            move || {
-                                let check = check.clone();
-                                let save = save.clone();
-                                view()
-                                    .flex_row()
-                                    .gap_2()
-                                    .child(ui::btn_icon(Icon::Check, "Check", Variant::Secondary).disabled(move || checking.get()).on_press(check))
-                                    .child(ui::btn("Save", Variant::Primary).disabled(move || !dirty() || checking.get()).on_press(save))
-                            },
-                        )),
-                )
-                .child(ui::muted(move || -> SharedString {
-                    match tab.get() {
-                        Tab::Overrides => OVERRIDE_HELP.into(),
-                        Tab::Profile => "The configuration as the provider sent it (read only). Kairo never edits it; updates replace it.".into(),
-                    }
-                }))
-                .child(when(
-                    move || status.with(Option::is_some) && tab.get() == Tab::Overrides,
-                    move || {
-                        let ok = move || status.with(|s| s.as_ref().is_some_and(|s| s.0));
-                        view()
-                            .flex_row()
-                            .items_start()
-                            .gap_2()
-                            .px_3()
-                            .py_2()
-                            .rounded(ui::radius_control())
-                            .bg(move || ui::subtle())
-                            .border_1()
-                            .border_color(move || theme().border)
-                            .child(ui::dot(move || if ok() { ui::success() } else { theme().destructive }).mt(px(4.0)))
-                            .child(
-                                text(move || -> SharedString { status.with(|s| s.as_ref().map(|s| s.1.clone()).unwrap_or_default()).into() })
-                                    .text_size(px(size::small()))
-                                    .selectable(true)
-                                    .flex_1(),
-                            )
-                    },
-                ))
-                .child(
-                    ui::card().flex_1().min_h(px(200.0)).child(dynamic(move || {
-                        let t = tab.get();
-                        let profile_text = profile_text.clone();
-                        untracked(move || match t {
-                            Tab::Overrides => editor()
-                                .default_value(if draft.get_untracked().trim().is_empty() { OVERRIDE_EXAMPLE.to_owned() } else { draft.get_untracked() })
-                                .language("yaml")
-                                .line_numbers(true)
-                                .font_size(px(12.5))
-                                .accessibility_label("Overrides")
-                                .on_change(move |v: &SharedString| draft.set(v.to_string()))
-                                .flex_1()
-                                .into_element(),
-                            Tab::Profile => editor()
-                                .default_value(profile_text)
-                                .language("yaml")
-                                .line_numbers(true)
-                                .read_only(true)
-                                .font_size(px(12.5))
-                                .accessibility_label("Profile")
-                                .flex_1()
-                                .into_element(),
-                        })
-                    })),
-                ),
-        )
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: i64 = 1_793_000_000; // 2026-10-26 07:33 UTC
+    const GB: u64 = 1024 * 1024 * 1024;
+
+    fn usage(used_gb: u64, total_gb: u64, expire: Option<i64>) -> Usage {
+        Usage {
+            upload: 0,
+            download: used_gb * GB,
+            total: total_gb * GB,
+            expire,
+        }
+    }
+
+    #[test]
+    fn updated_ago_in_the_largest_unit() {
+        assert_eq!(updated_ago(None, NOW), "Never updated");
+        assert_eq!(updated_ago(Some(NOW - 10), NOW), "Updated just now");
+        assert_eq!(updated_ago(Some(NOW - 5 * 60), NOW), "Updated 5 min ago");
+        assert_eq!(
+            updated_ago(Some(NOW - 2 * 3600 - 59), NOW),
+            "Updated 2 h ago"
+        );
+        assert_eq!(updated_ago(Some(NOW - 26 * 3600), NOW), "Updated 1 d ago");
+        // A clock that went back is just now, not negative.
+        assert_eq!(updated_ago(Some(NOW + 500), NOW), "Updated just now");
+    }
+
+    #[test]
+    fn schedule_says_how_it_is_kept_current() {
+        let remote = |h| Source::Remote {
+            url: "https://x.example/a".into(),
+            interval_hours: h,
+        };
+        assert_eq!(
+            schedule_line(&remote(12), Some(NOW - 7200), NOW),
+            "Updated 2 h ago · every 12 h"
+        );
+        assert_eq!(
+            schedule_line(&remote(0), Some(NOW - 7200), NOW),
+            "Updated 2 h ago · by hand"
+        );
+        assert_eq!(
+            schedule_line(&Source::Local { origin: None }, Some(NOW), NOW),
+            "Not updated automatically"
+        );
+        assert_eq!(interval_label(12), "Every 12 hours");
+        assert_eq!(interval_label(24), "Every day");
+        assert_eq!(interval_label(72), "Every 3 days");
+        assert_eq!(interval_label(0), "Only by hand");
+    }
+
+    #[test]
+    fn dates_are_month_and_day() {
+        // 2026-12-02 12:00 UTC
+        let t = 1_796_212_800;
+        assert_eq!(month_day(t, 0), "Dec 2");
+        // Near midnight the offset decides the day.
+        assert_eq!(month_day(1_796_169_600 + 3600, 0), "Dec 2");
+        assert_eq!(month_day(1_796_169_600 + 3600, -7200), "Dec 1");
+        assert_eq!(month_day(0, 0), "Jan 1");
+    }
+
+    #[test]
+    fn sizes_drop_needless_decimals() {
+        assert_eq!(size_text(37 * GB), "37 GB");
+        assert_eq!(size_text(41 * GB / 10), "4.1 GB");
+        assert_eq!(size_text(0), "0 B");
+        assert_eq!(used_of(37 * GB, 100 * GB), "37 of 100 GB");
+        assert_eq!(used_of(500 * 1024 * 1024, 50 * GB), "500 MB of 50 GB");
+    }
+
+    #[test]
+    fn the_usage_line_follows_the_header() {
+        let off = 0;
+        let expire = NOW + 22 * DAY;
+        let line = usage_line(Some(&usage(37, 100, Some(expire))), NOW, off);
+        assert_eq!(
+            line,
+            format!("37 of 100 GB · expires {}", month_day(expire, off))
+        );
+        assert_eq!(usage_line(None, NOW, off), "No usage data");
+        assert_eq!(
+            usage_line(Some(&usage(37, 0, None)), NOW, off),
+            "37 GB used · no expiry"
+        );
+        assert!(usage_line(Some(&usage(1, 10, Some(NOW - DAY))), NOW, off).contains("expired"));
+    }
+
+    #[test]
+    fn the_allowance_is_what_is_left_over_the_days_left() {
+        assert_eq!(days_left(Some(NOW + 22 * DAY), NOW), Some(22));
+        // A started day counts, so the last day never divides by zero.
+        assert_eq!(days_left(Some(NOW + 60), NOW), Some(1));
+        assert_eq!(days_left(Some(NOW - 1), NOW), None);
+        assert_eq!(days_left(None, NOW), None);
+        assert_eq!(allowance_per_day(63 * GB, 22), Some(63 * GB / 22));
+        assert_eq!(allowance_per_day(63 * GB, 0), None);
+        assert_eq!(left_bytes(&usage(37, 100, None)), Some(63 * GB));
+        // Over the plan: nothing left, not a wrap-around.
+        assert_eq!(left_bytes(&usage(120, 100, None)), Some(0));
+        assert_eq!(left_bytes(&usage(37, 0, None)), None);
+    }
+
+    #[test]
+    fn the_tiles_have_no_pace_and_no_projection() {
+        let off = 0;
+        let expire = NOW + 22 * DAY;
+        let tiles = usage_tiles(&usage(37, 100, Some(expire)), NOW, off);
+        assert_eq!(
+            (tiles[0].value.as_str(), tiles[0].detail.as_str()),
+            ("37 GB", "of 100 GB")
+        );
+        assert_eq!(tiles[1].value, "63 GB");
+        assert!(tiles[1].detail.starts_with("22 days to "));
+        assert_eq!(tiles[2].value, "—");
+        assert!(tiles[3].title.starts_with("To last until "));
+        assert_eq!(tiles[3].value, "≤ 2.9 GB/day");
+        assert_eq!(tiles[3].detail, "63 GB over 22 days");
+        for t in &tiles {
+            assert!(!t.detail.contains("at this rate") && !t.detail.contains("runs out"));
+        }
+    }
+
+    #[test]
+    fn the_tiles_without_a_limit_or_an_expiry_say_so() {
+        let tiles = usage_tiles(&usage(37, 0, None), NOW, 0);
+        assert_eq!(tiles[1].value, "No limit");
+        assert_eq!(tiles[3].value, "—");
+        let tiles = usage_tiles(&usage(37, 100, None), NOW, 0);
+        assert_eq!(tiles[1].detail, "no expiry");
+        assert_eq!(tiles[3].value, "—");
+        let tiles = usage_tiles(&usage(37, 100, Some(NOW - 5)), NOW, 0);
+        assert!(tiles[1].detail.starts_with("expired "));
+        assert_eq!(tiles[3].value, "—");
+        let tiles = usage_tiles(&usage(1, 100, Some(NOW + 3600)), NOW, 0);
+        assert_eq!(tiles[3].detail, "99 GB over 1 day");
+    }
+
+    #[test]
+    fn a_link_shows_only_its_host() {
+        assert_eq!(
+            host_of("https://sub.example.net/api/v1/client/9f2c?token=SECRET"),
+            "sub.example.net"
+        );
+        assert_eq!(host_of("not a link, SECRET"), "Subscription");
+        let remote = Source::Remote {
+            url: "https://cdn.example.org/x?token=SECRET".into(),
+            interval_hours: 24,
+        };
+        assert_eq!(source_label(&remote), "cdn.example.org");
+        assert_eq!(
+            source_label(&Source::Local { origin: None }),
+            "Imported file"
+        );
+    }
+
+    #[test]
+    fn errors_never_carry_a_link() {
+        let url = "https://sub.example.net/api?token=SECRET";
+        let said = scrub(
+            &format!("error sending request for url ({url}): timed out"),
+            Some(url),
+        );
+        assert_eq!(
+            said,
+            "error sending request for url (sub.example.net): timed out"
+        );
+        // Another link than the subscription's, and one without a host.
+        let said = scrub(
+            "redirected to http://other.example/x?token=SECRET and then http:// failed",
+            None,
+        );
+        assert!(!said.contains("SECRET") && !said.contains("/x"), "{said}");
+        assert!(said.contains("other.example"));
+        let (headline, hint) = plain_error(&format!("Download failed: bad url {url}"), Some(url));
+        assert!(!headline.contains("SECRET"));
+        assert!(!hint.unwrap_or_default().contains("SECRET"));
+    }
+
+    #[test]
+    fn a_server_error_is_the_providers() {
+        let (headline, hint) = plain_error("The server answered HTTP 503", None);
+        assert_eq!(headline, "Your provider says: “503 Service Unavailable”");
+        assert!(hint.is_some());
+        assert_eq!(
+            banner_text(&headline),
+            "couldn't update · Your provider says: “503 Service Unavailable”. Using the saved copy."
+        );
+        // A refused link is a different story, and a headline's full stop is not doubled.
+        let (headline, _) = plain_error("The server answered HTTP 404", None);
+        assert_eq!(headline, "The provider refused this link.");
+        assert_eq!(
+            banner_text(&headline),
+            "couldn't update · The provider refused this link. Using the saved copy."
+        );
+    }
+
+    #[test]
+    fn the_menu_offers_the_current_interval() {
+        assert_eq!(interval_choices(12), vec![6, 12, 24, 72, 168, 0]);
+        assert_eq!(interval_choices(5), vec![5, 6, 12, 24, 72, 168, 0]);
+    }
 }
