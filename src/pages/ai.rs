@@ -238,16 +238,35 @@ pub fn exit_place() -> Option<places::Place> {
     })
 }
 
-// The Downloads exit (the engine's group arrives with the merge; until then it
-// follows Everything else).
+/// The place Downloads go through now.
 pub fn downloads_place() -> Option<places::Place> {
-    crate::pages::exits::place_of(crate::pages::exits::Exit::Rest)
+    let store = store();
+    store.state.with(|_| ());
+    store.proxies.with(|_| ());
+    let name = store.state.with(|s| s.downloads.node.clone())?;
+    store.proxies.with(|p| {
+        p.0.groups
+            .iter()
+            .flat_map(|g| g.members.iter())
+            .find(|m| m.name == name && !m.is_group)
+            .map(places::place)
+    })
 }
+
+/// Downloads follow the fastest place by themselves.
 pub fn downloads_fastest() -> bool {
-    true
+    store().state.with(|s| s.downloads.fastest)
 }
-pub fn set_downloads(_name: String) {}
-pub fn downloads_to_fastest() {}
+
+pub fn set_downloads(name: String) {
+    let store = store();
+    store.run(store.svc().set_downloads_exit(name));
+}
+
+pub fn downloads_to_fastest() {
+    let store = store();
+    store.run(store.svc().downloads_follow_fastest());
+}
 
 fn tone_color(t: Tone) -> AdaptiveColor {
     match t {
@@ -296,10 +315,34 @@ pub fn goes_through(state: &State, service: &AiService) -> (String, bool) {
     }
 }
 
-/// What the user chose for this service's sites in Apps & Sites, if anything.
+/// The routes the user set for this service's sites in Apps & Sites.
+fn site_routes<'a>(state: &'a State, service: &AiService) -> Vec<&'a kairo_core::routes::Route> {
+    state
+        .settings
+        .routes
+        .iter()
+        .filter(|r| match &r.kind {
+            kairo_core::routes::RouteKind::Site { domain } => service
+                .suffixes
+                .iter()
+                .any(|s| domain == s || domain.ends_with(&format!(".{s}"))),
+            _ => false,
+        })
+        .collect()
+}
+
+/// What the user chose for this service's sites in Apps & Sites, if anything,
+/// in the exits' names.
 fn site_choice(state: &State, service: &AiService) -> Option<String> {
-    let _ = (state, service);
-    None
+    use kairo_core::routes::RouteExit as E;
+    site_routes(state, service).first().map(|r| match &r.exit {
+        E::Ai | E::Usual => "AI exit".to_owned(),
+        E::Everything => "Everything else".to_owned(),
+        E::Downloads => "Downloads".to_owned(),
+        E::Direct => "Direct".to_owned(),
+        E::Block => "Blocked".to_owned(),
+        E::Node(n) => places::split_flag(n).1.trim().to_owned(),
+    })
 }
 
 pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
@@ -342,8 +385,24 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
                     )
                 }
             };
-            let fix = (off_exit && state.settings.mode != kairo_core::Mode::Direct)
-                .then_some(Fix::UseAiExit);
+            let bypassing = state.bypass.iter().any(|b| b.service == Some(t.id));
+            let fix = if bypassing {
+                Some(Fix::UseEveryApp)
+            } else {
+                (off_exit && state.settings.mode != kairo_core::Mode::Direct)
+                    .then_some(Fix::UseAiExit)
+            };
+            let (goes, status, sees_flag, sees, tone) = if bypassing {
+                (
+                    "Direct".to_owned(),
+                    "Not through Kairo".to_owned(),
+                    "◎".to_owned(),
+                    "your own network".to_owned(),
+                    Tone::Bad,
+                )
+            } else {
+                (goes, status, sees_flag, sees, tone)
+            };
             Row {
                 id: t.id,
                 name: t.name,
@@ -575,10 +634,18 @@ fn apply_fix(store: crate::store::Store, id: &'static str, fix: Fix) {
     }
 }
 
-/// Sends the service's sites to the AI exit (drops the choice that took it
+/// Sends the service's sites to the AI exit (drops the choices that took it
 /// elsewhere).
 fn use_ai_exit(store: crate::store::Store, id: &'static str) {
-    let _ = (store, id);
+    let Some(service) = ai::SERVICES.iter().find(|s| s.id == id) else {
+        return;
+    };
+    let ids: Vec<String> = store
+        .state
+        .with_untracked(|s| site_routes(s, service).into_iter().map(|r| r.id.clone()).collect());
+    for rid in ids {
+        store.run(store.svc().remove_route(rid));
+    }
 }
 
 /// What happened to the exit, and the route being Direct.

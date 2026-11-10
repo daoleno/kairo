@@ -492,6 +492,7 @@ fn update_text(u: &UpdateStatus) -> String {
             progress: Some(p),
         } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
         UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
+        UpdateStatus::Available { version } => format!("Kairo {version} is available"),
         UpdateStatus::Ready { version } => format!("Kairo {version} is ready"),
         UpdateStatus::Manual { version, .. } => {
             format!("Kairo {version} is out (this copy cannot update itself)")
@@ -507,6 +508,9 @@ pub fn update_button() -> impl IntoElement {
     dynamic(move || {
         let u = store.state.with(|s| s.update.clone());
         untracked(move || match u {
+            UpdateStatus::Available { .. } => ui::btn_icon(Icon::Download, "Download", Variant::Primary)
+                .on_press(move || store.run(store.svc().download_update()))
+                .into_element(),
             UpdateStatus::Ready { .. } => {
                 ui::btn_icon(Icon::Restart, "Restart to Update", Variant::Primary)
                     .on_press(move || store.run(store.svc().restart_to_update()))
