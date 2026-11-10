@@ -561,6 +561,7 @@ impl Drop for CoreGuard {
     }
 }
 
+#[cfg(unix)]
 unsafe fn libc_kill(pid: i32) {
     unsafe extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;
@@ -568,6 +569,11 @@ unsafe fn libc_kill(pid: i32) {
     unsafe {
         kill(pid, 9);
     }
+}
+
+#[cfg(windows)]
+unsafe fn libc_kill(pid: i32) {
+    kairo_core::winapi::terminate(pid as u32);
 }
 
 fn env_logger_init() -> Option<()> {
