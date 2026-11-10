@@ -153,10 +153,9 @@ pub enum Install {
 
 impl Install {
     pub fn detect() -> Install {
-        let Ok(exe) = std::env::current_exe() else {
+        let Some(exe) = crate::paths::current_exe() else {
             return Install::Other;
         };
-        let exe = exe.canonicalize().unwrap_or(exe);
         if cfg!(windows) {
             return Self::detect_windows(&exe);
         }

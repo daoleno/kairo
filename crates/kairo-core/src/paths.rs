@@ -138,9 +138,26 @@ impl Paths {
 ///   .deb, `~/.local` for the tarball's install.sh);
 /// - a development build: `target/mihomo/mihomo` (`scripts/fetch-mihomo.sh`).
 pub fn bundled_core() -> Option<PathBuf> {
+    bundled_core_for(&current_exe()?)
+}
+
+/// This executable's real path. On Windows `canonicalize` returns the
+/// `\\?\C:\...` form, which is a poor thing to write into a Run entry or
+/// compare with a process's image path, so the plain drive path is used
+/// whenever there is one.
+pub fn current_exe() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let exe = exe.canonicalize().unwrap_or(exe);
-    bundled_core_for(&exe)
+    Some(plain(exe.canonicalize().unwrap_or(exe)))
+}
+
+/// `\\?\C:\dir` as `C:\dir`; every other path as it is.
+pub fn plain(p: PathBuf) -> PathBuf {
+    let stripped = p
+        .to_string_lossy()
+        .strip_prefix(r"\\?\")
+        .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+        .map(PathBuf::from);
+    stripped.unwrap_or(p)
 }
 
 pub fn bundled_core_for(exe: &Path) -> Option<PathBuf> {
@@ -171,4 +188,26 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     ));
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)
+}
+
+#[cfg(test)]
+mod plain_tests {
+    use super::plain;
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_verbatim_prefix_goes_only_from_drive_paths() {
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\C:\Users\a\kairo.exe")),
+            PathBuf::from(r"C:\Users\a\kairo.exe")
+        );
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\UNC\host\share\k.exe")),
+            PathBuf::from(r"\\?\UNC\host\share\k.exe")
+        );
+        assert_eq!(
+            plain(PathBuf::from("/usr/bin/kairo")),
+            PathBuf::from("/usr/bin/kairo")
+        );
+    }
 }
