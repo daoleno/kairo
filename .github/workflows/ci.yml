@@ -60,3 +60,28 @@ jobs:
           scripts/fetch-mihomo.sh windows-x86_64 "$RUNNER_TEMP/core"
           echo "KAIRO_TEST_CORE=$RUNNER_TEMP\\core\\mihomo.exe" >> "$GITHUB_ENV"
       - run: cargo test --workspace
+
+  android:
+    name: Android · the arm64 APK builds (debug-signed)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: nsh (the command that builds the app's native part)
+        run: |
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.4.0 sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: The APK, with the core built from the pinned mihomo
+        run: scripts/package-android.sh arm64-v8a dist
+      - name: The APK holds the app, the core and the VPN service
+        run: scripts/check-android-apk.sh dist/Kairo-*-android-arm64-v8a.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug-signed
+          path: dist/*.apk
