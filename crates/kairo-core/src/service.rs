@@ -612,7 +612,12 @@ impl Service {
         }
         match (version, seeded) {
             (Some(_), _) => {
+                // Android: the VPN (and its permission screen) waits for a
+                // subscription to connect with, not the first launch.
+                let waits_for_profile = cfg!(target_os = "android")
+                    && self.0.state.borrow().profiles.active.is_none();
                 if self.settings().auto_start_core
+                    && !waits_for_profile
                     && let Err(e) = self.start_core().await
                 {
                     log::warn!("start: {e}");
@@ -2346,7 +2351,12 @@ impl Service {
             let exe = match crate::update::install(&svc).await {
                 Ok(exe) => exe,
                 Err(e) => {
-                    svc.set_update(previous);
+                    // Android has no terminal for the user to see why.
+                    svc.set_update(if cfg!(target_os = "android") {
+                        crate::update::UpdateStatus::Failed { message: e.clone() }
+                    } else {
+                        previous
+                    });
                     return Err(e);
                 }
             };
