@@ -1,5 +1,6 @@
-//! Rules: the running configuration's rules in order (searchable), and its
-//! rule providers.
+//! Rules (Settings › Advanced › Inspect): the running configuration's rules in
+//! order (searchable) and its rule sets, read-only. Routes are changed under
+//! Apps & Sites.
 
 use std::sync::Arc;
 
@@ -10,12 +11,12 @@ use nsh_core::prelude::*;
 use crate::chrome::Glyph;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
-use crate::ui::{self, Icon, Variant, size};
+use crate::ui::{self, Icon, size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Rules,
-    Providers,
+    RuleSets,
 }
 
 pub fn page() -> impl IntoElement {
@@ -61,6 +62,25 @@ pub fn page() -> impl IntoElement {
         let _ = generation.get();
         untracked(load);
     });
+    // Rule sets being updated (one by one, or all from the toolbar).
+    let updating = signal(std::collections::HashSet::<String>::new());
+    let update = move |name: String| {
+        updating.update(|u| {
+            u.insert(name.clone());
+        });
+        let n = name.clone();
+        store.run_then(store.svc().update_rule_provider(name), move |_| {
+            updating.update(|u| {
+                u.remove(&n);
+            });
+            load();
+        });
+    };
+    let update_all = move || {
+        for p in providers.get_untracked().iter() {
+            update(p.name.clone());
+        }
+    };
 
     let shown = computed(move || {
         let q = query.get().trim().to_lowercase();
@@ -92,46 +112,54 @@ pub fn page() -> impl IntoElement {
                 }
             },
             vec![
-                toolbar::search("rules.search", "Type, payload or target", query),
+                crate::pages::settings::back(),
+                toolbar::search("rules.search", "Filter rules", query),
                 toolbar::button(
-                    "rules.reload",
-                    "Reload Rules",
+                    "rules.update",
+                    "Update Rule Sets",
                     Glyph::Refresh,
                     Icon::Refresh,
-                    load,
+                    update_all,
                 )
-                .enabled(move || running.get() && !loading.get()),
+                .enabled(move || {
+                    running.get()
+                        && providers.with(|p| !p.is_empty())
+                        && updating.with(|u| u.is_empty())
+                }),
             ],
         ))
-        .child(when(
-            move || providers.with(|p| !p.is_empty()),
-            move || {
-                view()
-                    .flex_row()
-                    .px_5()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(move || theme().border)
-                    .child(ui::segmented(
-                        vec![(Tab::Rules, "Rules"), (Tab::Providers, "Providers")],
-                        move || tab.get(),
-                        move |t| tab.set(t),
-                    ))
-            },
-        ))
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .px_5()
+                .py_2()
+                .border_b_1()
+                .border_color(move || theme().border)
+                .child(ui::segmented(
+                    vec![(Tab::Rules, "Rules"), (Tab::RuleSets, "Rule Sets")],
+                    move || tab.get(),
+                    move |t| tab.set(t),
+                ))
+                .child(
+                    ui::muted("Read-only · change routes under Apps & Sites")
+                        .flex_1()
+                        .text_right()
+                        .number_of_lines(1),
+                ),
+        )
         .child(
             when(
                 move || running.get(),
                 move || {
                     dynamic(move || {
-                        let t = if providers.with(|p| p.is_empty()) {
-                            Tab::Rules
-                        } else {
-                            tab.get()
-                        };
+                        let t = tab.get();
                         untracked(move || match t {
                             Tab::Rules => rule_list(shown, query).into_element(),
-                            Tab::Providers => provider_list(providers, query, load).into_element(),
+                            Tab::RuleSets => {
+                                provider_list(providers, query, updating, update).into_element()
+                            }
                         })
                     })
                 },
@@ -271,10 +299,9 @@ fn cell(content: impl IntoReactive<SharedString>, w: Option<f32>) -> Text {
 fn provider_list(
     providers: Signal<Arc<Vec<RuleProvider>>>,
     query: Signal<String>,
-    reload: impl Fn() + Copy + 'static,
+    updating: Signal<std::collections::HashSet<String>>,
+    update: impl Fn(String) + Copy + 'static,
 ) -> impl IntoElement {
-    let store = store();
-    let updating = signal(std::collections::HashSet::<String>::new());
     let shown = computed(move || {
         let q = query.get().trim().to_lowercase();
         providers.with(|p| {
@@ -284,42 +311,19 @@ fn provider_list(
                 .collect::<Vec<_>>()
         })
     });
-    let update = move |name: String| {
-        updating.update(|u| {
-            u.insert(name.clone());
-        });
-        let n = name.clone();
-        store.run_then(store.svc().update_rule_provider(name), move |_| {
-            updating.update(|u| {
-                u.remove(&n);
-            });
-            reload();
-        });
-    };
     scroll().flex_1().child(
         view()
             .p_5()
             .gap_3()
             .max_w(px(900.0))
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .child(
-                        ui::muted("Rule sets the rules refer to, kept up to date by the core.")
-                            .flex_1(),
-                    )
-                    .child(
-                        ui::btn_icon(Icon::Refresh, "Update All", Variant::Secondary).on_press(
-                            move || {
-                                for p in providers.get_untracked().iter() {
-                                    update(p.name.clone());
-                                }
-                            },
-                        ),
-                    ),
-            )
-            .child(ui::card().child(each(
+            .child(ui::muted(
+                "Rule sets the rules refer to, kept up to date by the core.",
+            ))
+            .child(when(
+                move || providers.with(|p| p.is_empty()),
+                || ui::muted("This configuration has no rule sets."),
+            ))
+            .child(when(move || providers.with(|p| !p.is_empty()), move || ui::card().child(each(
                 move || shown.get(),
                 |p: &RuleProvider| p.name.clone(),
                 move |p, i| {
@@ -376,6 +380,6 @@ fn provider_list(
                                 ),
                         )
                 },
-            ))),
+            )))),
     )
 }

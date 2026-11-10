@@ -1,4 +1,4 @@
-//! DNS: ask the core's resolver (the same DNS the proxy uses) and see the
+//! DNS (Settings › Advanced › Inspect): ask the core's resolver (the same DNS the proxy uses) and see the
 //! answers; flush the fake-IP cache.
 
 use kairo_core::model::{DnsAnswer, dns_type_name};
@@ -86,7 +86,11 @@ pub fn page() -> impl IntoElement {
 
     view()
         .flex_1()
-        .child(ui::toolbar::floating(Page::Dns, String::new, vec![]))
+        .child(ui::toolbar::floating(
+            Page::Dns,
+            String::new,
+            vec![crate::pages::settings::back()],
+        ))
         .child(
             scroll().flex_1().child(
                 view()
