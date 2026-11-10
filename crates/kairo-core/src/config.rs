@@ -476,6 +476,9 @@ pub async fn validate(core: &Path, dir: &Path, config: &Path) -> Result<(), Stri
         .arg(config)
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
+    // No console window flashing up (Kairo is a windowed program).
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let output = match tokio::time::timeout(Duration::from_secs(90), command.output()).await {
         Ok(Ok(o)) => o,
         Ok(Err(e)) => return Err(format!("Could not run the core: {e}")),

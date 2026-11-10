@@ -285,6 +285,9 @@ pub fn update_pressed(svc: &kairo_core::Service) {
 pub fn open_in_browser(url: &str) {
     let opener = if cfg!(target_os = "macos") {
         "open"
+    } else if cfg!(windows) {
+        // Explorer hands the address to the default browser.
+        "explorer"
     } else {
         "xdg-open"
     };

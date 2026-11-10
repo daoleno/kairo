@@ -60,16 +60,14 @@ pub fn install_binary(paths: &Paths, binary: &[u8]) -> Result<(), CoreError> {
 
 /// The version a core binary reports (`mihomo -v`: "Mihomo Meta v1.19.33 linux amd64 ...").
 pub async fn binary_version(core: &Path) -> Option<String> {
-    let out = tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::process::Command::new(core)
-            .arg("-v")
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .ok()?
-    .ok()?;
+    let mut command = tokio::process::Command::new(core);
+    command.arg("-v").kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let out = tokio::time::timeout(Duration::from_secs(10), command.output())
+        .await
+        .ok()?
+        .ok()?;
     parse_version(&String::from_utf8_lossy(&out.stdout))
 }
 
