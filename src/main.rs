@@ -536,7 +536,7 @@ mod platform {
 
     use nsh_platform_windows::{App, AppOptions, AppView, Appearance};
     use windows::Win32::Foundation::{
-        ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM,
+        ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM,
     };
     use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
     use windows::Win32::System::Threading::CreateMutexW;
@@ -546,9 +546,10 @@ mod platform {
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
     use windows::Win32::UI::WindowsAndMessaging::{
         AllowSetForegroundWindow, CallWindowProcW, DispatchMessageW, FindWindowW, GWLP_WNDPROC,
-        GetMessageW, GetWindowThreadProcessId, IsIconic, MSG, PostMessageW, SPI_GETWORKAREA,
-        SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow,
-        SystemParametersInfoW, TranslateMessage, WM_APP, WM_CLOSE, WM_ENDSESSION,
+        GetMessageW, GetWindowRect, GetWindowThreadProcessId, IsIconic, MSG, PostMessageW,
+        SPI_GETWORKAREA, SW_HIDE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER,
+        SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
+        TranslateMessage, WM_APP, WM_CLOSE, WM_ENDSESSION,
     };
     use windows::core::{HSTRING, w};
 
@@ -675,7 +676,7 @@ mod platform {
     /// The first window size in points: 1180x760, or less on a small screen so
     /// the window fits above the taskbar.
     fn window_size() -> (i32, i32) {
-        let mut work = windows::Win32::Foundation::RECT::default();
+        let mut work = RECT::default();
         // SAFETY: fills a RECT; the process is DPI aware by now, so it is in pixels.
         let ok = unsafe {
             SystemParametersInfoW(
@@ -697,6 +698,42 @@ mod platform {
             fit(work.right - work.left, 1180),
             fit(work.bottom - work.top, 760),
         )
+    }
+
+    /// Puts the window inside the screen's work area (above the taskbar),
+    /// smaller if it has to be: on a small screen the bottom of the sidebar,
+    /// where the update button is, would otherwise be under the taskbar.
+    fn fit_to_work_area(hwnd: HWND) {
+        let mut work = RECT::default();
+        let mut rect = RECT::default();
+        // SAFETY: fill RECTs; the window is ours.
+        unsafe {
+            if SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                Some(&mut work as *mut _ as *mut core::ffi::c_void),
+                Default::default(),
+            )
+            .is_err()
+                || GetWindowRect(hwnd, &mut rect).is_err()
+            {
+                return;
+            }
+            let w = (rect.right - rect.left).min(work.right - work.left);
+            let h = (rect.bottom - rect.top).min(work.bottom - work.top);
+            let x = rect.left.clamp(work.left, work.right - w);
+            let y = rect.top.clamp(work.top, work.bottom - h);
+            if (x, y, w, h)
+                != (
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                )
+            {
+                let _ = SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
     }
 
     /// The UI thread: the window, the tray and the message loop.
@@ -727,6 +764,7 @@ mod platform {
         };
         view.load(App::Rust(super::root()));
         let hwnd = view.hwnd();
+        fit_to_work_area(hwnd);
         MAIN_WINDOW.store(hwnd.0 as isize, Ordering::SeqCst);
         // SAFETY: replaces the window's procedure with one that forwards to it.
         unsafe {
