@@ -3,14 +3,13 @@
 //! page: one switch, the place traffic goes through, the route, the apps and
 //! sites that go elsewhere, and what is flowing. Everything else is Advanced.
 
-use kairo_core::places::{self, Place};
 use kairo_core::{CoreStatus, Mode};
-use nsh_base::{ButtonElement as Button, popover, theme};
+use nsh_base::{ButtonElement as Button, theme};
 use nsh_core::prelude::*;
 
 use crate::store::{Page, store};
 use crate::ui::toolbar;
-use crate::ui::{self, Icon, icon, size};
+use crate::ui::{self, size};
 
 pub fn page() -> impl IntoElement {
     let store = store();

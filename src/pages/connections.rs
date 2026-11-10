@@ -7,9 +7,7 @@ use kairo_core::model::Connection;
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
-use crate::chrome::Glyph;
-use crate::store::{Page, Snap, store};
-use crate::ui::toolbar;
+use crate::store::{Snap, store};
 use crate::ui::{self, Icon, Variant, icon, size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +27,12 @@ fn W_PROCESS() -> f32 {
     w(110.0)
 }
 #[allow(non_snake_case)]
-fn W_RULE() -> f32 {
-    w(140.0)
+fn W_TIME() -> f32 {
+    w(64.0)
 }
 #[allow(non_snake_case)]
 fn W_CHAIN() -> f32 {
-    w(150.0)
+    w(190.0)
 }
 #[allow(non_snake_case)]
 fn W_SPEED() -> f32 {
@@ -46,10 +44,45 @@ fn W_TOTAL() -> f32 {
 }
 const W_CLOSE: f32 = 32.0;
 
-pub fn page() -> impl IntoElement {
+/// The connection's exit and node, in words: `AI exit · Tokyo 03`.
+pub fn goes_through(c: &Connection, names: &kairo_core::activity::ExitNames) -> String {
+    use kairo_core::activity::{ExitKind, exit_of};
+    let kind = exit_of(c, names);
+    match kind {
+        ExitKind::Direct | ExitKind::Blocked | ExitKind::Local => kind.title().to_owned(),
+        _ => {
+            let node = c.outbound();
+            let node = kairo_core::places::split_flag(node).1.trim().to_owned();
+            if node.is_empty() {
+                kind.title().to_owned()
+            } else {
+                format!("{} · {node}", kind.title())
+            }
+        }
+    }
+}
+
+/// How long ago, short: `41 m`, `1 h 12 m`, `3 d`.
+pub fn age(start: &str, now: i64) -> String {
+    let Some(t) = kairo_core::activity::parse_time(start) else {
+        return String::new();
+    };
+    let s = (now - t).max(0);
+    match s {
+        0..=59 => format!("{s} s"),
+        60..=3599 => format!("{} m", s / 60),
+        3600..=86399 => format!("{} h {} m", s / 3600, s % 3600 / 60),
+        _ => format!("{} d", s / 86400),
+    }
+}
+
+/// The open connections as a table, with the selected one's details beside it
+/// (Activity › All Connections). `query` filters; `paused` holds a snapshot.
+pub fn list(
+    query: Signal<String>,
+    paused: Signal<Option<Snap<kairo_core::model::Connections>>>,
+) -> impl IntoElement {
     let store = store();
-    let query = signal(String::new());
-    let paused = signal(None::<Snap<kairo_core::model::Connections>>);
     let order = signal(Order::Newest);
     let selected = signal(None::<String>);
 
@@ -83,103 +116,44 @@ pub fn page() -> impl IntoElement {
             .connections
             .with(|c| c.0.list.iter().any(|c| !c.process.is_empty()))
     });
-    let total = move || store.connections.with(|c| c.0.list.len());
 
     view()
         .flex_1()
-        .child(toolbar::toolbar(
-            Page::Activity,
-            move || {
-                let (shown, all) = (count(), total());
-                let paused = if paused.with(Option::is_some) {
-                    " · paused"
-                } else {
-                    ""
-                };
-                if shown == all {
-                    format!("{all} open{paused}")
-                } else {
-                    format!("{shown} of {all}{paused}")
-                }
-            },
-            vec![
-                toolbar::search("connections.search", "Host, process, rule or node", query),
-                toolbar::button_dyn(
-                    "connections.pause",
-                    move || {
-                        if paused.with(Option::is_some) {
-                            "Resume"
-                        } else {
-                            "Pause"
-                        }
-                    },
-                    move || {
-                        if paused.with(Option::is_some) {
-                            (Glyph::Resume, Icon::Play)
-                        } else {
-                            (Glyph::Pause, Icon::Pause)
-                        }
-                    },
-                    move || {
-                        if paused.with_untracked(Option::is_some) {
-                            paused.set(None);
-                        } else {
-                            paused.set(Some(store.connections.get_untracked()));
-                        }
-                    },
-                ),
-                toolbar::button(
-                    "connections.close-all",
-                    "Close All",
-                    Glyph::CloseAll,
-                    Icon::Close,
-                    move || {
-                        let svc = store.svc();
-                        store.run_then(svc.close_all_connections(), move |_| paused.set(None));
-                    },
-                )
-                .enabled(move || total() > 0),
-            ],
-        ))
+        .flex_row()
+        .min_h(px(0.0))
         .child(
             view()
                 .flex_1()
-                .flex_row()
-                .min_h(px(0.0))
+                .min_w(px(0.0))
+                .child(header_row(order, compact, processes))
                 .child(
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .child(header_row(order, compact, processes))
-                        .child(
-                            when(
-                                move || count() > 0,
-                                move || table(rows, selected, compact, processes),
-                            )
-                            .otherwise(move || {
-                                ui::empty_state(
-                                    Icon::Connections,
-                                    "No connections",
-                                    move || -> SharedString {
-                                        if !store.state.with(|s| s.core.is_running()) {
-                                            "Connections appear while the core is running.".into()
-                                        } else if query.with(|q| !q.is_empty()) {
-                                            "Nothing matches the filter.".into()
-                                        } else {
-                                            "Apps that use the proxy show up here.".into()
-                                        }
-                                    },
-                                    None,
-                                )
-                            }),
+                    when(
+                        move || count() > 0,
+                        move || table(rows, selected, compact, processes),
+                    )
+                    .otherwise(move || {
+                        ui::empty_state(
+                            Icon::Connections,
+                            "No connections",
+                            move || -> SharedString {
+                                if !store.state.with(|s| s.core.is_running()) {
+                                    "Connections appear while Kairo is connected.".into()
+                                } else if query.with(|q| !q.is_empty()) {
+                                    "Nothing matches the filter.".into()
+                                } else {
+                                    "Apps that use Kairo show up here.".into()
+                                }
+                            },
+                            None,
                         )
-                        .child(footer()),
+                    }),
                 )
-                .child(when(
-                    move || selected.with(Option::is_some),
-                    move || inspector(selected, source),
-                )),
+                .child(footer()),
         )
+        .child(when(
+            move || selected.with(Option::is_some),
+            move || inspector(selected, source),
+        ))
 }
 
 fn head(
@@ -248,10 +222,7 @@ fn header_row(
             move || wide() && processes.get(),
             move || head("Process", Some(W_PROCESS()), false, None),
         ))
-        .child(when(wide, move || {
-            head("Rule", Some(W_RULE()), false, None)
-        }))
-        .child(head("Node", Some(W_CHAIN()), false, None))
+        .child(head("Goes through", Some(W_CHAIN()), false, None))
         .child(head(
             "Down",
             Some(W_SPEED()),
@@ -267,6 +238,7 @@ fn header_row(
             true,
             Some((order, Order::Total)),
         ))
+        .child(when(wide, move || head("Time", Some(W_TIME()), false, None)))
         .child(view().w(px(W_CLOSE)))
 }
 
@@ -347,23 +319,12 @@ fn table(
                     )
                     .style_when(move || narrow() || !processes.get(), |s| s.hidden()),
                 )
-                .child(
-                    cell(
-                        f(|c| {
-                            if c.rule_payload.is_empty() {
-                                c.rule.clone()
-                            } else {
-                                format!("{} {}", c.rule, c.rule_payload)
-                            }
-                        }),
-                        Some(W_RULE()),
-                        false,
-                        true,
-                    )
-                    .style_when(narrow, |s| s.hidden()),
-                )
                 .child(cell(
-                    f(|c| c.outbound().to_owned()),
+                    move || -> SharedString {
+                        let names = store.activity.with(|a| a.0.names.clone());
+                        conn.with(|c| c.as_ref().map(|c| goes_through(c, &names)).unwrap_or_default())
+                            .into()
+                    },
                     Some(W_CHAIN()),
                     false,
                     false,
@@ -401,6 +362,15 @@ fn table(
                     true,
                     true,
                 ))
+                .child(
+                    cell(
+                        f(|c| age(&c.start, kairo_core::service::unix())),
+                        Some(W_TIME()),
+                        false,
+                        true,
+                    )
+                    .style_when(narrow, |s| s.hidden()),
+                )
                 .child(
                     view().w(px(W_CLOSE)).items_end().child(
                         ui::icon_btn(Icon::Close, "Close Connection")
@@ -564,6 +534,7 @@ fn inspector(
                                         .unwrap_or("")
                                         .to_owned(),
                                 ))
+                                .child(always_buttons(&c))
                                 .child(
                                     ui::btn_icon(
                                         Icon::Close,
@@ -581,4 +552,52 @@ fn inspector(
                 }
             })
         }))
+}
+
+/// "Always Direct · Always AI Exit · Block" for the connection's site.
+fn always_buttons(c: &Connection) -> impl IntoElement {
+    use kairo_core::routes::{RouteExit, RouteKind};
+    let store = store();
+    let site = kairo_core::activity::site_of(&c.host);
+    let one = move |label: &'static str, exit: RouteExit| {
+        let site = site.clone();
+        ui::btn(label, Variant::Secondary).on_press(move || {
+            store.run_then(
+                store.svc().set_route(RouteKind::Site { domain: site.clone() }, exit.clone()),
+                move |r| {
+                    if r.is_ok() {
+                        store.info("Saved in Apps & Sites");
+                    }
+                },
+            )
+        })
+    };
+    view()
+        .gap_2()
+        .child(ui::muted("For this site"))
+        .child(
+            view()
+                .flex_row()
+                .flex_wrap()
+                .gap_2()
+                .child(one("Always Direct", RouteExit::Direct))
+                .child(one("Always AI Exit", RouteExit::Ai))
+                .child(one("Block", RouteExit::Block)),
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ages_read_short() {
+        let start = "2026-11-09T15:00:00Z";
+        let t = kairo_core::activity::parse_time(start).unwrap();
+        assert_eq!(age(start, t + 30), "30 s");
+        assert_eq!(age(start, t + 41 * 60), "41 m");
+        assert_eq!(age(start, t + 3600 + 12 * 60), "1 h 12 m");
+        assert_eq!(age(start, t + 3 * 86400), "3 d");
+        assert_eq!(age("nope", t), "");
+    }
 }

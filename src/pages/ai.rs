@@ -9,7 +9,7 @@ use kairo_core::ai::{self, AiService};
 use kairo_core::ai_check::{self, Api, Check, Country, Hold};
 use kairo_core::places;
 use kairo_core::service::{AiAlert, State};
-use nsh_base::{popover, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::store::store;
