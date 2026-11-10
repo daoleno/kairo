@@ -550,7 +550,8 @@ fn footer() -> impl IntoElement {
             .tabular_nums(),
         )
         .child(view().flex_1().min_w(px(0.0)))
-        .child(ui::muted(move || -> SharedString {
+        // Alone on its line on a phone, where it wraps instead of running off the screen.
+        .child(view().when(phone, |v| v.w_full()).child(ui::muted(move || -> SharedString {
             store
                 .live
                 .with(|l| {
@@ -566,7 +567,7 @@ fn footer() -> impl IntoElement {
                     )
                 })
                 .into()
-        }))
+        })))
 }
 
 fn detail_row(label: &'static str, value: String) -> impl IntoElement {
