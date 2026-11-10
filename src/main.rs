@@ -321,6 +321,14 @@ mod platform {
                         show: Arc::new(|| {
                             glib::MainContext::default().invoke(present);
                         }),
+                        page: Arc::new(|name| {
+                            glib::MainContext::default().invoke(move || {
+                                if let Some(page) = nsh_app_kairo::store::Page::named(name) {
+                                    nsh_app_kairo::chrome::select(page);
+                                }
+                                present();
+                            });
+                        }),
                         quit: quit.clone(),
                     };
                     match kairo_tray::start(svc.clone(), hooks) {
@@ -375,6 +383,12 @@ mod platform {
         svc.set_quit_hook(quit.clone());
         let hooks = kairo_tray::Hooks {
             show: Arc::new(present),
+            page: Arc::new(|name| {
+                if let Some(page) = nsh_app_kairo::store::Page::named(name) {
+                    nsh_app_kairo::chrome::select(page);
+                }
+                present();
+            }),
             quit,
         };
         let tray_ok = kairo_tray::start(svc.clone(), hooks).is_ok();

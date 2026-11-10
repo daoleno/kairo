@@ -44,9 +44,9 @@ fn commands(store: Store) -> Vec<Command> {
         ));
     }
     for (m, title) in [
-        (Mode::Rule, "Route: Smart"),
-        (Mode::Global, "Route: All Traffic"),
-        (Mode::Direct, "Route: Direct"),
+        (Mode::Rule, "Mode: Smart"),
+        (Mode::Global, "Mode: Everything"),
+        (Mode::Direct, "Mode: Direct"),
     ] {
         out.push(cmd(title, "Connection", Icon::Rules, move |s| {
             s.run(s.svc().set_mode(m))
@@ -64,13 +64,13 @@ fn commands(store: Store) -> Vec<Command> {
         ));
     }
     out.push(cmd(
-        "Location: Fastest",
+        "Everything else: Fastest",
         "Kairo keeps the fastest place",
         Icon::Bolt,
         |s| s.run(s.svc().set_location(None)),
     ));
     out.push(cmd(
-        "Test Locations",
+        "Test Exits Again",
         "Measure every place's delay",
         Icon::Bolt,
         |s| s.run(s.svc().test_places()),
@@ -88,6 +88,30 @@ fn commands(store: Store) -> Vec<Command> {
         "Subscriptions",
         Icon::Plus,
         |s| s.page.set(Page::Profiles),
+    ));
+    out.push(cmd(
+        "Show All Connections",
+        "Activity",
+        Icon::Connections,
+        |s| {
+            s.all_connections.set(true);
+            s.page.set(Page::Activity)
+        },
+    ));
+    out.push(cmd(
+        "Use Every App (TUN)",
+        "Connection",
+        Icon::Shield,
+        |_| crate::pages::home::set_via(crate::pages::home::Via::Tun),
+    ));
+    out.push(cmd(
+        "Copy Proxy Line for Terminal",
+        "Connection",
+        Icon::Link,
+        |s| {
+            set_clipboard(s.svc().terminal_env());
+            s.info("Copied. Paste it in the terminal before you start the tool.");
+        },
     ));
     out.push(cmd(
         "Update Subscriptions",
@@ -121,6 +145,7 @@ fn commands(store: Store) -> Vec<Command> {
         })
     }));
     // Every place, by delay.
+    let ai_on = store.state.with(|s| s.settings.ai.enabled && !s.ai.group.is_empty());
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
     let mut list = store.proxies.with(|p| {
         places::main_group(&p.0.groups, &preferred)
@@ -138,19 +163,32 @@ fn commands(store: Store) -> Vec<Command> {
             .clone()
             .or_else(|| places::region_flag(p.region))
             .unwrap_or_default();
-        out.push(cmd(
-            format!("{flag} {}", p.title).trim().to_owned(),
+        let detail = |exit: &str| {
             format!(
-                "Location · {}{}",
+                "{exit} · {}{}",
                 p.region,
                 p.delay
                     .filter(|d| *d > 0)
                     .map(|d| format!(" · {d} ms"))
                     .unwrap_or_default()
-            ),
+            )
+        };
+        let title = format!("{flag} {}", p.title).trim().to_owned();
+        let for_ai = name.clone();
+        out.push(cmd(
+            title.clone(),
+            detail("Everything else"),
             Icon::Globe,
             move |s| s.run(s.svc().set_location(Some(name.clone()))),
         ));
+        if ai_on {
+            out.push(cmd(
+                title,
+                detail("AI exit"),
+                Icon::Globe,
+                move |s| s.run(s.svc().set_ai_exit(for_ai.clone())),
+            ));
+        }
     }
     out
 }

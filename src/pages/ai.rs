@@ -595,7 +595,7 @@ fn table_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement
         )
         .child(
             cell(2)
-                .child(text(r.sees_flag.clone()).text_size(px(size::large())))
+                .child(ui::flag(r.sees_flag.clone(), size::large()))
                 .child(
                     ui::body(r.sees.clone())
                         .number_of_lines(1)

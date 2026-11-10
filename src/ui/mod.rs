@@ -436,6 +436,23 @@ pub fn card_soft() -> View {
         .overflow_hidden()
 }
 
+/// A flag, as the emoji of its country; Taiwan's is drawn: Apple's emoji font
+/// leaves it out on Macs set to some regions, and a missing-glyph box is worse
+/// than a picture.
+pub fn flag(flag: impl Into<String>, size: f32) -> AnyElement {
+    let flag = flag.into();
+    if flag == "🇹🇼" {
+        // Red field, blue canton, a white sun: 3:2.
+        let uri = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='20' viewBox='0 0 30 20'><rect width='30' height='20' rx='2' fill='%23fe0000'/><rect width='15' height='10' rx='2' fill='%23000095'/><rect x='6' width='9' height='10' fill='%23000095'/><circle cx='7.5' cy='5' r='3.1' fill='%23fff'/><circle cx='7.5' cy='5' r='2.2' fill='%23000095'/><circle cx='7.5' cy='5' r='1.8' fill='%23fff'/></svg>";
+        return svg(uri)
+            .w(px(size * 1.3))
+            .h(px(size * 0.87))
+            .flex_shrink_0()
+            .into_element();
+    }
+    text(flag).text_size(px(size)).into_element()
+}
+
 /// A hairline separator.
 pub fn divider() -> View {
     view().h(px(1.0)).bg(move || theme().border)

@@ -172,12 +172,6 @@ pub fn page() -> impl IntoElement {
             },
             vec![
                 toolbar::search("apps.search", "Search apps and sites", query),
-                toolbar::button("apps.add-app", "Add App…", crate::chrome::Glyph::Add, Icon::Plus, move || {
-                    adding.set(Some(Adding::App))
-                }),
-                toolbar::button("apps.add-site", "Add Site…", crate::chrome::Glyph::Add, Icon::Plus, move || {
-                    adding.set(Some(Adding::Site))
-                }),
             ],
         ))
         .child(

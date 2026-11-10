@@ -216,14 +216,12 @@ pub fn card(exit: Exit, selected: impl Fn() -> bool + Copy + 'static, press: imp
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(
-                    text(move || {
-                        place
-                            .with(|p| p.as_ref().and_then(|p| p.flag.clone()))
-                            .unwrap_or_else(|| "◎".into())
-                    })
-                    .text_size(px(size::large() + 3.0)),
-                )
+                .child(dynamic(move || {
+                    let f = place
+                        .with(|p| p.as_ref().and_then(|p| p.flag.clone()))
+                        .unwrap_or_else(|| "◎".into());
+                    untracked(move || ui::flag(f, size::large() + 3.0))
+                }))
                 .child(
                     text(move || -> SharedString {
                         place
@@ -298,13 +296,111 @@ pub fn page() -> impl IntoElement {
                         view()
                             .flex_1()
                             .min_w(px(0.0))
+                            .gap_4()
                             .child(dynamic(move || {
                                 let e = which.get();
                                 untracked(move || picker(e).into_element())
-                            })),
+                            }))
+                            .child(when(
+                                move || which.get() == Exit::Downloads,
+                                mirror_card,
+                            )),
                     ),
             ),
         )
+}
+
+// --- The mirror ------------------------------------------------------------------------
+
+/// What the mirror's speed test says, in words.
+pub fn mirror_text(test: &kairo_core::downloads::MirrorTest) -> String {
+    use kairo_core::downloads::MirrorTest as T;
+    let secs = |ms: u64| format!("{:.1} s", ms as f64 / 1000.0);
+    match test {
+        T::Untested => "Off. Test the mirror first: Kairo turns it on only if it is not slower.".into(),
+        T::Running => "Testing…".into(),
+        T::Passed { mirror_ms, direct_ms: Some(d) } => {
+            format!("Mirror {} · original {}. Not slower, so it can be on.", secs(*mirror_ms), secs(*d))
+        }
+        T::Passed { mirror_ms, direct_ms: None } => {
+            format!("Mirror {} · the original did not answer. It can be on.", secs(*mirror_ms))
+        }
+        T::Failed { why } => format!("The test did not pass: {why}"),
+    }
+}
+
+/// The mirror switch, under the Downloads exit: off until a speed test passes.
+fn mirror_card() -> impl IntoElement {
+    let store = store();
+    let info = computed(move || store.state.with(|s| s.downloads.clone()));
+    let running = move || {
+        info.with(|d| matches!(d.mirror_test, kairo_core::downloads::MirrorTest::Running))
+    };
+    let can_switch = move || info.with(|d| d.mirror_test.passed());
+    ui::card()
+        .rounded(px(22.0))
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_4()
+                .px_4()
+                .py_3()
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap_0p5()
+                        .child(ui::body("Use mirrors for model hubs and package indexes"))
+                        .child(ui::muted(move || -> SharedString {
+                            info.with(|d| mirror_text(&d.mirror_test)).into()
+                        }))
+                        .child(ui::muted(
+                            "A mirror is a third party serving the same files; trust it as you would any download source. Kairo changes no files: it gives you the lines to paste.",
+                        )),
+                )
+                .child(
+                    ui::btn("Test", Variant::Secondary)
+                        .disabled(running)
+                        .on_press(move || store.run(store.svc().test_mirror())),
+                )
+                .child(
+                    view().opacity(move || if can_switch() || info.with(|d| d.mirror) { 1.0 } else { 0.4 }).child(
+                        ui::toggle(
+                            move || info.with(|d| d.mirror),
+                            "Use mirrors",
+                            move |on| {
+                                if can_switch() || !on {
+                                    store.run(store.svc().set_mirror(on));
+                                } else {
+                                    store.error(kairo_core::downloads::MIRROR_REFUSED);
+                                }
+                            },
+                        ),
+                    ),
+                ),
+        )
+        .child(when(
+            move || info.with(|d| d.mirror),
+            move || {
+                let lines = kairo_core::downloads::mirror_env_lines().join("\n");
+                let copy = lines.clone();
+                view()
+                    .gap_2()
+                    .px_4()
+                    .pb_3()
+                    .child(ui::divider())
+                    .child(text(lines).text_size(px(size::small())).selectable(true))
+                    .child(
+                        view().flex_row().child(
+                            ui::btn("Copy for terminal", Variant::Secondary).on_press(move || {
+                                set_clipboard(copy.clone());
+                                store.info("Copied");
+                            }),
+                        ),
+                    )
+            },
+        ))
 }
 
 // --- The picker ------------------------------------------------------------------------
@@ -334,8 +430,8 @@ fn countries(exit: Exit) -> Vec<Country> {
             return vec![];
         };
         let all = places::places(&p.0.groups, g);
-        let _ = exit;
-        places::by_region(&all)
+        let here = place_of(exit).map(|p| p.region);
+        let mut list: Vec<Country> = places::by_region(&all)
             .into_iter()
             .map(|(region, servers)| Country {
                 region,
@@ -346,7 +442,19 @@ fn countries(exit: Exit) -> Vec<Country> {
                     .unwrap_or_else(|| "◎".into()),
                 servers,
             })
-            .collect()
+            .collect();
+        // Where it is now first, then the quickest countries.
+        list.sort_by_key(|c| {
+            (
+                Some(c.region) != here,
+                c.servers
+                    .iter()
+                    .filter_map(|s| s.delay.filter(|d| *d > 0))
+                    .min()
+                    .unwrap_or(u32::MAX),
+            )
+        });
+        list
     })
 }
 
@@ -395,10 +503,19 @@ fn picker(exit: Exit) -> impl IntoElement {
         store.proxies.with(|_| ());
         place_of(exit).map(|p| p.name)
     };
-    // Open the country the exit is in, once.
-    if let Some(p) = place_of(exit) {
-        open.set(Some(p.region));
-    }
+    // Open the country the exit is in, once it is known.
+    effect(move || {
+        store.state.with(|_| ());
+        store.proxies.with(|_| ());
+        let here = place_of(exit);
+        untracked(move || {
+            if open.get().is_none()
+                && let Some(p) = here
+            {
+                open.set(Some(p.region));
+            }
+        });
+    });
     ui::card()
         .rounded(px(22.0))
         .child(
@@ -483,10 +600,7 @@ fn picker(exit: Exit) -> impl IntoElement {
                                 move || {
                                     open.set(if is_open && !expand_all { None } else { Some(region) })
                                 },
-                                text(c.flag.clone())
-                                    .text_size(px(size::large()))
-                                    .w(px(22.0))
-                                    .into_element(),
+                                ui::flag(c.flag.clone(), size::large()),
                                 ui::body(region).font_weight(FontWeight::MEDIUM),
                                 ui::muted(format!("{count}")),
                                 Some(is_open),

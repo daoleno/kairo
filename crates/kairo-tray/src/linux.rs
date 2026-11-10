@@ -6,7 +6,7 @@ use kairo_core::{Mode, Service};
 use ksni::menu::{CheckmarkItem, RadioGroup, RadioItem, StandardItem, SubMenu};
 use ksni::{MenuItem, TrayMethods};
 
-use crate::{Hooks, Model, act};
+use crate::{ExitId, Hooks, Model, act};
 
 struct KairoTray {
     svc: Service,
@@ -53,52 +53,95 @@ impl ksni::Tray for KairoTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let m = &self.model;
-        let mut items: Vec<MenuItem<Self>> = vec![
-            StandardItem {
-                label: m.status.clone(),
-                enabled: false,
-                ..Default::default()
+        let mut items: Vec<MenuItem<Self>> = vec![CheckmarkItem {
+            label: if m.running { "Connected".into() } else { m.status.clone() },
+            checked: m.running,
+            enabled: m.has_profile,
+            activate: Box::new(|t: &mut Self| act::connect(&t.svc, !t.model.running)),
+            ..Default::default()
+        }
+        .into()];
+        if !m.ai.is_empty() {
+            items.push(
+                StandardItem {
+                    label: m.ai.clone().replace('_', "__"),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        items.push(MenuItem::Separator);
+        for e in &m.exits {
+            let id = e.id;
+            let mut sub: Vec<MenuItem<Self>> = Vec::new();
+            if let Some(on) = e.fastest {
+                sub.push(
+                    CheckmarkItem {
+                        label: "Fastest".into(),
+                        checked: on,
+                        activate: Box::new(|t: &mut Self| act::locate(&t.svc, String::new())),
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+                sub.push(MenuItem::Separator);
             }
-            .into(),
-            MenuItem::Separator,
-            CheckmarkItem {
-                label: "Connected".into(),
-                checked: m.running,
-                enabled: m.has_profile,
-                activate: Box::new(|t: &mut Self| act::connect(&t.svc, !t.model.running)),
-                ..Default::default()
-            }
-            .into(),
-        ];
-        if let Some((_, choices, now)) = &m.group {
-            let selected = now
-                .as_ref()
-                .and_then(|n| choices.iter().position(|c| &c.name == n))
+            let selected = e
+                .choices
+                .iter()
+                .position(|c| c.checked)
                 .unwrap_or(usize::MAX);
+            sub.push(
+                RadioGroup {
+                    selected,
+                    select: Box::new(move |t: &mut Self, i| {
+                        let name = t
+                            .model
+                            .exits
+                            .iter()
+                            .find(|e| e.id == id)
+                            .and_then(|e| e.choices.get(i))
+                            .map(|c| c.name.clone());
+                        if let Some(name) = name {
+                            match id {
+                                ExitId::Rest => act::locate(&t.svc, name),
+                                ExitId::Ai => act::ai_exit(&t.svc, name),
+                            }
+                        }
+                    }),
+                    options: e
+                        .choices
+                        .iter()
+                        .map(|c| RadioItem {
+                            label: Model::choice_label(c).replace('_', "__"),
+                            ..Default::default()
+                        })
+                        .collect(),
+                }
+                .into(),
+            );
+            sub.push(MenuItem::Separator);
+            sub.push(
+                StandardItem {
+                    label: "All Servers…".into(),
+                    activate: Box::new(|t: &mut Self| (t.hooks.page)("exits")),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            sub.push(
+                StandardItem {
+                    label: "Test Again".into(),
+                    activate: Box::new(|t: &mut Self| act::test_again(&t.svc)),
+                    ..Default::default()
+                }
+                .into(),
+            );
             items.push(
                 SubMenu {
-                    label: format!("Location: {}", m.place).replace('_', "__"),
-                    icon_name: "find-location-symbolic".into(),
-                    submenu: vec![
-                        RadioGroup {
-                            selected,
-                            select: Box::new(move |t: &mut Self, i| {
-                                if let Some((_, choices, _)) = &t.model.group
-                                    && let Some(c) = choices.get(i)
-                                {
-                                    act::locate(&t.svc, c.name.clone());
-                                }
-                            }),
-                            options: choices
-                                .iter()
-                                .map(|c| RadioItem {
-                                    label: Model::choice_label(c).replace('_', "__"),
-                                    ..Default::default()
-                                })
-                                .collect(),
-                        }
-                        .into(),
-                    ],
+                    label: format!("{}: {}", e.title, e.place).replace('_', "__"),
+                    submenu: sub,
                     ..Default::default()
                 }
                 .into(),
@@ -112,7 +155,7 @@ impl ksni::Tray for KairoTray {
                 options: Mode::ALL
                     .iter()
                     .map(|x| RadioItem {
-                        label: Model::route_title(*x).into(),
+                        label: format!("Mode: {}", Model::route_title(*x)),
                         ..Default::default()
                     })
                     .collect(),
@@ -125,6 +168,15 @@ impl ksni::Tray for KairoTray {
                 label: "Open Kairo".into(),
                 icon_name: "window-new-symbolic".into(),
                 activate: Box::new(|t: &mut Self| (t.hooks.show)()),
+                ..Default::default()
+            }
+            .into(),
+        );
+        items.push(
+            StandardItem {
+                label: "Settings…".into(),
+                icon_name: "emblem-system-symbolic".into(),
+                activate: Box::new(|t: &mut Self| (t.hooks.page)("settings")),
                 ..Default::default()
             }
             .into(),
