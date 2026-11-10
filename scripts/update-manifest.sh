@@ -17,6 +17,8 @@ names = {
     "linux-aarch64-deb": f"kairo_{v}_arm64.deb",
     "macos-universal-zip": f"Kairo-{v}-macos-universal.zip",
     "windows-x86_64-zip": f"Kairo-{v}-windows-x86_64.zip",
+    # Android: the arm64 phone APK (the update is a whole APK the system installs).
+    "android-arm64-apk": f"Kairo-{v}-android-arm64-v8a.apk",
 }
 sums = {}
 for line in open(f"{d}/SHA256SUMS"):

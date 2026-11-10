@@ -126,10 +126,45 @@ jobs:
             dist/*.zip
             dist/*-setup.exe
 
+  android:
+    needs: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: nsh (the command that builds the app's native part)
+        run: |
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.4.0 sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: The APK, signed with the release key (kept in the repository's secrets)
+        env:
+          KEYSTORE_B64: ${{ secrets.KAIRO_ANDROID_KEYSTORE_B64 }}
+          KEY_PASSWORD: ${{ secrets.KAIRO_ANDROID_KEY_PASSWORD }}
+        run: |
+          (umask 077
+           printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/kairo-android.p12"
+           printf '%s' "$KEY_PASSWORD" > "$RUNNER_TEMP/kairo-android.pass")
+          KAIRO_ANDROID_KEYSTORE="$RUNNER_TEMP/kairo-android.p12" \
+          KAIRO_ANDROID_KEY_PASSWORD_FILE="$RUNNER_TEMP/kairo-android.pass" \
+            scripts/package-android.sh arm64-v8a dist
+          rm -f "$RUNNER_TEMP/kairo-android.p12" "$RUNNER_TEMP/kairo-android.pass"
+      - name: The APK holds the app, the core and the VPN service, and carries the release key
+        run: scripts/check-android-apk.sh dist/Kairo-*-android-arm64-v8a.apk release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: dist/*.apk
+
   publish:
     # On a tag: the release. By hand: everything but the release (the files,
     # the signed update manifest included, are kept as an artifact).
-    needs: [verify, linux, macos, windows]
+    needs: [verify, linux, macos, windows, android]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
