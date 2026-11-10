@@ -96,20 +96,40 @@ jobs:
             dist/*.zip
 
   windows:
-    # Not released yet: no tray, system proxy or TUN on Windows. Kept building.
     needs: verify
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
+      - name: Inno Setup (the installer)
+        run: choco install innosetup -y --no-progress
+      - name: The zip (what Kairo updates itself from) and the per-user installer
+        shell: pwsh
+        run: |
+          $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          scripts\package-windows.ps1
+      - name: The zip has the program and its core, with forward-slash names
+        shell: bash
+        run: |
+          python -I - dist/Kairo-*-windows-x86_64.zip <<'PY'
+          import sys, zipfile
+          names = zipfile.ZipFile(sys.argv[1]).namelist()
+          print(names)
+          assert not any("\\" in n for n in names), names
+          assert "Kairo/kairo.exe" in names and "Kairo/mihomo.exe" in names, names
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
 
   publish:
     # On a tag: the release. By hand: everything but the release (the files,
     # the signed update manifest included, are kept as an artifact).
-    needs: [verify, linux, macos]
+    needs: [verify, linux, macos, windows]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

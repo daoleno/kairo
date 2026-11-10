@@ -1,5 +1,6 @@
 //! Who holds a local TCP port. Best effort: on Linux from `/proc` (the
-//! processes of other users stay unnamed), on macOS from `lsof`.
+//! processes of other users stay unnamed), on macOS from `lsof`, on Windows from
+//! the TCP table.
 
 use std::time::Duration;
 
@@ -42,6 +43,14 @@ pub async fn wait_free(port: u16, limit: Duration) -> bool {
 /// Whether `holder` is a core of the Kairo whose runtime directory is
 /// `runtime` (its command line names its config there).
 pub fn is_ours(holder: &Holder, runtime: &std::path::Path) -> bool {
+    // On Windows a process's command line is not at hand: its executable is,
+    // and Kairo runs its core from `<home>/core`.
+    #[cfg(windows)]
+    if let (Some(command), Some(home)) = (holder.command.as_deref(), runtime.parent())
+        && crate::supervisor::same_path(command, &home.join("core").join("mihomo.exe"))
+    {
+        return true;
+    }
     let runtime = runtime.to_string_lossy();
     holder
         .command
@@ -64,11 +73,37 @@ pub fn holder(port: u16) -> Option<Holder> {
     {
         mac::holder(port)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        windows_holder(port)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = port;
         None
     }
+}
+
+#[cfg(windows)]
+fn windows_holder(port: u16) -> Option<Holder> {
+    use crate::winapi;
+    let row = winapi::tcp_table()
+        .into_iter()
+        .find(|r| r.state == winapi::TCP_LISTEN && r.local.1 == port)?;
+    let path = winapi::image_path(row.pid);
+    Some(Holder {
+        pid: Some(row.pid),
+        name: path
+            .as_deref()
+            .map(|p| winapi::file_name(p).trim_end_matches(".exe").to_owned())
+            .or_else(|| {
+                winapi::processes()
+                    .into_iter()
+                    .find(|(pid, _)| *pid == row.pid)
+                    .map(|(_, n)| n.trim_end_matches(".exe").to_owned())
+            }),
+        command: path,
+    })
 }
 
 /// The listening sockets' inodes for `port` in a `/proc/net/tcp` table.

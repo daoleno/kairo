@@ -7,6 +7,8 @@
 //! - GNOME and GTK desktops: `gsettings` (`org.gnome.system.proxy`).
 //! - KDE Plasma: `kioslaverc` through `kwriteconfig6`/`kwriteconfig5`, then KIO is
 //!   told to reload. GTK apps on Plasma read gsettings, so both are set there.
+//! - Windows: the current user's Internet Settings (`ProxyEnable`, `ProxyServer`,
+//!   `ProxyOverride`, `AutoConfigURL`), then WinINet is told to reload.
 
 use std::process::Command;
 
@@ -28,6 +30,8 @@ pub struct Saved {
     pub gnome: Option<GnomeProxy>,
     pub kde: Option<KdeProxy>,
     pub mac: Option<Vec<MacService>>,
+    #[serde(default)]
+    pub windows: Option<WinProxy>,
     /// The port Kairo pointed the system at (absent in 0.1 state files).
     #[serde(default)]
     pub applied: Option<u16>,
@@ -83,6 +87,15 @@ impl Saved {
             if dead_local(&host, port, ours) {
                 log::warn!("the proxy saved before Kairo ({host}:{port}) is gone: restoring none");
                 k.proxy_type = "0".into();
+            }
+        }
+        if let Some(w) = &mut self.windows
+            && w.enabled
+        {
+            let (host, port) = win_first_proxy(w.server.as_deref().unwrap_or(""));
+            if dead_local(&host, port, ours) {
+                log::warn!("the proxy saved before Kairo ({host}:{port}) is gone: restoring none");
+                w.enabled = false;
             }
         }
         if let Some(services) = &mut self.mac {
@@ -141,6 +154,115 @@ pub struct MacService {
     pub bypass: Vec<String>,
 }
 
+/// Windows' proxy settings of the current user as they were.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WinProxy {
+    pub enabled: bool,
+    /// `ProxyServer` (`127.0.0.1:7890` or `http=…;https=…`), absent when unset.
+    pub server: Option<String>,
+    /// `ProxyOverride`, absent when unset.
+    pub bypass: Option<String>,
+    /// `AutoConfigURL` (a PAC script), absent when unset.
+    pub pac: Option<String>,
+}
+
+/// The host and port of the first proxy in a `ProxyServer` value.
+pub fn win_first_proxy(server: &str) -> (String, u16) {
+    let first = server.split(';').next().unwrap_or("").trim();
+    // `http=host:port` names the scheme; a bare `host:port` serves all.
+    let addr = first.rsplit_once('=').map_or(first, |(_, a)| a);
+    let addr = addr.trim_start_matches("http://").trim_start_matches("socks=");
+    match addr.rsplit_once(':') {
+        Some((host, port)) => (host.to_owned(), port.parse().unwrap_or(0)),
+        None => (addr.to_owned(), 0),
+    }
+}
+
+/// `ProxyOverride` for a bypass list. Windows takes host names, `*` wildcards
+/// and `<local>`, not CIDR ranges: a range on a byte boundary (and the
+/// private `172.16.0.0/12`) becomes the wildcards that cover it.
+pub fn win_override(bypass: &[String]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |s: String| {
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    };
+    for entry in bypass {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let Some((addr, bits)) = entry.split_once('/') else {
+            add(entry.to_owned());
+            continue;
+        };
+        let (Ok(ip), Ok(bits)) = (addr.parse::<std::net::Ipv4Addr>(), bits.parse::<u32>()) else {
+            // IPv6 ranges have no wildcard form here.
+            continue;
+        };
+        let o = ip.octets();
+        match bits {
+            8 => add(format!("{}.*", o[0])),
+            16 => add(format!("{}.{}.*", o[0], o[1])),
+            24 => add(format!("{}.{}.{}.*", o[0], o[1], o[2])),
+            12 if o[0] == 172 && o[1] == 16 => {
+                for second in 16..32 {
+                    add(format!("172.{second}.*"));
+                }
+            }
+            _ => {}
+        }
+    }
+    add("<local>".to_owned());
+    out.join(";")
+}
+
+#[cfg(windows)]
+fn win_read() -> WinProxy {
+    use crate::winapi::{INTERNET_SETTINGS as K, reg_get_dword, reg_get_string};
+    WinProxy {
+        enabled: reg_get_dword(K, "ProxyEnable").unwrap_or(0) != 0,
+        server: reg_get_string(K, "ProxyServer"),
+        bypass: reg_get_string(K, "ProxyOverride"),
+        pac: reg_get_string(K, "AutoConfigURL"),
+    }
+}
+
+#[cfg(windows)]
+fn win_apply(spec: &ProxySpec) -> Result<(), String> {
+    use crate::winapi::{INTERNET_SETTINGS as K, reg_delete, reg_set_dword, reg_set_string};
+    reg_set_string(K, "ProxyServer", &format!("{}:{}", spec.host, spec.port))?;
+    reg_set_string(K, "ProxyOverride", &win_override(&spec.bypass))?;
+    // A PAC script would win over the fixed proxy.
+    reg_delete(K, "AutoConfigURL")?;
+    reg_set_dword(K, "ProxyEnable", 1)?;
+    crate::winapi::notify_proxy_changed();
+    Ok(())
+}
+
+#[cfg(windows)]
+fn win_restore(w: &WinProxy) -> Result<(), String> {
+    use crate::winapi::{INTERNET_SETTINGS as K, reg_delete, reg_set_dword, reg_set_string};
+    let put = |name: &str, value: &Option<String>| match value {
+        Some(v) => reg_set_string(K, name, v),
+        None => reg_delete(K, name),
+    };
+    put("ProxyServer", &w.server)?;
+    put("ProxyOverride", &w.bypass)?;
+    put("AutoConfigURL", &w.pac)?;
+    reg_set_dword(K, "ProxyEnable", u32::from(w.enabled))?;
+    crate::winapi::notify_proxy_changed();
+    Ok(())
+}
+
+#[cfg(windows)]
+fn win_points_to(spec: &ProxySpec) -> bool {
+    let w = win_read();
+    w.enabled && win_first_proxy(w.server.as_deref().unwrap_or("")) == (spec.host.clone(), spec.port)
+}
+
 fn run(program: &str, args: &[&str]) -> Result<String, String> {
     let out = Command::new(program)
         .args(args)
@@ -167,6 +289,7 @@ pub struct Backends {
     pub gnome: bool,
     pub kde: Option<&'static str>,
     pub mac: bool,
+    pub windows: bool,
 }
 
 pub fn backends() -> Backends {
@@ -176,6 +299,7 @@ pub fn backends() -> Backends {
             gnome: false,
             kde: None,
             mac: false,
+            windows: false,
         };
     }
     if cfg!(target_os = "macos") {
@@ -183,6 +307,7 @@ pub fn backends() -> Backends {
             gnome: false,
             kde: None,
             mac: true,
+            windows: false,
         };
     }
     if cfg!(target_os = "windows") {
@@ -190,6 +315,7 @@ pub fn backends() -> Backends {
             gnome: false,
             kde: None,
             mac: false,
+            windows: true,
         };
     }
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
@@ -211,13 +337,14 @@ pub fn backends() -> Backends {
         gnome: have("gsettings"),
         kde,
         mac: false,
+        windows: false,
     }
 }
 
 /// Whether there is any way to set the system proxy here.
 pub fn supported() -> bool {
     let b = backends();
-    b.gnome || b.kde.is_some() || b.mac
+    b.gnome || b.kde.is_some() || b.mac || b.windows
 }
 
 // --- GNOME -------------------------------------------------------------------------
@@ -506,6 +633,40 @@ fn mac_points_to(spec: &ProxySpec) -> bool {
     })
 }
 
+// Windows' backend calls the registry; elsewhere these never run.
+#[cfg(windows)]
+fn win_saved(b: Backends) -> Option<WinProxy> {
+    b.windows.then(win_read)
+}
+#[cfg(not(windows))]
+fn win_saved(_: Backends) -> Option<WinProxy> {
+    None
+}
+#[cfg(windows)]
+fn win_apply_spec(spec: &ProxySpec) -> Result<(), String> {
+    win_apply(spec)
+}
+#[cfg(not(windows))]
+fn win_apply_spec(_: &ProxySpec) -> Result<(), String> {
+    Err("not Windows".into())
+}
+#[cfg(windows)]
+fn win_restore_saved(w: &WinProxy) -> Result<(), String> {
+    win_restore(w)
+}
+#[cfg(not(windows))]
+fn win_restore_saved(_: &WinProxy) -> Result<(), String> {
+    Ok(())
+}
+#[cfg(windows)]
+fn win_points_to_spec(spec: &ProxySpec) -> bool {
+    win_points_to(spec)
+}
+#[cfg(not(windows))]
+fn win_points_to_spec(_: &ProxySpec) -> bool {
+    false
+}
+
 // --- Public ------------------------------------------------------------------------
 
 fn load_saved(paths: &Paths) -> Option<Saved> {
@@ -519,7 +680,7 @@ fn load_saved(paths: &Paths) -> Option<Saved> {
 pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
     let _lock = lock(paths);
     let b = backends();
-    if !(b.gnome || b.kde.is_some() || b.mac) {
+    if !(b.gnome || b.kde.is_some() || b.mac || b.windows) {
         return Err("This desktop has no system proxy Kairo can set".into());
     }
     let mut saved = match load_saved(paths) {
@@ -528,6 +689,7 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
             gnome: if b.gnome { gnome_read().ok() } else { None },
             kde: b.kde.map(kde_read),
             mac: if b.mac { Some(mac_read()?) } else { None },
+            windows: win_saved(b),
             applied: None,
         },
     };
@@ -555,8 +717,16 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
             errors.push(e);
         }
     }
+    if b.windows
+        && let Err(e) = win_apply_spec(spec)
+    {
+        errors.push(e);
+    }
     // One working mechanism is enough (GNOME's tools may exist on Plasma without a dconf).
-    let total = usize::from(b.gnome) + usize::from(b.kde.is_some()) + usize::from(b.mac);
+    let total = usize::from(b.gnome)
+        + usize::from(b.kde.is_some())
+        + usize::from(b.mac)
+        + usize::from(b.windows);
     if errors.len() == total {
         Err(errors.join("; "))
     } else {
@@ -593,6 +763,11 @@ fn disable_locked(paths: &Paths) -> Result<(), String> {
     }
     if let Some(m) = &saved.mac
         && let Err(e) = mac_restore(m)
+    {
+        errors.push(e);
+    }
+    if let Some(w) = &saved.windows
+        && let Err(e) = win_restore_saved(w)
     {
         errors.push(e);
     }
@@ -647,7 +822,30 @@ fn lock(paths: &Paths) -> Option<std::fs::File> {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let _ = std::fs::create_dir_all(paths.state_dir());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            // Share mode 0: a second open fails while this one is held.
+            if let Ok(file) = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .share_mode(0)
+                .open(paths.state_dir().join("sysproxy.lock"))
+            {
+                return Some(file);
+            }
+            if std::time::Instant::now() >= deadline {
+                log::warn!("the system proxy's lock is held too long: going ahead");
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = paths;
         None
@@ -691,6 +889,7 @@ pub fn points_to(spec: &ProxySpec) -> bool {
     (b.gnome && gnome_points_to(spec))
         || b.kde.is_some_and(|v| kde_points_to(v, spec))
         || (b.mac && mac_points_to(spec))
+        || (b.windows && win_points_to_spec(spec))
 }
 
 #[cfg(test)]
@@ -734,6 +933,7 @@ mod tests {
                 },
                 ..Default::default()
             }]),
+            windows: None,
             applied: Some(7897),
         }
         .without_dead_proxies();
@@ -806,5 +1006,56 @@ mod tests {
         };
         assert_eq!(kde_address("http", &spec), "http://127.0.0.1 7897");
         assert_eq!(gvariant_list(&spec.bypass), "['localhost', '*.local']");
+    }
+
+    #[test]
+    fn windows_override_has_no_ranges() {
+        let list: Vec<String> = [
+            "localhost",
+            "127.0.0.0/8",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "fc00::/7",
+            "*.local",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let o = win_override(&list);
+        let parts: Vec<&str> = o.split(';').collect();
+        assert!(parts.contains(&"localhost"));
+        assert!(parts.contains(&"127.*"));
+        assert!(parts.contains(&"10.*"));
+        assert!(parts.contains(&"172.16.*"));
+        assert!(parts.contains(&"172.31.*"));
+        assert!(parts.contains(&"192.168.*"));
+        assert!(parts.contains(&"*.local"));
+        assert_eq!(parts.last(), Some(&"<local>"));
+        assert!(!o.contains('/'));
+        assert!(!o.contains("fc00"));
+    }
+
+    #[test]
+    fn windows_proxy_server_is_read() {
+        assert_eq!(win_first_proxy("127.0.0.1:7890"), ("127.0.0.1".into(), 7890));
+        assert_eq!(
+            win_first_proxy("http=127.0.0.1:7890;https=127.0.0.1:7890"),
+            ("127.0.0.1".into(), 7890)
+        );
+        assert_eq!(win_first_proxy(""), ("".into(), 0));
+    }
+
+    #[test]
+    fn a_dead_windows_proxy_is_restored_as_none() {
+        let saved = Saved {
+            windows: Some(WinProxy {
+                enabled: true,
+                server: Some("127.0.0.1:1".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(!saved.without_dead_proxies().windows.unwrap().enabled);
     }
 }

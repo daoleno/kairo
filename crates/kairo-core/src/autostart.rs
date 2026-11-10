@@ -1,9 +1,11 @@
-//! Launch at login: an XDG autostart entry on Linux, a LaunchAgent on macOS.
+//! Launch at login: an XDG autostart entry on Linux, a LaunchAgent on macOS, a
+//! `Run` value of the current user on Windows (no administrator needed).
 
 use std::path::PathBuf;
 
 const ID: &str = "dev.kairo.app";
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn home() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -40,6 +42,20 @@ fn entry_path() -> PathBuf {
     PathBuf::new()
 }
 
+/// The `Run` values on Windows: Kairo at login, and the network check.
+#[cfg(windows)]
+const RUN_NAME: &str = "Kairo";
+#[cfg(windows)]
+const RUN_RESTORE_NAME: &str = "KairoNetworkCheck";
+
+/// The command line of a `Run` value: the quoted executable and its flag.
+pub fn run_value(exe: &str, flag: Option<&str>) -> String {
+    match flag {
+        Some(f) => format!("\"{exe}\" {f}"),
+        None => format!("\"{exe}\""),
+    }
+}
+
 /// The autostart entry for `exe`.
 pub fn entry(exe: &str, minimized: bool) -> String {
     let flag = if minimized { " --minimized" } else { "" };
@@ -60,11 +76,33 @@ pub fn entry(exe: &str, minimized: bool) -> String {
 }
 
 pub fn is_enabled() -> bool {
-    entry_path().exists()
+    #[cfg(windows)]
+    {
+        crate::winapi::reg_get_string(crate::winapi::RUN_KEY, RUN_NAME).is_some()
+    }
+    #[cfg(not(windows))]
+    {
+        entry_path().exists()
+    }
 }
 
 /// Turns launch at login on or off.
 pub fn set(on: bool, minimized: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use crate::winapi::{RUN_KEY, reg_delete, reg_set_string};
+        return if on {
+            let exe = executable()?;
+            reg_set_string(
+                RUN_KEY,
+                RUN_NAME,
+                &run_value(&exe, minimized.then_some("--minimized")),
+            )
+        } else {
+            reg_delete(RUN_KEY, RUN_NAME)
+        };
+    }
+    #[allow(unreachable_code)]
     if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
         return Err("not supported on this platform".into());
     }
@@ -126,6 +164,25 @@ pub fn restore_entry(exe: &str, kairo_home: Option<&str>) -> String {
 
 /// Puts the login check in place (once; rewritten when Kairo moved).
 pub fn install_restore() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use crate::winapi::{RUN_KEY, reg_get_string, reg_set_string};
+        let exe = executable()?;
+        let check = run_value(&exe, Some("--restore-network"));
+        if reg_get_string(RUN_KEY, RUN_RESTORE_NAME).as_deref() != Some(check.as_str()) {
+            reg_set_string(RUN_KEY, RUN_RESTORE_NAME, &check)?;
+        }
+        // Launch at login follows the executable when it moved (an update, a new folder).
+        if let Some(current) = reg_get_string(RUN_KEY, RUN_NAME) {
+            let flag = current.contains("--minimized").then_some("--minimized");
+            let wanted = run_value(&exe, flag);
+            if current != wanted {
+                reg_set_string(RUN_KEY, RUN_NAME, &wanted)?;
+            }
+        }
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
     if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
         return Ok(());
     }
@@ -149,6 +206,15 @@ mod tests {
         assert!(e.contains("/opt/kairo/kairo"));
         assert!(e.contains("--restore-network"));
         assert!(e.contains("/tmp/k"));
+    }
+
+    #[test]
+    fn run_value_quotes_the_path() {
+        assert_eq!(
+            super::run_value("C:\\Users\\a b\\kairo.exe", Some("--minimized")),
+            "\"C:\\Users\\a b\\kairo.exe\" --minimized"
+        );
+        assert_eq!(super::run_value("k.exe", None), "\"k.exe\"");
     }
 
     #[test]

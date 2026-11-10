@@ -26,6 +26,8 @@ pub mod supervisor;
 pub mod sysproxy;
 pub mod tun;
 pub mod update;
+#[cfg(windows)]
+pub mod winapi;
 
 pub use service::{CoreStatus, Live, Notice, Proxies, Service, State, Task};
 pub use settings::{LogLevel, Mode, Settings, Theme};

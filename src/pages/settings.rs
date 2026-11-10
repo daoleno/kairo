@@ -392,6 +392,9 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
                             "A one-time permission: the core gets the cap_net_admin capability (you'll be asked for your password).".into()
                         }
                         Some(Privilege::Needed) => "A one-time permission: the core is made to run as root (you'll be asked for your password).".into(),
+                        Some(Privilege::Unsupported) if cfg!(windows) => {
+                            "Coming to Kairo for Windows. For now, apps that follow the system proxy use Kairo.".into()
+                        }
                         Some(Privilege::Unsupported) => "Not available on this platform.".into(),
                     }
                 },

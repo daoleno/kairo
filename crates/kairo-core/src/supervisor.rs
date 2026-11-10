@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+#[cfg_attr(windows, allow(unused_imports))]
 use std::time::Duration;
 
 use crate::paths::Paths;
@@ -58,6 +59,9 @@ impl CoreProcess {
             .current_dir(paths.runtime_dir())
             .stdin(Stdio::null())
             .kill_on_drop(true);
+        // No console window (Kairo is a windowed program; the core is a console one).
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         // The core writes its output to the log file itself, not into a pipe
         // Kairo reads: a pipe would break when Kairo dies, and the core's next
         // line would end it (SIGPIPE).
@@ -168,6 +172,13 @@ pub async fn stop_stale(paths: &Paths) {
 /// SIGTERM, three seconds, SIGKILL; returns once the process is gone (or
 /// after another second), so its ports are free for the next core.
 pub async fn stop_pid(pid: i32) {
+    #[cfg(windows)]
+    {
+        let pid = pid as u32;
+        if crate::winapi::terminate(pid) {
+            let _ = tokio::task::spawn_blocking(move || crate::winapi::wait_for_exit(pid, 4000)).await;
+        }
+    }
     #[cfg(unix)]
     unsafe {
         libc::kill(pid, libc::SIGTERM);
@@ -197,7 +208,9 @@ pub fn core_alive(paths: &Paths) -> bool {
     };
     #[cfg(unix)]
     let alive = pid > 1 && unsafe { libc::kill(pid, 0) } == 0;
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    let alive = pid > 1 && crate::winapi::pid_alive(pid as u32);
+    #[cfg(not(any(unix, windows)))]
     let alive = pid > 1;
     alive && is_our_core(pid, paths)
 }
@@ -214,7 +227,13 @@ fn is_our_core(pid: i32, paths: &Paths) -> bool {
             })
             .unwrap_or(false)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        // The core Kairo runs is the copy in its own `core` directory.
+        let _ = runtime;
+        crate::winapi::image_path(pid as u32).is_some_and(|p| same_path(&p, &paths.core_bin()))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         std::process::Command::new("ps")
             .args(["-p", &pid.to_string(), "-o", "command="])
@@ -246,4 +265,10 @@ mod tests {
         };
         assert_eq!(e.reason(), "The core exited with code 2");
     }
+}
+
+/// Whether two Windows paths name the same file (case and slashes aside).
+pub fn same_path(a: &str, b: &Path) -> bool {
+    let norm = |s: &str| s.replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    norm(a) == norm(&b.to_string_lossy())
 }

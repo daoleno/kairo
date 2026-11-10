@@ -1,0 +1,35 @@
+// Windows resources: the icon (id 1, which NSH's window class loads), the
+// manifest and the version information.
+#include <winver.h>
+
+1 ICON "../assets/kairo.ico"
+1 24 "kairo.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION KAIRO_VERSION_COMMA
+ PRODUCTVERSION KAIRO_VERSION_COMMA
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Kairo"
+            VALUE "FileDescription", "Kairo"
+            VALUE "FileVersion", KAIRO_VERSION_STR
+            VALUE "InternalName", "kairo"
+            VALUE "LegalCopyright", "GPL-3.0-or-later"
+            VALUE "OriginalFilename", "kairo.exe"
+            VALUE "ProductName", "Kairo"
+            VALUE "ProductVersion", KAIRO_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
