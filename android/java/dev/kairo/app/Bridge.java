@@ -67,29 +67,34 @@ public final class Bridge {
      * message for the user.
      */
     public static String installApk(String path) {
+        int id = -1;
+        android.content.pm.PackageInstaller pi = null;
         try {
-            android.content.pm.PackageInstaller pi = app.getPackageManager().getPackageInstaller();
+            pi = app.getPackageManager().getPackageInstaller();
             if (!app.getPackageManager().canRequestPackageInstalls()) {
                 // Take the user to the setting; they come back and press again.
                 Intent s = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         android.net.Uri.parse("package:" + app.getPackageName()))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 app.startActivity(s);
-                return "Allow Kairo to install updates in the screen that opened, then press the button again.";
+                // The button stays "Restart to Update": press it again after allowing.
+                return null;
             }
             android.content.pm.PackageInstaller.SessionParams p = new android.content.pm.PackageInstaller.SessionParams(
                     android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
             p.setRequireUserAction(android.content.pm.PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
-            int id = pi.createSession(p);
-            try (android.content.pm.PackageInstaller.Session session = pi.openSession(id);
-                 java.io.InputStream in = new java.io.FileInputStream(path);
-                 java.io.OutputStream out = session.openWrite("kairo.apk", 0, -1)) {
-                byte[] buf = new byte[1 << 16];
-                int n;
-                while ((n = in.read(buf)) > 0) {
-                    out.write(buf, 0, n);
+            id = pi.createSession(p);
+            try (android.content.pm.PackageInstaller.Session session = pi.openSession(id)) {
+                try (java.io.InputStream in = new java.io.FileInputStream(path);
+                     java.io.OutputStream out = session.openWrite("kairo.apk", 0, -1)) {
+                    byte[] buf = new byte[1 << 16];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        out.write(buf, 0, n);
+                    }
+                    session.fsync(out);
                 }
-                session.fsync(out);
+                // Committed only once the file is closed ("Files still open" otherwise).
                 Intent result = new Intent(app, InstallResultReceiver.class).setPackage(app.getPackageName());
                 PendingIntent pending = PendingIntent.getBroadcast(app, id, result,
                         PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -97,7 +102,11 @@ public final class Bridge {
             }
             return null;
         } catch (Exception e) {
-            return "Could not start the update: " + e.getMessage();
+            android.util.Log.e("Kairo", "installApk failed", e);
+            if (pi != null && id >= 0) {
+                try { pi.abandonSession(id); } catch (Exception ignored) { }
+            }
+            return "Could not start the update: " + e;
         }
     }
 
