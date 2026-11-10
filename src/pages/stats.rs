@@ -262,6 +262,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
                 170.0,
                 "Move over a column for exact values".into(),
                 unit_of(series.buckets.iter().map(|b| b.total()).max().unwrap_or(0)),
+                0.0,
             )
             .into_element()
         })
@@ -910,6 +911,7 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         80.0,
         "Failed tests per hour".into(),
         1.0,
+        2.0,
     );
     let node_now = data
         .iter()

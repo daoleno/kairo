@@ -157,6 +157,7 @@ pub fn columns(
     height: f32,
     idle: String,
     scale: f64,
+    min_top: f64,
 ) -> impl IntoElement {
     let n = cols.len().max(1);
     let hover = signal(None::<usize>);
@@ -169,7 +170,7 @@ pub fn columns(
         .fold(0.0, f64::max);
     // Round the axis in the unit the labels use (MB, GB), not in raw bytes.
     let (_, top) = nice_axis(max / scale, 3);
-    let top = top * scale;
+    let top = (top * scale).max(min_top);
     let series_r = series.clone();
     let cols_r = cols.clone();
     let paint = move || {
