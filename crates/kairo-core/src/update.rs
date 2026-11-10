@@ -1142,7 +1142,13 @@ mod tests {
         // First sight of a newer version.
         assert_eq!(after_check(&Idle, down("0.3.0"), "10:00"), avail("0.3.0"));
         assert_eq!(
-            after_check(&UpToDate { checked: "09:00".into() }, down("0.3.0"), "10:00"),
+            after_check(
+                &UpToDate {
+                    checked: "09:00".into()
+                },
+                down("0.3.0"),
+                "10:00"
+            ),
             avail("0.3.0")
         );
         // The same again: not flipped, not restarted.
@@ -1156,8 +1162,14 @@ mod tests {
         );
         // Nothing newer: what was downloaded stays offered; an offer that
         // vanished is not one any more.
-        assert_eq!(after_check(&ready("0.3.0"), Found::Nothing, "10:00"), ready("0.3.0"));
-        assert_eq!(after_check(&avail("0.3.0"), Found::Nothing, "10:00"), up_to_date);
+        assert_eq!(
+            after_check(&ready("0.3.0"), Found::Nothing, "10:00"),
+            ready("0.3.0")
+        );
+        assert_eq!(
+            after_check(&avail("0.3.0"), Found::Nothing, "10:00"),
+            up_to_date
+        );
         assert_eq!(after_check(&Idle, Found::Nothing, "10:00"), up_to_date);
         // A newer one than the one on offer or downloaded replaces it.
         assert_eq!(
@@ -1210,12 +1222,23 @@ mod tests {
     #[test]
     fn checks_over_an_offer_are_quiet() {
         use UpdateStatus::*;
-        assert!(quiet(&Available { version: "1".into() }));
-        assert!(quiet(&Ready { version: "1".into() }));
-        assert!(quiet(&Downloading { version: "1".into(), progress: None }));
+        assert!(quiet(&Available {
+            version: "1".into()
+        }));
+        assert!(quiet(&Ready {
+            version: "1".into()
+        }));
+        assert!(quiet(&Downloading {
+            version: "1".into(),
+            progress: None
+        }));
         assert!(!quiet(&Idle));
-        assert!(!quiet(&UpToDate { checked: "10:00".into() }));
-        assert!(!quiet(&Failed { message: "x".into() }));
+        assert!(!quiet(&UpToDate {
+            checked: "10:00".into()
+        }));
+        assert!(!quiet(&Failed {
+            message: "x".into()
+        }));
     }
 
     #[test]
