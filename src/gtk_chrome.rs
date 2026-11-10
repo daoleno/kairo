@@ -513,11 +513,7 @@ impl Footer {
             .margin_bottom(8)
             .visible(false)
             .build();
-        update.connect_clicked(|_| {
-            let svc = Service::global();
-            let rt = svc.runtime();
-            rt.spawn(svc.restart_to_update());
-        });
+        update.connect_clicked(|_| chrome::update_pressed(&Service::global()));
         root.append(&update);
         root.append(&top);
         root.append(&speeds);
@@ -533,13 +529,13 @@ impl Footer {
     }
 
     fn update(&self, s: &State, l: &Live) {
-        match &s.update {
-            kairo_core::UpdateStatus::Ready { version } => {
-                self.update
-                    .set_label(&format!("Restart to Update to {version}"));
+        match chrome::update_button(&s.update) {
+            Some(b) => {
+                self.update.set_label(&b.label);
+                self.update.set_sensitive(b.enabled);
                 self.update.set_visible(true);
             }
-            _ => self.update.set_visible(false),
+            None => self.update.set_visible(false),
         }
         self.status.set_label(s.plain());
         self.mode.set_label(s.settings.mode.route());

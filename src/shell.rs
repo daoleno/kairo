@@ -98,15 +98,17 @@ fn core_footer() -> impl IntoElement {
                 .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
                 .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down))),
         )
-        // A downloaded Kairo update: one tap installs it and restarts.
-        .child(when(
-            move || {
-                store
-                    .state
-                    .with(|s| matches!(s.update, kairo_core::UpdateStatus::Ready { .. }))
-            },
-            pages::settings::update_button,
-        ))
+        // A newer Kairo: Download, its progress, then Restart to Update.
+        .child(dynamic(move || {
+            let b = store.state.with(|s| crate::chrome::update_button(&s.update));
+            untracked(move || match b {
+                Some(b) => ui::btn_icon(Icon::Download, b.label, ui::Variant::Primary)
+                    .disabled(!b.enabled)
+                    .on_press(move || crate::chrome::update_pressed(&store.svc()))
+                    .into_element(),
+                None => view().into_element(),
+            })
+        }))
 }
 
 fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {

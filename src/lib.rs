@@ -139,14 +139,12 @@ fn menus(store: Store) {
                 "Kairo",
                 [
                     MenuItem::role(MenuRole::About),
-                    match store.state.with(|s| s.update.clone()) {
-                        kairo_core::UpdateStatus::Ready { version } => {
-                            MenuItem::new(format!("Restart to Update to {version}")).on_select({
-                                let svc = svc.clone();
-                                move || store.run(svc.restart_to_update())
-                            })
-                        }
-                        _ => MenuItem::new("Check for Updates…").on_select({
+                    match store.state.with(|s| chrome::update_button(&s.update)) {
+                        Some(b) => MenuItem::new(b.label).disabled(!b.enabled).on_select({
+                            let svc = svc.clone();
+                            move || chrome::update_pressed(&svc)
+                        }),
+                        None => MenuItem::new("Check for Updates…").on_select({
                             let svc = svc.clone();
                             move || {
                                 store.run_then(svc.check_for_update(), move |r| {

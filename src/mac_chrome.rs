@@ -722,9 +722,7 @@ define_class!(
     impl UpdateTarget {
         #[unsafe(method(restartToUpdate:))]
         fn restart(&self, _sender: &AnyObject) {
-            let svc = Service::global();
-            let rt = svc.runtime();
-            rt.spawn(svc.restart_to_update());
+            chrome::update_pressed(&Service::global());
         }
     }
 );
@@ -794,7 +792,7 @@ impl Footer {
         // A downloaded update, one click from installing.
         let update = unsafe {
             objc2_app_kit::NSButton::buttonWithTitle_target_action(
-                ns_string!("Restart to Update"),
+                ns_string!("Download"),
                 Some(&*UpdateTarget::shared(mtm)),
                 Some(sel!(restartToUpdate:)),
                 mtm,
@@ -825,14 +823,13 @@ impl Footer {
     }
 
     fn update(&self, s: &kairo_core::State, l: &kairo_core::Live) {
-        match &s.update {
-            kairo_core::UpdateStatus::Ready { version } => {
-                self.update.setTitle(&NSString::from_str(&format!(
-                    "Restart to Update to {version}"
-                )));
+        match chrome::update_button(&s.update) {
+            Some(b) => {
+                self.update.setTitle(&NSString::from_str(&b.label));
+                self.update.setEnabled(b.enabled);
                 self.update.setHidden(false);
             }
-            _ => self.update.setHidden(true),
+            None => self.update.setHidden(true),
         }
         self.status.setStringValue(&NSString::from_str(s.plain()));
         self.mode.setStringValue(&NSString::from_str(&format!(
