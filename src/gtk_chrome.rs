@@ -19,62 +19,50 @@ use nsh_platform_linux::gtk4 as gtk;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-const PAGES: [Page; 9] = Page::SIDEBAR;
-/// Where the sidebar's Advanced section starts, and where Settings sits apart.
-const ADVANCED_AT: i32 = 3;
-const SETTINGS_AT: i32 = 8;
+const PAGES: [Page; 6] = Page::SIDEBAR;
+/// Where Settings sits apart.
+const SETTINGS_AT: i32 = 5;
 
 /// The icon theme's names for a page's glyph, best first (Adwaita and Breeze
 /// name some differently).
 fn icons(page: Page) -> &'static [&'static str] {
     match page {
         Page::Overview => &["go-home-symbolic", "user-home-symbolic"],
+        Page::Exits => &[
+            "globe-symbolic",
+            "web-browser-symbolic",
+            "network-workgroup-symbolic",
+        ],
         Page::Activity => &[
-            "media-playlist-shuffle-symbolic",
+            "network-transmit-receive-symbolic",
             "utilities-system-monitor-symbolic",
-            "emblem-synchronizing-symbolic",
+            "network-wired-symbolic",
         ],
         Page::Apps => &[
             "view-app-grid-symbolic",
             "view-grid-symbolic",
             "applications-other-symbolic",
         ],
-        Page::Proxies => &[
-            "globe-symbolic",
-            "web-browser-symbolic",
-            "network-workgroup-symbolic",
-        ],
         Page::Profiles => &[
+            "view-list-symbolic",
             "text-x-generic-symbolic",
             "emblem-documents-symbolic",
-            "document-properties-symbolic",
         ],
-        Page::Connections => &[
-            "network-transmit-receive-symbolic",
-            "network-connect-symbolic",
-            "network-wired-symbolic",
-        ],
-        Page::Rules => &[
-            "view-filter-symbolic",
-            "filter-symbolic",
-            "view-list-symbolic",
-            "format-justify-left-symbolic",
-        ],
+        Page::Settings => &["emblem-system-symbolic", "preferences-system-symbolic"],
+        Page::Proxies => &["globe-symbolic"],
+        Page::Rules => &["view-filter-symbolic", "view-list-symbolic"],
         Page::Logs => &["utilities-terminal-symbolic"],
         Page::Dns => &["network-server-symbolic"],
-        Page::Settings => &["emblem-system-symbolic", "preferences-system-symbolic"],
+        Page::AiService => &["utilities-system-monitor-symbolic"],
     }
 }
 
-fn sidebar_row(page: Page) -> (gtk::ListBoxRow, gtk::Label) {
+fn sidebar_row(page: Page) -> gtk::ListBoxRow {
     let icon = gtk::Image::from_gicon(&gio::ThemedIcon::from_names(icons(page)));
     let title = gtk::Label::builder()
         .label(page.title())
         .xalign(0.0)
         .hexpand(true)
-        .build();
-    let count = gtk::Label::builder()
-        .css_classes(["dim-label", "numeric"])
         .build();
     let row = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
@@ -82,10 +70,9 @@ fn sidebar_row(page: Page) -> (gtk::ListBoxRow, gtk::Label) {
         .build();
     row.append(&icon);
     row.append(&title);
-    row.append(&count);
     let r = gtk::ListBoxRow::builder().child(&row).build();
     r.update_property(&[gtk::accessible::Property::Label(page.title())]);
-    (r, count)
+    r
 }
 
 /// Builds the window's content around `nsh` (the NSH view's widget).
@@ -93,26 +80,12 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let list = gtk::ListBox::builder()
         .css_classes(["navigation-sidebar"])
         .build();
-    let mut counts = Vec::new();
     for page in PAGES {
-        let (row, count) = sidebar_row(page);
-        list.append(&row);
-        counts.push(count);
+        list.append(&sidebar_row(page));
     }
-    // The everyday pages; Advanced below them; Settings apart.
+    // The five pages; Settings apart.
     list.set_header_func(|row, _| {
         let header: Option<gtk::Widget> = match row.index() {
-            ADVANCED_AT => Some(
-                gtk::Label::builder()
-                    .label("Advanced")
-                    .xalign(0.0)
-                    .css_classes(["heading", "dim-label"])
-                    .margin_start(12)
-                    .margin_top(14)
-                    .margin_bottom(4)
-                    .build()
-                    .upcast(),
-            ),
             SETTINGS_AT => Some(gtk::Separator::new(gtk::Orientation::Horizontal).upcast()),
             _ => None,
         };
@@ -120,7 +93,10 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     });
     // The page the app opens on, before the list reports selections.
     let first = *chrome::bridge().page.borrow();
-    let first_row = PAGES.iter().position(|p| *p == first).unwrap_or(0);
+    let first_row = PAGES
+        .iter()
+        .position(|p| *p == first.sidebar())
+        .unwrap_or(0);
     list.select_row(list.row_at_index(first_row as i32).as_ref());
     list.connect_row_selected(|_, row| {
         if let Some(page) = row.and_then(|r| PAGES.get(r.index() as usize)) {
@@ -152,11 +128,11 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         .content(&content_view)
         .min_sidebar_width(200.0)
         .max_sidebar_width(260.0)
-        .show_sidebar(first.advanced())
+        .show_sidebar(true)
         .build();
     let toggle = gtk::ToggleButton::builder()
         .icon_name("sidebar-show-symbolic")
-        .tooltip_text("Show Sidebar (Advanced)")
+        .tooltip_text("Show Sidebar")
         .build();
     split
         .bind_property("show-sidebar", &toggle, "active")
@@ -268,13 +244,11 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let mut pages = chrome::bridge().page.subscribe();
     let list_page = list.clone();
     let title_page = title.clone();
-    let split_page = split.clone();
     glib::spawn_future_local(async move {
         loop {
             let page = *pages.borrow_and_update();
-            // A page the sidebar does not list (DNS, from the palette) leaves
-            // no row selected.
-            match PAGES.iter().position(|p| *p == page) {
+            // An Inspect view stands under Settings' row.
+            match PAGES.iter().position(|p| *p == page.sidebar()) {
                 Some(i) => {
                     if list_page.selected_row().map(|r| r.index() as usize) != Some(i) {
                         list_page.select_row(list_page.row_at_index(i as i32).as_ref());
@@ -283,10 +257,6 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
                 None => list_page.unselect_all(),
             }
             title_page.set_title(page.title());
-            // An Advanced page from a menu, a key or the palette: show where it is.
-            if page.advanced() && !split_page.shows_sidebar() {
-                split_page.set_show_sidebar(true);
-            }
             if pages.changed().await.is_err() {
                 break;
             }
@@ -328,7 +298,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         if let Some(app) = window.application() {
             app.set_accels_for_action("win.settings", &["<Control>comma"]);
             app.set_accels_for_action("win.palette", &["<Control>k"]);
-            for i in 1..=8 {
+            for i in 1..=5 {
                 app.set_accels_for_action(&format!("win.go-{i}"), &[&format!("<Control>{i}")]);
             }
         }
@@ -365,7 +335,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         }
     });
 
-    // The core's state: the sidebar's footer, the counts, the color scheme.
+    // The core's state: the sidebar's footer, the color scheme.
     let mut state = svc.state();
     let mut live = svc.live();
     glib::spawn_future_local(async move {
@@ -373,9 +343,6 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
             let s = state.borrow_and_update().clone();
             let l = live.borrow_and_update().clone();
             footer.update(&s, &l);
-            let n = |v: usize| if v > 0 { v.to_string() } else { String::new() };
-            counts[3].set_label(&n(s.profiles.profiles.len()));
-            counts[4].set_label(&n(l.connections));
             let scheme = match s.settings.theme {
                 Theme::System => adw::ColorScheme::Default,
                 Theme::Light => adw::ColorScheme::ForceLight,
@@ -550,11 +517,7 @@ impl Footer {
             .margin_bottom(8)
             .visible(false)
             .build();
-        update.connect_clicked(|_| {
-            let svc = Service::global();
-            let rt = svc.runtime();
-            rt.spawn(svc.restart_to_update());
-        });
+        update.connect_clicked(|_| chrome::update_pressed(&Service::global()));
         root.append(&update);
         root.append(&top);
         root.append(&speeds);
@@ -570,13 +533,13 @@ impl Footer {
     }
 
     fn update(&self, s: &State, l: &Live) {
-        match &s.update {
-            kairo_core::UpdateStatus::Ready { version } => {
-                self.update
-                    .set_label(&format!("Restart to Update to {version}"));
+        match chrome::update_button(&s.update) {
+            Some(b) => {
+                self.update.set_label(&b.label);
+                self.update.set_sensitive(b.enabled);
                 self.update.set_visible(true);
             }
-            _ => self.update.set_visible(false),
+            None => self.update.set_visible(false),
         }
         self.status.set_label(s.plain());
         self.mode.set_label(s.settings.mode.route());

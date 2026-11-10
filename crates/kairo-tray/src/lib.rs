@@ -1,7 +1,6 @@
-//! Kairo's tray / menu bar item: whether it is connected and through where,
-//! and the three everyday choices without the window: Connect, the location
-//! (Fastest or a place, quickest first) and the route. Then the window and
-//! Quit. The system proxy and TUN live in Settings (Connect sets the proxy).
+//! Kairo's tray / menu bar item: whether it is connected, how the AI services
+//! stand, the two exits you switch most (Everything else, AI) with a country
+//! each, the mode, and the window, Settings and Quit.
 //!
 //! - Linux: a StatusNotifierItem (KDE Plasma, GNOME with the AppIndicator
 //!   extension, most panels) through `ksni`.
@@ -21,20 +20,41 @@ mod macos;
 pub struct Hooks {
     /// Shows and focuses the main window.
     pub show: Arc<dyn Fn() + Send + Sync>,
+    /// Shows the window on a page (`"exits"`, `"settings"`).
+    pub page: Arc<dyn Fn(&'static str) + Send + Sync>,
     /// Quits the app (after restoring the system proxy).
     pub quit: Arc<dyn Fn() + Send + Sync>,
 }
 
-/// A location in the menu: `name` empty is Fastest (automatic).
+/// A country in an exit's menu: choosing it picks its fastest server.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
+    /// The server to go through (empty for nothing: see [`ExitMenu::fastest`]).
     pub name: String,
     pub label: String,
-    pub delay: Option<u32>,
+    /// Good, OK, Slow or "".
+    pub health: &'static str,
+    pub checked: bool,
 }
 
-/// How many places the menu lists (the rest: All Locations… in the window).
-pub const PLACES: usize = 15;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitId {
+    /// Everything else (the Location).
+    Rest,
+    Ai,
+}
+
+/// One exit's submenu.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExitMenu {
+    pub id: ExitId,
+    pub title: &'static str,
+    /// Where it goes now ("🇭🇰 Hong Kong").
+    pub place: String,
+    /// `Some(on)` when it has "Fastest" (the AI exit never does).
+    pub fastest: Option<bool>,
+    pub choices: Vec<Choice>,
+}
 
 /// What the menu shows.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -42,75 +62,167 @@ pub struct Model {
     pub status: String,
     pub running: bool,
     pub mode: Mode,
-    pub sysproxy: bool,
-    pub sysproxy_supported: bool,
-    pub tun: bool,
-    pub tun_allowed: bool,
     pub up: u64,
     pub down: u64,
     pub has_profile: bool,
-    /// The location: its group, the choices (Fastest first) and the one in use
-    /// (empty: Fastest).
-    pub group: Option<(String, Vec<Choice>, Option<String>)>,
-    /// The location's title for the submenu ("Fastest · Tokyo 03").
-    pub place: String,
+    /// "AI: all 6 see Japan", "AI: 2 problems".
+    pub ai: String,
+    pub exits: Vec<ExitMenu>,
+}
+
+/// A flag for a menu: Taiwan's is left out (Apple's emoji font omits it on
+/// Macs set to some regions, and a menu cannot draw a picture there).
+pub fn menu_flag(flag: &str) -> String {
+    if flag == "🇹🇼" || flag.is_empty() {
+        String::new()
+    } else {
+        format!("{flag}  ")
+    }
+}
+
+/// How a delay reads in a menu.
+pub fn health_word(delay: Option<u32>) -> &'static str {
+    match delay {
+        None => "",
+        Some(0) => "Slow",
+        Some(d) if d < 200 => "Good",
+        Some(d) if d < 500 => "OK",
+        Some(_) => "Slow",
+    }
+}
+
+/// The AI line: what the last check found, in a few words.
+pub fn ai_line(state: &kairo_core::State) -> String {
+    use kairo_core::ai_check::{self, Api};
+    let checks = &state.ai.checks;
+    if !state.settings.ai.enabled || checks.is_empty() {
+        return String::new();
+    }
+    let odd = ai_check::odd_ones(checks);
+    let problems = checks
+        .iter()
+        .filter(|c| {
+            !c.reachable
+                || matches!(c.api, Api::Unexpected { .. } | Api::Unreachable { .. })
+                || odd
+                    .as_ref()
+                    .is_some_and(|(_, ids)| ids.contains(&c.service))
+        })
+        .count()
+        + state
+            .bypass
+            .iter()
+            .map(|b| b.tool.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+    if problems > 0 {
+        return format!(
+            "AI: {problems} {}",
+            if problems == 1 { "problem" } else { "problems" }
+        );
+    }
+    let codes: std::collections::BTreeSet<&str> =
+        checks.iter().filter_map(|c| c.country.code()).collect();
+    match (codes.len(), codes.iter().next()) {
+        (1, Some(code)) => format!(
+            "AI: all {} see {}",
+            checks.len(),
+            ai_check::country_name(code)
+        ),
+        _ => format!("AI: {} reachable", checks.len()),
+    }
 }
 
 impl Model {
     pub fn of(svc: &Service) -> Model {
+        use kairo_core::places;
         let state = svc.state().borrow().clone();
         let live = svc.live().borrow().clone();
         let proxies = svc.proxies().borrow().clone();
         let s = &state.settings;
-        let main = kairo_core::places::main_group(&proxies.groups, &s.tray_group);
-        let now_place = main.and_then(|g| kairo_core::places::current(&proxies.groups, g));
-        let label_of = |p: &kairo_core::places::Place| {
+        let main = places::main_group(&proxies.groups, &s.tray_group);
+        let rest_place = main.and_then(|g| places::current(&proxies.groups, g));
+        let ai_place = svc.ai_node().and_then(|n| {
+            proxies
+                .groups
+                .iter()
+                .flat_map(|g| g.members.iter())
+                .find(|m| m.name == n && !m.is_group)
+                .map(places::place)
+        });
+        let label_of = |p: &places::Place| {
             format!(
                 "{}{}",
-                p.flag.clone().map(|f| f + "  ").unwrap_or_default(),
-                p.title
+                menu_flag(p.flag.as_deref().unwrap_or("")),
+                if p.region == "Other" {
+                    p.title.clone()
+                } else {
+                    p.region.to_owned()
+                }
             )
         };
-        let group = main.map(|g| {
-            let mut places = kairo_core::places::places(&proxies.groups, g);
-            places.sort_by_key(|p| match p.delay {
-                Some(d) if d > 0 => d,
-                _ => u32::MAX,
-            });
-            let mut choices = vec![Choice {
-                name: String::new(),
-                label: "Fastest".into(),
-                delay: None,
-            }];
-            choices.extend(places.into_iter().take(PLACES).map(|p| Choice {
-                label: label_of(&p),
-                name: p.name,
-                delay: p.delay,
-            }));
-            let now = if s.auto_location {
-                Some(String::new())
-            } else {
-                now_place.as_ref().map(|p| p.name.clone())
-            };
-            (g.name.clone(), choices, now)
-        });
-        let place = match (&now_place, s.auto_location) {
-            (Some(p), true) => format!("Fastest · {}", label_of(p)),
-            (Some(p), false) => label_of(p),
-            (None, _) => "—".into(),
+        // Countries, the best server of each, quickest first.
+        let countries = |now: Option<&places::Place>| -> Vec<Choice> {
+            let Some(g) = main else { return vec![] };
+            let all = places::places(&proxies.groups, g);
+            let mut out: Vec<(u32, Choice)> = places::by_region(&all)
+                .into_iter()
+                .filter_map(|(region, list)| {
+                    let best = list
+                        .iter()
+                        .filter(|p| p.delay.is_some_and(|d| d > 0))
+                        .min_by_key(|p| p.delay)
+                        .or(list.first())?;
+                    let flag = best
+                        .flag
+                        .clone()
+                        .or_else(|| places::region_flag(region))
+                        .unwrap_or_default();
+                    Some((
+                        best.delay.filter(|d| *d > 0).unwrap_or(u32::MAX),
+                        Choice {
+                            name: best.name.clone(),
+                            label: format!("{}{region}", menu_flag(&flag)),
+                            health: health_word(best.delay),
+                            checked: now.is_some_and(|n| list.iter().any(|p| p.name == n.name)),
+                        },
+                    ))
+                })
+                .collect();
+            out.sort_by_key(|(d, _)| *d);
+            out.into_iter().take(PLACES).map(|(_, c)| c).collect()
         };
+        let mut exits = Vec::new();
+        if main.is_some() {
+            exits.push(ExitMenu {
+                id: ExitId::Rest,
+                title: "Everything else",
+                place: rest_place
+                    .as_ref()
+                    .map(label_of)
+                    .unwrap_or_else(|| "—".into()),
+                fastest: Some(s.auto_location),
+                choices: countries(if s.auto_location {
+                    None
+                } else {
+                    rest_place.as_ref()
+                }),
+            });
+            if s.ai.enabled && !state.ai.group.is_empty() {
+                exits.push(ExitMenu {
+                    id: ExitId::Ai,
+                    title: "AI exit",
+                    place: ai_place
+                        .as_ref()
+                        .map(label_of)
+                        .unwrap_or_else(|| "—".into()),
+                    fastest: None,
+                    choices: countries(ai_place.as_ref()),
+                });
+            }
+        }
         let status = match &state.core {
-            CoreStatus::Running { .. } => match &now_place {
-                Some(p) => format!(
-                    "Connected · {}{}",
-                    label_of(p),
-                    p.delay
-                        .filter(|d| *d > 0)
-                        .map(|d| format!(" · {d} ms"))
-                        .unwrap_or_default()
-                ),
-                None => "Connected".into(),
-            },
+            CoreStatus::Running { .. } => "Connected".to_owned(),
             CoreStatus::Starting => "Connecting…".into(),
             CoreStatus::Failed { .. } => "Couldn't connect".into(),
             _ => "Not Connected".into(),
@@ -119,36 +231,39 @@ impl Model {
             status,
             running: state.core.is_running(),
             mode: s.mode,
-            sysproxy: s.system_proxy,
-            sysproxy_supported: state.sysproxy_supported,
-            tun: s.tun,
-            tun_allowed: state.tun_privilege == Some(kairo_core::tun::Privilege::Granted),
             up: live.up,
             down: live.down,
             has_profile: state.profiles.active.is_some(),
-            group,
-            place,
+            ai: if state.core.is_running() {
+                ai_line(&state)
+            } else {
+                String::new()
+            },
+            exits,
         }
     }
 
-    /// The menu label of a location: its name and last delay.
+    /// The menu label of a country: its name and how good it is.
     pub fn choice_label(c: &Choice) -> String {
-        match c.delay {
-            Some(0) => format!("{}    no answer", c.label),
-            Some(d) => format!("{}    {d} ms", c.label),
-            None => c.label.clone(),
+        if c.health.is_empty() {
+            c.label.clone()
+        } else {
+            format!("{}    {}", c.label, c.health)
         }
     }
 
-    /// The route's title (the mode in plain words).
+    /// The mode in plain words.
     pub fn route_title(m: Mode) -> &'static str {
         match m {
-            Mode::Rule => "Smart Route",
-            Mode::Global => "All Traffic",
+            Mode::Rule => "Smart",
+            Mode::Global => "Everything",
             Mode::Direct => "Direct",
         }
     }
 }
+
+/// How many countries a menu lists (the rest: All Servers… in the window).
+pub const PLACES: usize = 12;
 
 /// The actions of the menu, carried out on the service.
 pub(crate) mod act {
@@ -157,9 +272,16 @@ pub(crate) mod act {
     pub fn mode(svc: &Service, m: Mode) {
         svc.fire(svc.set_mode(m));
     }
-    /// A location (empty: Fastest).
+    /// Everything else: a server, or (empty) Fastest.
     pub fn locate(svc: &Service, name: String) {
         svc.fire(svc.set_location((!name.is_empty()).then_some(name)));
+    }
+    /// The AI exit: a server.
+    pub fn ai_exit(svc: &Service, name: String) {
+        svc.fire(svc.set_ai_exit(name));
+    }
+    pub fn test_again(svc: &Service) {
+        svc.fire(svc.test_places());
     }
     pub fn connect(svc: &Service, on: bool) {
         svc.fire(svc.connect(on));
@@ -277,21 +399,24 @@ mod tests {
     #[test]
     fn labels() {
         use super::{Choice, Model};
-        assert_eq!(
-            Model::choice_label(&Choice {
-                name: "x".into(),
-                label: "a".into(),
-                delay: Some(120)
-            }),
-            "a    120 ms"
-        );
-        assert_eq!(
-            Model::choice_label(&Choice {
-                name: "x".into(),
-                label: "a".into(),
-                delay: Some(0)
-            }),
-            "a    no answer"
-        );
+        let c = |health| Choice {
+            name: "x".into(),
+            label: "🇭🇰  Hong Kong".into(),
+            health,
+            checked: false,
+        };
+        assert_eq!(Model::choice_label(&c("Good")), "🇭🇰  Hong Kong    Good");
+        assert_eq!(Model::choice_label(&c("")), "🇭🇰  Hong Kong");
+    }
+
+    #[test]
+    fn delays_read_as_words_and_taiwan_has_no_flag_in_a_menu() {
+        assert_eq!(super::health_word(None), "");
+        assert_eq!(super::health_word(Some(0)), "Slow");
+        assert_eq!(super::health_word(Some(60)), "Good");
+        assert_eq!(super::health_word(Some(300)), "OK");
+        assert_eq!(super::health_word(Some(900)), "Slow");
+        assert_eq!(super::menu_flag("🇹🇼"), "");
+        assert_eq!(super::menu_flag("🇯🇵"), "🇯🇵  ");
     }
 }

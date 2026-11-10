@@ -129,6 +129,10 @@ pub struct Settings {
     pub accent: String,
     /// AI services on one exit, local models off the proxy, domestic AI direct.
     pub ai: crate::ai::AiSettings,
+    /// Downloads on an exit of their own: pinned, fastest, mirror.
+    pub downloads: crate::downloads::DownloadsSettings,
+    /// The person's choices for single apps and sites ("Apps & Sites").
+    pub routes: Vec<crate::routes::Route>,
 }
 
 impl Default for Settings {
@@ -158,6 +162,8 @@ impl Default for Settings {
             auto_location: true,
             accent: String::new(),
             ai: crate::ai::AiSettings::default(),
+            downloads: crate::downloads::DownloadsSettings::default(),
+            routes: Vec::new(),
         }
     }
 }
@@ -219,6 +225,9 @@ impl Settings {
             settings.auto_location = false;
             let _ = settings.save(paths);
         }
+        // Routes edited by hand are checked again; ones that cannot be rules go.
+        let stored = std::mem::take(&mut settings.routes);
+        settings.routes = crate::routes::sanitize(stored);
         if first_run {
             settings.mixed_port = free_port(settings.mixed_port, &[]);
             settings.controller_port = free_port(settings.controller_port, &[settings.mixed_port]);

@@ -257,13 +257,21 @@ mod platform {
                     window.present();
                     return;
                 }
+                // KAIRO_WINDOW=WxH: a window of another size (screenshots of long pages).
+                let (win_w, win_h) = std::env::var("KAIRO_WINDOW")
+                    .ok()
+                    .and_then(|v| {
+                        let (w, h) = v.split_once('x')?;
+                        Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?))
+                    })
+                    .unwrap_or((1180, 760));
                 let window: gtk::ApplicationWindow = if native {
                     libadwaita::ApplicationWindow::builder()
                         .application(app)
                         .title("Kairo")
                         .icon_name(APP_ID)
-                        .default_width(1180)
-                        .default_height(760)
+                        .default_width(win_w)
+                        .default_height(win_h)
                         .build()
                         .upcast()
                 } else {
@@ -271,8 +279,8 @@ mod platform {
                         .application(app)
                         .title("Kairo")
                         .icon_name(APP_ID)
-                        .default_width(1180)
-                        .default_height(760)
+                        .default_width(win_w)
+                        .default_height(win_h)
                         .build()
                 };
                 window.set_size_request(860, 560);
@@ -320,6 +328,14 @@ mod platform {
                     let hooks = kairo_tray::Hooks {
                         show: Arc::new(|| {
                             glib::MainContext::default().invoke(present);
+                        }),
+                        page: Arc::new(|name| {
+                            glib::MainContext::default().invoke(move || {
+                                if let Some(page) = nsh_app_kairo::store::Page::named(name) {
+                                    nsh_app_kairo::chrome::select(page);
+                                }
+                                present();
+                            });
                         }),
                         quit: quit.clone(),
                     };
@@ -375,6 +391,12 @@ mod platform {
         svc.set_quit_hook(quit.clone());
         let hooks = kairo_tray::Hooks {
             show: Arc::new(present),
+            page: Arc::new(|name| {
+                if let Some(page) = nsh_app_kairo::store::Page::named(name) {
+                    nsh_app_kairo::chrome::select(page);
+                }
+                present();
+            }),
             quit,
         };
         let tray_ok = kairo_tray::start(svc.clone(), hooks).is_ok();

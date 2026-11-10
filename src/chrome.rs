@@ -68,6 +68,9 @@ pub enum Glyph {
     Restart,
     Stop,
     Start,
+    Back,
+    Copy,
+    Sliders,
 }
 
 impl Glyph {
@@ -86,6 +89,9 @@ impl Glyph {
             Glyph::Restart => "arrow.counterclockwise",
             Glyph::Stop => "stop",
             Glyph::Start => "play",
+            Glyph::Back => "chevron.backward",
+            Glyph::Copy => "doc.on.doc",
+            Glyph::Sliders => "slider.horizontal.3",
         }
     }
 
@@ -115,6 +121,9 @@ impl Glyph {
             ],
             Glyph::Restart => &["view-refresh-symbolic"],
             Glyph::Stop => &["media-playback-stop-symbolic", "process-stop-symbolic"],
+            Glyph::Back => &["go-previous-symbolic"],
+            Glyph::Copy => &["edit-copy-symbolic"],
+            Glyph::Sliders => &["preferences-system-symbolic", "emblem-system-symbolic"],
         }
     }
 }
@@ -225,4 +234,114 @@ pub fn set_insets(insets: Insets) {
     bridge()
         .insets
         .send_if_modified(|i| std::mem::replace(i, insets) != insets);
+}
+
+// --- Kairo's own update, as the sidebar's foot shows it -----------------------------
+
+/// The one button of the update at the sidebar's foot: what it says, and
+/// whether it can be pressed now. `None`: nothing to offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateButton {
+    pub label: String,
+    pub enabled: bool,
+}
+
+/// What the foot offers for the updater's state: **Download** when a newer
+/// Kairo exists, its progress while it comes, then **Restart to Update**.
+pub fn update_button(u: &kairo_core::UpdateStatus) -> Option<UpdateButton> {
+    use kairo_core::UpdateStatus as U;
+    let button = |label: String, enabled: bool| Some(UpdateButton { label, enabled });
+    match u {
+        U::Available { version } | U::Manual { version, .. } => {
+            button(format!("Download Kairo {version}"), true)
+        }
+        U::Downloading {
+            progress: Some(p), ..
+        } => button(format!("Downloading… {:.0}%", p * 100.0), false),
+        U::Downloading { .. } => button("Downloading…".into(), false),
+        U::Ready { version } => button(format!("Restart to Update to {version}"), true),
+        U::Installing { .. } => button("Installing…".into(), false),
+        _ => None,
+    }
+}
+
+/// The button pressed: does what it says for the state the updater is in now.
+pub fn update_pressed(svc: &kairo_core::Service) {
+    use kairo_core::UpdateStatus as U;
+    let rt = svc.runtime();
+    match svc.snapshot().update {
+        U::Available { .. } => {
+            rt.spawn(svc.download_update());
+        }
+        U::Ready { .. } => {
+            rt.spawn(svc.restart_to_update());
+        }
+        U::Manual { url, .. } => open_in_browser(&url),
+        _ => {}
+    }
+}
+
+/// Opens a web page in the desktop's browser.
+pub fn open_in_browser(url: &str) {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(opener)
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use kairo_core::UpdateStatus as U;
+
+    #[test]
+    fn the_foot_offers_download_then_progress_then_restart() {
+        let v = || "0.3.1".to_owned();
+        let b = |u: U| update_button(&u);
+        assert_eq!(b(U::Idle), None);
+        assert_eq!(b(U::Checking), None);
+        assert_eq!(
+            b(U::UpToDate {
+                checked: "10:00".into()
+            }),
+            None
+        );
+        assert_eq!(
+            b(U::Available { version: v() }),
+            Some(UpdateButton {
+                label: "Download Kairo 0.3.1".into(),
+                enabled: true
+            })
+        );
+        assert_eq!(
+            b(U::Downloading {
+                version: v(),
+                progress: Some(0.42)
+            }),
+            Some(UpdateButton {
+                label: "Downloading… 42%".into(),
+                enabled: false
+            })
+        );
+        assert_eq!(
+            b(U::Ready { version: v() }),
+            Some(UpdateButton {
+                label: "Restart to Update to 0.3.1".into(),
+                enabled: true
+            })
+        );
+        assert_eq!(
+            b(U::Failed {
+                message: "x".into()
+            }),
+            None
+        );
+    }
 }

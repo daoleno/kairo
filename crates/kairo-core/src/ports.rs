@@ -207,6 +207,13 @@ mod tests {
         assert_eq!(h.pid, Some(std::process::id()));
         assert!(h.name.is_some());
         drop(l);
-        assert!(holder(port).is_none());
+        // The kernel lets go of a closed listener at once, but another test
+        // of this process may bind and drop its own sockets meanwhile: look a
+        // few times before calling it held.
+        let free = (0..20).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            holder(port).is_none()
+        });
+        assert!(free, "a closed listener is no holder");
     }
 }

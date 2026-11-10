@@ -121,18 +121,50 @@ pub fn build_applied(
     settings: &Settings,
     taken: &dyn Fn(u16) -> bool,
 ) -> Result<(String, Option<crate::ai::Applied>), ConfigError> {
+    build_full(profile, override_text, settings, taken).map(|b| (b.text, b.applied))
+}
+
+/// A built config and what Kairo did to it.
+#[derive(Debug, Clone)]
+pub struct Built {
+    pub text: String,
+    /// What the AI layer did (`None`: it is off, or there was nothing to route through).
+    pub applied: Option<crate::ai::Applied>,
+    /// Routes (ids) left out because their exit is not in the config.
+    pub skipped_routes: Vec<String>,
+}
+
+/// [`build_applied`], with the routes' outcome too.
+pub fn build_full(
+    profile: &str,
+    override_text: &str,
+    settings: &Settings,
+    taken: &dyn Fn(u16) -> bool,
+) -> Result<Built, ConfigError> {
     let mut config = parse_mapping(profile).map_err(ConfigError::Profile)?;
     let avoid = [settings.mixed_port, settings.controller_port];
     for (from, to) in move_taken_inbounds(&mut config, taken, &avoid) {
         log::info!("the profile's local port {from} is taken: the core uses {to}");
     }
     let patch = parse_mapping(override_text).map_err(ConfigError::Override)?;
-    // AI on its own exit, local models off the proxy. It goes in before the
-    // override, so the override's `prepend-rules` still come first and a
-    // `rules:` of its own replaces everything, as it always did. "All
-    // Traffic" is then rules with the Location as the rest (see `core_mode`).
+    // AI on its own exit, local models off the proxy, the person's routes for
+    // apps and sites. It goes in before the override, so the override's
+    // `prepend-rules` still come first and a `rules:` of its own replaces
+    // everything, as it always did. "All Traffic" is then rules with the
+    // Location as the rest (see `core_mode`).
     let all_traffic = settings.mode == crate::settings::Mode::Global;
-    let applied = crate::ai::apply(&mut config, &settings.ai, &settings.tray_group, all_traffic);
+    let applied = crate::ai::apply_with(
+        &mut config,
+        &settings.ai,
+        &settings.routes,
+        &settings.tray_group,
+        all_traffic,
+    );
+    let skipped_routes = match &applied {
+        Some(a) => a.skipped_routes.clone(),
+        // The layer is off: the routes still apply.
+        None => crate::ai::apply_routes(&mut config, &settings.routes, &settings.tray_group),
+    };
     merge(&mut config, patch);
     apply_settings(&mut config, settings);
     // No group of locations to send the rest through (a bare list of nodes):
@@ -140,10 +172,11 @@ pub fn build_applied(
     if all_traffic && settings.ai.enabled && applied.as_ref().is_none_or(|a| a.main.is_none()) {
         set(&mut config, "mode", "global");
     }
-    Ok((
-        serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"),
+    Ok(Built {
+        text: serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"),
         applied,
-    ))
+        skipped_routes,
+    })
 }
 
 /// The mode the core runs for a setting. mihomo's own `global` ignores the

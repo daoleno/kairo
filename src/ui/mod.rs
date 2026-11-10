@@ -1,6 +1,7 @@
 //! Kairo's styled component layer over `nsh_base`: tokens, the type scale and
 //! the controls every page composes. Pages never restyle base components.
 
+pub mod charts;
 pub mod icons;
 pub mod toolbar;
 
@@ -34,6 +35,29 @@ pub fn graph_up() -> AdaptiveColor {
 }
 pub fn subtle() -> AdaptiveColor {
     token("subtle", theme().muted)
+}
+
+// Chart series: Ember only for AI (the focal series), the others stay quiet.
+pub fn chart_ai() -> AdaptiveColor {
+    token("chart-ai", theme().primary)
+}
+pub fn chart_rest() -> AdaptiveColor {
+    token("chart-rest", theme().muted_foreground)
+}
+pub fn chart_downloads() -> AdaptiveColor {
+    token("chart-downloads", theme().muted_foreground)
+}
+pub fn chart_direct() -> AdaptiveColor {
+    token("chart-direct", theme().muted)
+}
+pub fn chart_neutral() -> AdaptiveColor {
+    token("chart-neutral", theme().muted_foreground)
+}
+pub fn chart_grid() -> AdaptiveColor {
+    token("chart-grid", theme().border)
+}
+pub fn chart_bad() -> AdaptiveColor {
+    token("chart-bad", theme().destructive)
 }
 
 pub fn radius_control() -> Points {
@@ -426,6 +450,31 @@ pub fn card() -> View {
         .border_color(move || theme().border)
         .bg(move || theme().card)
         .overflow_hidden()
+}
+
+/// A soft, borderless rounded surface (Home's cards and tables).
+pub fn card_soft() -> View {
+    view()
+        .rounded(px(20.0))
+        .bg(move || theme().muted)
+        .overflow_hidden()
+}
+
+/// A flag, as the emoji of its country; Taiwan's is drawn: Apple's emoji font
+/// leaves it out on Macs set to some regions, and a missing-glyph box is worse
+/// than a picture.
+pub fn flag(flag: impl Into<String>, size: f32) -> AnyElement {
+    let flag = flag.into();
+    if flag == "🇹🇼" {
+        // Red field, blue canton, a white sun: 3:2.
+        let uri = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='20' viewBox='0 0 30 20'><rect width='30' height='20' rx='2' fill='%23fe0000'/><rect width='15' height='10' rx='2' fill='%23000095'/><rect x='6' width='9' height='10' fill='%23000095'/><circle cx='7.5' cy='5' r='3.1' fill='%23fff'/><circle cx='7.5' cy='5' r='2.2' fill='%23000095'/><circle cx='7.5' cy='5' r='1.8' fill='%23fff'/></svg>";
+        return svg(uri)
+            .w(px(size * 1.3))
+            .h(px(size * 0.87))
+            .flex_shrink_0()
+            .into_element();
+    }
+    text(flag).text_size(px(size)).into_element()
 }
 
 /// A hairline separator.

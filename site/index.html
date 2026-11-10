@@ -179,10 +179,10 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     </div>
     <figure class="hero-shot">
       <div class="window">
-        <img class="shot-light" src="shots/home-light.webp" width="1100" height="780" alt="Kairo's Home: a tile for each AI service with the country it sees and the tools using it, then the Location, AI exit, Route and Apps &amp; Sites rows.">
-        <img class="shot-dark" src="shots/home-dark.webp" width="1100" height="780" alt="Kairo's Home in dark mode." loading="lazy">
+        <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo's Home: the connect switch with mode and apps, three exits (AI, Everything else, Downloads) with a country and how each is doing, and a row for each AI service with what Kairo measured.">
+        <img class="shot-dark" src="shots/home-dark.webp" width="1180" height="760" alt="Kairo's Home in dark mode." loading="lazy">
       </div>
-      <figcaption><b>Home</b> <span style="color:var(--muted)">· one tile per AI service: what Kairo measured, nothing more</span></figcaption>
+      <figcaption><b>Home</b> <span style="color:var(--muted)">· three exits, and one row per AI service: what Kairo measured, nothing more</span></figcaption>
     </figure>
   </div>
 
@@ -190,39 +190,46 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     <div class="gallery">
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/activity-light.webp" width="1100" height="330" alt="Activity: Claude, Codex and Cursor on the left, the AI exit in the middle, ChatGPT, Claude and Cursor on the right, joined by lines as thick as the traffic." loading="lazy">
-          <img class="shot-dark" src="shots/activity-dark.webp" width="1100" height="330" alt="Activity in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/activity-light.webp" width="1180" height="1130" alt="Activity: traffic per hour stacked by the exit it left through, the top apps, each AI service's share, and a reachability row per service for the day." loading="lazy">
+          <img class="shot-dark" src="shots/activity-dark.webp" width="1180" height="1130" alt="Activity in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Activity</b> <span>· which tool talks to which service, and the way it goes</span></figcaption>
+        <figcaption><b>Activity</b> <span>· how much went through which exit, which apps and AI services used it, and how each service held up today. Recorded on your computer, kept 30 days</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/detail-light.webp" width="1100" height="1040" alt="The Claude tile opened: reachable, the API answers in 498 ms, the country it sees, and a connection held open for 90 seconds." loading="lazy">
-          <img class="shot-dark" src="shots/detail-dark.webp" width="1100" height="1040" alt="The service detail in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/aiservice-light.webp" width="1180" height="860" alt="One AI service: reachability for every hour of the week, the API response time, and the country the service saw." loading="lazy">
+          <img class="shot-dark" src="shots/aiservice-dark.webp" width="1180" height="860" alt="One AI service in dark mode." loading="lazy">
         </div>
-        <figcaption><b>What was measured</b> <span>· reachable, API, country, a connection held open</span></figcaption>
+        <figcaption><b>Every AI service</b> <span>· a week of checks: reachable each hour, how fast the API answered, which country it saw</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/location-light.webp" width="1180" height="760" alt="The Location popover: search, Fastest, and places grouped by region with their delays." loading="lazy">
-          <img class="shot-dark" src="shots/location-dark.webp" width="1180" height="760" alt="Locations in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/exits-light.webp" width="1180" height="1130" alt="Exits: the three exits, the countries with their best servers, and under them the quality of the exit: response time, failed tests and changes." loading="lazy">
+          <img class="shot-dark" src="shots/exits-dark.webp" width="1180" height="1130" alt="Exits in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Locations</b> <span>· the AI exit has its own row and stays when this changes</span></figcaption>
+        <figcaption><b>Exits</b> <span>· AI, everything else and downloads each get a country; the AI exit stays when the others change. Below: how the server held up, and every switch</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/groups-light.webp" width="1180" height="760" alt="Groups: the subscription's groups, and the selected group's members with their delays." loading="lazy">
-          <img class="shot-dark" src="shots/groups-dark.webp" width="1180" height="760" alt="Groups in dark mode." loading="lazy">
+          <img class="shot-light" src="shots/profiles-light.webp" width="1180" height="980" alt="Subscriptions: usage, what is left, the recent pace, and a chart of use so far with where it ends if the pace continues." loading="lazy">
+          <img class="shot-dark" src="shots/profiles-dark.webp" width="1180" height="980" alt="Subscriptions in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Advanced</b> <span>· every group, rule, connection and log, as mihomo has them</span></figcaption>
+        <figcaption><b>Subscriptions</b> <span>· usage and expiry, and whether the data lasts until the plan ends</span></figcaption>
+      </figure>
+      <figure>
+        <div class="window">
+          <img class="shot-light" src="shots/settings-light.webp" width="1180" height="760" alt="Settings: appearance, launch at login, how apps follow Kairo, and the AI switches." loading="lazy">
+          <img class="shot-dark" src="shots/settings-dark.webp" width="1180" height="760" alt="Settings in dark mode." loading="lazy">
+        </div>
+        <figcaption><b>Settings</b> <span>· a short list; groups, rules, logs and DNS are one click away under Advanced</span></figcaption>
       </figure>
     </div>
 
     <div class="facts">
-      <div><b>One exit, pinned</b><span>AI tools stay on it when the Location changes. Open connections are never cut.</span></div>
-      <div><b>Measured, not promised</b><span>Reachable, API answer, the country a service sees, a connection held for 90 seconds.</span></div>
+      <div><b>One exit, pinned</b><span>AI tools stay on it when everything else changes. Open connections are never cut.</span></div>
+      <div><b>Measured, not promised</b><span>Reachable, API answer, the country a service sees, a connection held for 90 seconds. Kept hour by hour for 30 days, on this computer only.</span></div>
       <div><b>Direct where it should be</b><span>Domestic AI goes straight out. Local models never leave your computer.</span></div>
-      <div><b>mihomo built in</b><span>The official core ships inside and updates with the app.</span></div>
+      <div><b>Updates itself</b><span>When a new version is out, a Download button appears in the sidebar. mihomo ships inside and updates with the app.</span></div>
     </div>
     <p class="note">Kairo shows what a service sees. Where you are, and the service's own terms, still apply.</p>
   </section>

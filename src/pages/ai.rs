@@ -9,7 +9,7 @@ use kairo_core::ai::{self, AiService};
 use kairo_core::ai_check::{self, Api, Check, Country, Hold};
 use kairo_core::places;
 use kairo_core::service::{AiAlert, State};
-use nsh_base::{popover, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::store::store;
@@ -150,6 +150,7 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
         .collect()
 }
 
+#[cfg(test)]
 /// The line under the board's title.
 pub fn summary(tiles: &[Tile], checking: bool) -> String {
     let look = tiles
@@ -238,6 +239,36 @@ pub fn exit_place() -> Option<places::Place> {
     })
 }
 
+/// The place Downloads go through now.
+pub fn downloads_place() -> Option<places::Place> {
+    let store = store();
+    store.state.with(|_| ());
+    store.proxies.with(|_| ());
+    let name = store.state.with(|s| s.downloads.node.clone())?;
+    store.proxies.with(|p| {
+        p.0.groups
+            .iter()
+            .flat_map(|g| g.members.iter())
+            .find(|m| m.name == name && !m.is_group)
+            .map(places::place)
+    })
+}
+
+/// Downloads follow the fastest place by themselves.
+pub fn downloads_fastest() -> bool {
+    store().state.with(|s| s.downloads.fastest)
+}
+
+pub fn set_downloads(name: String) {
+    let store = store();
+    store.run(store.svc().set_downloads_exit(name));
+}
+
+pub fn downloads_to_fastest() {
+    let store = store();
+    store.run(store.svc().downloads_follow_fastest());
+}
+
 fn tone_color(t: Tone) -> AdaptiveColor {
     match t {
         Tone::Ok => ui::success(),
@@ -247,69 +278,439 @@ fn tone_color(t: Tone) -> AdaptiveColor {
     }
 }
 
-/// What to show on Home between the switch and the choices.
-pub fn board() -> impl IntoElement {
-    let store = store();
-    let selected = signal(None::<&'static str>);
-    let tiles = computed(move || {
-        store
-            .state
-            .with(|s| store.activity.with(|a| tiles(s, &a.0)))
-    });
-    let checking = move || store.state.with(|s| s.ai.checking);
-    when(on, move || {
-        view()
-            .gap_3()
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap_3()
-                    .px_1()
-                    .child(ui::section_label("AI"))
-                    .child(
-                        ui::muted(move || -> SharedString {
-                            summary(&tiles.get(), checking()).into()
-                        })
-                        .flex_1(),
-                    )
-                    .child(
-                        ui::link_btn(move || -> SharedString {
-                            if checking() {
-                                "Checking…".into()
-                            } else {
-                                "Check again".into()
-                            }
-                        })
-                        .disabled(checking)
-                        .on_press(move || store.run(store.svc().check_ai())),
-                    ),
-            )
-            .child(alerts(selected, tiles))
-            .child(grid(selected, tiles))
-            .child(when(
-                move || selected.get().is_some(),
-                move || detail(selected),
-            ))
-            .child(lanes())
+/// A fix Kairo offers on a row, one button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fix {
+    /// The service goes somewhere other than the AI exit: send it there.
+    UseAiExit,
+    /// The tool does not go through Kairo: take every app (TUN).
+    UseEveryApp,
+}
+
+/// One row of the table on Home.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub mono: &'static str,
+    pub tone: Tone,
+    pub status: String,
+    pub sees_flag: String,
+    pub sees: String,
+    /// What it sees is not where the others are.
+    pub odd: bool,
+    pub goes: String,
+    pub used_by: String,
+    pub fix: Option<Fix>,
+}
+
+/// Where a service's traffic goes, in the exits' names, and whether that is a
+/// problem: the AI exit is where AI belongs.
+pub fn goes_through(state: &State, service: &AiService) -> (String, bool) {
+    if state.settings.mode == kairo_core::Mode::Direct {
+        return ("Direct".into(), true);
+    }
+    match site_choice(state, service) {
+        Some(label) if label != "AI exit" => (label, true),
+        _ => ("AI exit".into(), false),
+    }
+}
+
+/// The routes the user set for this service's sites in Apps & Sites.
+fn site_routes<'a>(state: &'a State, service: &AiService) -> Vec<&'a kairo_core::routes::Route> {
+    state
+        .settings
+        .routes
+        .iter()
+        .filter(|r| match &r.kind {
+            kairo_core::routes::RouteKind::Site { domain } => service
+                .suffixes
+                .iter()
+                .any(|s| domain == s || domain.ends_with(&format!(".{s}"))),
+            _ => false,
+        })
+        .collect()
+}
+
+/// What the user chose for this service's sites in Apps & Sites, if anything,
+/// in the exits' names.
+fn site_choice(state: &State, service: &AiService) -> Option<String> {
+    use kairo_core::routes::RouteExit as E;
+    site_routes(state, service).first().map(|r| match &r.exit {
+        E::Ai | E::Usual => "AI exit".to_owned(),
+        E::Everything => "Everything else".to_owned(),
+        E::Downloads => "Downloads".to_owned(),
+        E::Direct => "Direct".to_owned(),
+        E::Block => "Blocked".to_owned(),
+        E::Node(n) => places::split_flag(n).1.trim().to_owned(),
     })
 }
 
-/// What happened to the exit, and which service sees another country.
-fn alerts(selected: Signal<Option<&'static str>>, tiles: Memo<Vec<Tile>>) -> impl IntoElement {
+pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
+    let odd = ai_check::odd_ones(&state.ai.checks);
+    tiles(state, tally)
+        .into_iter()
+        .map(|t| {
+            let service = ai::SERVICES
+                .iter()
+                .find(|s| s.id == t.id)
+                .expect("a tile is of a service");
+            let check = state.ai.checks.iter().find(|c| c.service == t.id);
+            let is_odd = odd.as_ref().is_some_and(|(_, ids)| ids.contains(&t.id));
+            let (goes, off_exit) = goes_through(state, service);
+            let country = check.and_then(|c| {
+                c.country.code().map(|code| {
+                    let name = ai_check::country_name(code);
+                    match c.country {
+                        Country::Estimated { .. } => format!("≈ {name}"),
+                        _ => name.to_owned(),
+                    }
+                })
+            });
+            let (status, sees_flag, sees, tone) = match t.tone {
+                Tone::Idle => (t.line1.clone(), "◎".to_owned(), "—".to_owned(), Tone::Idle),
+                Tone::Bad => (
+                    "Unreachable".to_owned(),
+                    "◎".to_owned(),
+                    "—".to_owned(),
+                    Tone::Bad,
+                ),
+                Tone::Look if !check.is_some_and(|c| c.reachable) => (
+                    "Unreachable".to_owned(),
+                    "◎".to_owned(),
+                    "—".to_owned(),
+                    Tone::Bad,
+                ),
+                _ => {
+                    let api_trouble = matches!(
+                        check.map(|c| &c.api),
+                        Some(Api::Unexpected { .. } | Api::Unreachable { .. })
+                    );
+                    (
+                        if api_trouble {
+                            "API not answering".to_owned()
+                        } else {
+                            "Reachable".to_owned()
+                        },
+                        t.flag.clone(),
+                        country.clone().unwrap_or_else(|| "—".into()),
+                        if api_trouble { Tone::Look } else { Tone::Ok },
+                    )
+                }
+            };
+            let bypassing = state.bypass.iter().any(|b| b.service == Some(t.id));
+            let fix = if bypassing {
+                Some(Fix::UseEveryApp)
+            } else {
+                (off_exit && state.settings.mode != kairo_core::Mode::Direct)
+                    .then_some(Fix::UseAiExit)
+            };
+            let (goes, status, sees_flag, sees, tone) = if bypassing {
+                (
+                    "Direct".to_owned(),
+                    "Not through Kairo".to_owned(),
+                    "◎".to_owned(),
+                    "your own network".to_owned(),
+                    Tone::Bad,
+                )
+            } else {
+                (goes, status, sees_flag, sees, tone)
+            };
+            Row {
+                id: t.id,
+                name: t.name,
+                mono: t.mono,
+                tone,
+                status,
+                sees_flag,
+                sees,
+                odd: is_odd,
+                goes,
+                used_by: if t.line2 == "Not where the others are"
+                    || t.line2.starts_with("Its API")
+                    || t.line2 == "No answer"
+                    || t.line2 == "Estimated"
+                    || t.line2 == "Not in use"
+                {
+                    String::new()
+                } else {
+                    t.line2.clone()
+                },
+                fix,
+            }
+        })
+        .collect()
+}
+
+/// The line under the table's title.
+pub fn table_summary(rows: &[Row], checking: bool) -> (String, bool) {
+    let problems = rows
+        .iter()
+        .filter(|r| matches!(r.tone, Tone::Bad | Tone::Look) || r.fix.is_some())
+        .count();
+    if problems > 0 {
+        return (
+            if problems == 1 {
+                "1 problem".into()
+            } else {
+                format!("{problems} problems")
+            },
+            true,
+        );
+    }
+    let ok = rows.iter().filter(|r| r.tone == Tone::Ok).count();
+    if ok == 0 {
+        return (
+            if checking {
+                "Checking…".into()
+            } else {
+                "Not checked yet".into()
+            },
+            false,
+        );
+    }
+    // What was measured: where they answered and what they see.
+    let flags: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r.tone == Tone::Ok && r.sees != "—")
+        .map(|r| r.sees.as_str())
+        .collect();
+    let text = match (ok == rows.len(), flags.len()) {
+        (true, 1) => format!("All {ok} see {}", flags.iter().next().unwrap_or(&"")),
+        (true, _) => format!("All {ok} reachable"),
+        (false, _) => format!("{ok} of {} reachable", rows.len()),
+    };
+    (text, false)
+}
+
+/// What to show on Home under the exits: the AI services, one row each.
+pub fn board() -> impl IntoElement {
+    let store = store();
+    let selected = signal(None::<&'static str>);
+    let rows = computed(move || store.state.with(|s| store.activity.with(|a| rows(s, &a.0))));
+    let checking = move || store.state.with(|s| s.ai.checking);
+    when(on, move || {
+        view().gap_3().child(alerts()).child(
+            crate::ui::card_soft()
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_3()
+                        .px_5()
+                        .pt_4()
+                        .pb_2()
+                        .child(ui::body("AI").font_weight(FontWeight::SEMIBOLD))
+                        .child(
+                            text(move || -> SharedString {
+                                table_summary(&rows.get(), checking()).0.into()
+                            })
+                            .text_size(px(size::body()))
+                            .text_color(move || {
+                                if table_summary(&rows.get(), checking()).1 {
+                                    ui::warning()
+                                } else {
+                                    theme().muted_foreground
+                                }
+                            })
+                            .flex_1(),
+                        )
+                        .child(
+                            ui::capsule(
+                                move || -> SharedString {
+                                    if checking() {
+                                        "Checking…".into()
+                                    } else {
+                                        "Check Now".into()
+                                    }
+                                },
+                                false,
+                            )
+                            .h(px(30.0))
+                            .px_4()
+                            .disabled(checking)
+                            .on_press(move || store.run(store.svc().check_ai())),
+                        ),
+                )
+                .child(header_row())
+                .child(dynamic(move || {
+                    let rows = rows.get();
+                    untracked(move || {
+                        view()
+                            .children(rows.into_iter().map(move |r| table_row(r, selected)))
+                            .into_element()
+                    })
+                }))
+                .child(when(
+                    move || selected.get().is_some(),
+                    move || view().p_4().child(detail(selected)),
+                ))
+                .child(lanes()),
+        )
+    })
+}
+
+const COLS: [f32; 5] = [0.22, 0.20, 0.18, 0.17, 0.23];
+
+fn cell(i: usize) -> View {
+    view()
+        .w(percentage(COLS[i]))
+        .flex_shrink_0()
+        .min_w(px(0.0))
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .pr_2()
+}
+
+fn header_row() -> impl IntoElement {
+    let head = |i: usize, t: &'static str| {
+        cell(i).child(
+            ui::muted(t)
+                .text_size(px(size::small()))
+                .font_weight(FontWeight::MEDIUM),
+        )
+    };
+    view()
+        .flex_row()
+        .items_center()
+        .px_5()
+        .h(px(28.0))
+        .child(head(0, "Service"))
+        .child(head(1, "Status"))
+        .child(head(2, "Sees"))
+        .child(head(3, "Goes through"))
+        .child(head(4, "Used by").justify_end())
+}
+
+fn table_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement {
+    let id = r.id;
+    let tone = r.tone;
+    let problem = matches!(tone, Tone::Bad | Tone::Look) || r.fix.is_some();
+    let store = store();
+    nsh_base::button()
+        .w_full()
+        .accessibility_label(format!(
+            "{}: {} · sees {} · {}",
+            r.name, r.status, r.sees, r.goes
+        ))
+        .on_press(move || {
+            selected.set(if selected.get_untracked() == Some(id) {
+                None
+            } else {
+                Some(id)
+            })
+        })
+        .flex_row()
+        .items_center()
+        .px_5()
+        .min_h(px(42.0))
+        .border_t_1()
+        .border_color(move || theme().border.opacity(0.7))
+        .cursor_pointer()
+        .bg(move || {
+            if problem {
+                tone_color(if tone == Tone::Ok { Tone::Look } else { tone }).opacity(0.12)
+            } else {
+                AdaptiveColor::from(black().opacity(0.0))
+            }
+        })
+        .hover(|s| s.bg(move || theme().accent.opacity(0.5)))
+        .child(
+            cell(0)
+                .child(mono(r.mono))
+                .child(ui::body(r.name).number_of_lines(1)),
+        )
+        .child(
+            cell(1)
+                .child(ui::dot(move || tone_color(tone)))
+                .child(ui::body(r.status.clone()).number_of_lines(1)),
+        )
+        .child(
+            cell(2)
+                .child(ui::flag(r.sees_flag.clone(), size::large()))
+                .child(
+                    ui::body(r.sees.clone())
+                        .number_of_lines(1)
+                        .font_weight(if r.odd {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .text_color(move || {
+                            if r.odd {
+                                ui::warning()
+                            } else {
+                                theme().foreground
+                            }
+                        }),
+                ),
+        )
+        .child(
+            cell(3).child(
+                ui::muted(r.goes.clone())
+                    .text_size(px(size::body()))
+                    .number_of_lines(1),
+            ),
+        )
+        .child(
+            cell(4).justify_end().child(match r.fix {
+                Some(fix) => ui::capsule(
+                    match fix {
+                        Fix::UseAiExit => "Use AI Exit",
+                        Fix::UseEveryApp => "Use Every App",
+                    },
+                    true,
+                )
+                .h(px(28.0))
+                .px_3p5()
+                .on_press(move || apply_fix(store, id, fix))
+                .into_element(),
+                None => ui::muted(r.used_by.clone())
+                    .number_of_lines(1)
+                    .into_element(),
+            }),
+        )
+}
+
+/// Carries out a row's fix.
+fn apply_fix(store: crate::store::Store, id: &'static str, fix: Fix) {
+    match fix {
+        Fix::UseAiExit => use_ai_exit(store, id),
+        Fix::UseEveryApp => crate::pages::home::set_via(crate::pages::home::Via::Tun),
+    }
+}
+
+/// Sends the service's sites to the AI exit (drops the choices that took it
+/// elsewhere).
+fn use_ai_exit(store: crate::store::Store, id: &'static str) {
+    let Some(service) = ai::SERVICES.iter().find(|s| s.id == id) else {
+        return;
+    };
+    let ids: Vec<String> = store.state.with_untracked(|s| {
+        site_routes(s, service)
+            .into_iter()
+            .map(|r| r.id.clone())
+            .collect()
+    });
+    for rid in ids {
+        store.run(store.svc().remove_route(rid));
+    }
+}
+
+/// What happened to the exit, and the route being Direct.
+fn alerts() -> impl IntoElement {
     let store = store();
     dynamic(move || {
         let alert = store.state.with(|s| s.ai.alert.clone());
         let direct = store
             .state
             .with(|s| s.settings.mode == kairo_core::Mode::Direct);
-        let odd = store.state.with(|s| ai_check::odd_ones(&s.ai.checks));
-        let tiles = tiles.get();
         untracked(move || {
             let mut out = view().gap_2();
             if direct {
                 out = out.child(banner(
-                    "Route is Direct".to_owned(),
+                    "Mode is Direct".to_owned(),
                     "Everything goes out directly, so AI tools are not using the exit and nothing is checked."
                         .to_owned(),
                     vec![Some(
@@ -332,12 +733,12 @@ fn alerts(selected: Signal<Option<&'static str>>, tiles: Memo<Vec<Tile>>) -> imp
                             p.title
                         )
                     })
-                    .unwrap_or_else(|| "your Location".into());
+                    .unwrap_or_else(|| "Everything else".into());
                 let pin = place.map(|p| p.name);
                 out = out.child(banner(
                     format!("{was} is no longer in your subscription"),
                     format!(
-                        "AI now follows your Location ({now}). Sessions already open keep running."
+                        "AI now follows Everything else ({now}). Sessions already open keep running."
                     ),
                     vec![
                         pin.map(|name| {
@@ -351,30 +752,6 @@ fn alerts(selected: Signal<Option<&'static str>>, tiles: Memo<Vec<Tile>>) -> imp
                                 .into_element(),
                         ),
                     ],
-                ));
-            }
-            if let Some((majority, ids)) = odd {
-                let names: Vec<&str> = tiles
-                    .iter()
-                    .filter(|t| ids.contains(&t.id))
-                    .map(|t| t.name)
-                    .collect();
-                let first = ids.first().copied();
-                out = out.child(banner(
-                    format!(
-                        "{} {} a different country",
-                        names.join(" and "),
-                        if names.len() == 1 { "sees" } else { "see" }
-                    ),
-                    format!(
-                        "The others see {}. One exit can look different to services that share it.",
-                        ai_check::country_name(&majority)
-                    ),
-                    vec![Some(
-                        ui::capsule("Details", false)
-                            .on_press(move || selected.set(first))
-                            .into_element(),
-                    )],
                 ));
             }
             out.into_element()
@@ -402,100 +779,6 @@ fn banner(title: String, detail: String, actions: Vec<Option<AnyElement>>) -> im
         .children(actions.into_iter().flatten())
 }
 
-fn grid(selected: Signal<Option<&'static str>>, tiles: Memo<Vec<Tile>>) -> impl IntoElement {
-    dynamic(move || {
-        let tiles = tiles.get();
-        untracked(move || {
-            let mut rows = view().gap_3();
-            for chunk in tiles.chunks(3) {
-                let mut row = view().flex_row().gap_3();
-                for t in chunk {
-                    row = row.child(
-                        view()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(tile(t.clone(), selected)),
-                    );
-                }
-                // A short last row keeps the tiles' width.
-                for _ in chunk.len()..3 {
-                    row = row.child(view().flex_1());
-                }
-                rows = rows.child(row);
-            }
-            rows.into_element()
-        })
-    })
-}
-
-fn tile(t: Tile, selected: Signal<Option<&'static str>>) -> impl IntoElement {
-    let id = t.id;
-    let tone = t.tone;
-    let on = move || selected.get() == Some(id);
-    let look = matches!(tone, Tone::Look | Tone::Bad);
-    nsh_base::button()
-        .w_full()
-        .accessibility_label(format!("{}: {} {}", t.name, t.line1, t.line2))
-        .selected(on)
-        .on_press(move || selected.set(if on() { None } else { Some(id) }))
-        .gap_3()
-        .p_3()
-        .rounded(px(20.0))
-        .cursor_pointer()
-        .bg(move || {
-            if look {
-                tone_color(tone).opacity(0.14)
-            } else {
-                theme().muted
-            }
-        })
-        .hover(|s| s.bg(move || theme().accent))
-        .style_when(on, |s| {
-            s.outline(px(2.0)).outline_color(move || theme().primary)
-        })
-        .focus(|s| s.outline(px(3.0)).outline_color(move || theme().ring))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .child(mono(t.mono))
-                .child(
-                    ui::body(t.name)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .flex_1()
-                        .number_of_lines(1),
-                )
-                .child(ui::dot(move || tone_color(tone))),
-        )
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .child(text(t.flag).text_size(px(26.0)))
-                .child(
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .child(
-                            ui::body(t.line1)
-                                .font_weight(if look {
-                                    FontWeight::SEMIBOLD
-                                } else {
-                                    FontWeight::NORMAL
-                                })
-                                .number_of_lines(1),
-                        )
-                        .child(
-                            ui::muted(t.line2)
-                                .text_size(px(size::small()))
-                                .number_of_lines(1),
-                        ),
-                ),
-        )
-}
-
 /// The service's initial, in a soft circle.
 pub fn mono(s: &'static str) -> impl IntoElement {
     view()
@@ -520,40 +803,25 @@ fn lanes() -> impl IntoElement {
         untracked(move || {
             view()
                 .flex_row()
+                .items_center()
                 .gap_3()
-                .child(lane(
-                    "Stays on this computer",
-                    "Ollama, LM Studio and your own network are never proxied.",
-                ))
-                .child(lane(
-                    if domestic {
-                        "Goes direct"
+                .px_5()
+                .h(px(36.0))
+                .border_t_1()
+                .border_color(move || theme().border.opacity(0.7))
+                .child(
+                    ui::muted(if domestic {
+                        "Direct: Kimi, DeepSeek, Doubao, Tongyi"
                     } else {
-                        "Domestic AI"
-                    },
-                    if domestic {
-                        "Kimi, DeepSeek, Doubao and Tongyi go straight out."
-                    } else {
-                        "Kimi, DeepSeek, Doubao and Tongyi follow your subscription."
-                    },
-                ))
+                        "Kimi, DeepSeek, Doubao, Tongyi follow your subscription"
+                    })
+                    .flex_1()
+                    .number_of_lines(1),
+                )
+                .child(ui::muted("On this computer: Ollama, LM Studio").number_of_lines(1))
                 .into_element()
         })
     })
-}
-
-fn lane(title: &'static str, detail: &'static str) -> impl IntoElement {
-    view()
-        .flex_1()
-        .min_w(px(0.0))
-        .gap_0p5()
-        .px_4()
-        .py_3()
-        .rounded(px(18.0))
-        .border_1()
-        .border_color(move || theme().border)
-        .child(ui::body(title).font_weight(FontWeight::MEDIUM))
-        .child(ui::muted(detail).text_size(px(size::small())))
 }
 
 // --- A service in detail ------------------------------------------------------------
@@ -710,154 +978,6 @@ fn check_row(ok: Option<bool>, title: &'static str, value: String) -> AnyElement
         .child(ui::body(title).w(px(170.0)).flex_shrink_0())
         .child(ui::muted(value).flex_1().min_w(px(0.0)))
         .into_element()
-}
-
-// --- The AI exit -------------------------------------------------------------------
-
-/// The row on Home: where AI tools go out, apart from the Location.
-pub fn exit_row() -> impl IntoElement {
-    let store = store();
-    let open = signal(false);
-    let place = computed(exit_place);
-    let pinned = move || store.state.with(|s| s.settings.ai.exit.is_some());
-    let value = move || -> SharedString {
-        match place.get() {
-            Some(p) => format!("{} · {}", p.title, ui::delay_text(p.delay)).into(),
-            None => "—".into(),
-        }
-    };
-    popover()
-        .open(move || Some(open.get()))
-        .on_open_change(move |e: &nsh_base::PopoverEvent| {
-            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
-                open.set(*next);
-            }
-        })
-        .placement(Placement::Bottom)
-        .align(Align::End)
-        .offset(px(6.0))
-        .popup_class("transition-opacity duration-150")
-        .popup_starting_class(Some(SharedString::from("opacity-0")))
-        .trigger(
-            ui::row_view()
-                .cursor_pointer()
-                .child(
-                    text(move || {
-                        place
-                            .get()
-                            .and_then(|p| p.flag)
-                            .unwrap_or_else(|| "◎".into())
-                    })
-                    .text_size(px(size::large() + 2.0)),
-                )
-                .child(
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .gap_0p5()
-                        .child(ui::body("AI exit"))
-                        .child(ui::muted(move || -> SharedString {
-                            if pinned() {
-                                "Stays here when the Location changes".into()
-                            } else {
-                                "Follows your Location".into()
-                            }
-                        })),
-                )
-                .child(ui::muted(value).tabular_nums().number_of_lines(1))
-                .child(icon(Icon::ChevronDown, 12.0).text_color(move || theme().muted_foreground)),
-        )
-        .child(exit_picker(move || open.set(false)))
-}
-
-fn exit_picker(close: impl Fn() + Copy + 'static) -> impl IntoElement {
-    let store = store();
-    let query = signal(String::new());
-    let preferred = move || store.state.with(|s| s.settings.tray_group.clone());
-    let pinned = move || store.state.with(|s| s.settings.ai.exit.clone());
-    let list = move || {
-        let q = query.get().to_lowercase();
-        store.proxies.with(|p| {
-            let Some(g) = places::main_group(&p.0.groups, &preferred()) else {
-                return vec![];
-            };
-            let all: Vec<places::Place> = places::places(&p.0.groups, g)
-                .into_iter()
-                .filter(|p| {
-                    q.is_empty()
-                        || p.name.to_lowercase().contains(&q)
-                        || p.region.to_lowercase().contains(&q)
-                })
-                .collect();
-            places::by_region(&all)
-        })
-    };
-    view()
-        .w(px(360.0))
-        .max_h(move || px((nsh_core::element::window().height.0 - 340.0).clamp(220.0, 520.0)))
-        .rounded(px(22.0))
-        .bg(move || theme().popover)
-        .shadow_xl()
-        .border_1()
-        .border_color(move || theme().border.opacity(0.6))
-        .overflow_hidden()
-        .child(
-            view()
-                .p_3()
-                .child(ui::search_field(query, "Search locations")),
-        )
-        .child(
-            scroll().flex_shrink(1.0).child(
-                view()
-                    .px_2()
-                    .pb_2()
-                    .child(
-                        nsh_base::button()
-                            .on_press(move || {
-                                close();
-                                store.run(store.svc().ai_follow_location());
-                            })
-                            .flex_row()
-                            .items_center()
-                            .gap_3()
-                            .h(px(40.0))
-                            .px_3()
-                            .rounded(px(12.0))
-                            .cursor_pointer()
-                            .hover(|s| s.bg(move || theme().accent))
-                            .style_when(move || pinned().is_none(), |s| s.bg(ui::selection))
-                            .child(icon(Icon::Globe, 15.0).text_color(move || theme().primary))
-                            .child(
-                                ui::body("Follow my Location")
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .flex_1(),
-                            ),
-                    )
-                    .child(dynamic(move || {
-                        let regions = list();
-                        let pinned = pinned();
-                        untracked(move || {
-                            view().children(regions.into_iter().map(move |(region, places)| {
-                                let pinned = pinned.clone();
-                                view()
-                                    .child(ui::section_label(region).px_3().pt_3().pb_1())
-                                    .children(places.into_iter().map(move |p| {
-                                        let chosen =
-                                            pinned.as_ref().is_some_and(|e| e.name == p.name);
-                                        let name = p.name.clone();
-                                        let delay = ui::delay_text(p.delay).to_string();
-                                        crate::pages::home::place_line(p, chosen, delay).on_press(
-                                            move || {
-                                                close();
-                                                store.run(store.svc().set_ai_exit(name.clone()));
-                                            },
-                                        )
-                                    }))
-                            }))
-                        })
-                    })),
-            ),
-        )
 }
 
 #[cfg(test)]

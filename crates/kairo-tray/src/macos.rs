@@ -15,13 +15,18 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSData, NSSize, NSString};
 
-use crate::{Hooks, Model, act};
+use crate::{ExitId, Hooks, Model, act};
 
 const TAG_MODE: isize = 1; // + index
 const TAG_CORE: isize = 20;
 const TAG_SHOW: isize = 21;
 const TAG_QUIT: isize = 22;
-const TAG_NODE: isize = 1000; // + index
+const TAG_ALL: isize = 23;
+const TAG_TEST: isize = 24;
+const TAG_SETTINGS: isize = 25;
+const TAG_FASTEST: isize = 26;
+const TAG_REST: isize = 1000; // + index
+const TAG_AI: isize = 2000; // + index
 
 pub struct Ivars {
     svc: Service,
@@ -42,16 +47,31 @@ define_class!(
             let tag = item.tag();
             let iv = self.ivars();
             let model = iv.model.borrow().clone();
+            let choice = |id: ExitId, i: isize| {
+                model
+                    .exits
+                    .iter()
+                    .find(|e| e.id == id)
+                    .and_then(|e| e.choices.get(i as usize))
+                    .map(|c| c.name.clone())
+            };
             match tag {
                 t if (TAG_MODE..TAG_MODE + 3).contains(&t) => act::mode(&iv.svc, Mode::ALL[(t - TAG_MODE) as usize]),
                 TAG_CORE => act::connect(&iv.svc, !model.running),
                 TAG_SHOW => (iv.hooks.show)(),
                 TAG_QUIT => (iv.hooks.quit)(),
-                t if t >= TAG_NODE => {
-                    if let Some((_, choices, _)) = &model.group
-                        && let Some(c) = choices.get((t - TAG_NODE) as usize)
-                    {
-                        act::locate(&iv.svc, c.name.clone());
+                TAG_ALL => (iv.hooks.page)("exits"),
+                TAG_SETTINGS => (iv.hooks.page)("settings"),
+                TAG_TEST => act::test_again(&iv.svc),
+                TAG_FASTEST => act::locate(&iv.svc, String::new()),
+                t if t >= TAG_AI => {
+                    if let Some(name) = choice(ExitId::Ai, t - TAG_AI) {
+                        act::ai_exit(&iv.svc, name);
+                    }
+                }
+                t if t >= TAG_REST => {
+                    if let Some(name) = choice(ExitId::Rest, t - TAG_REST) {
+                        act::locate(&iv.svc, name);
                     }
                 }
                 _ => {}
@@ -117,53 +137,59 @@ fn symbol(item: Retained<NSMenuItem>, name: &str) -> Retained<NSMenuItem> {
 fn build(target: &Target, menu: &NSMenu, m: &Model) {
     let mtm = MainThreadMarker::from(target);
     menu.removeAllItems();
-    let status = item(target, mtm, &m.status, 0, false, None);
-    menu.addItem(&status);
-    menu.addItem(&NSMenuItem::separatorItem(mtm));
     menu.addItem(&symbol(
         item(
             target,
             mtm,
-            "Connected",
+            if m.running { "Connected" } else { &m.status },
             TAG_CORE,
             m.has_profile,
             Some(m.running),
         ),
         "power",
     ));
-    if let Some((group, choices, now)) = &m.group {
-        let holder = symbol(
-            item(
-                target,
-                mtm,
-                &format!("Location: {}", m.place),
-                0,
-                true,
-                None,
-            ),
-            "location",
+    if !m.ai.is_empty() {
+        menu.addItem(&item(target, mtm, &m.ai, 0, false, None));
+    }
+    menu.addItem(&NSMenuItem::separatorItem(mtm));
+    for e in &m.exits {
+        let holder = item(
+            target,
+            mtm,
+            &format!("{}: {}", e.title, e.place),
+            0,
+            true,
+            None,
         );
         unsafe { holder.setAction(None) };
-        let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(group));
+        let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(e.title));
         sub.setAutoenablesItems(false);
-        for (i, c) in choices.iter().enumerate() {
-            let checked = now.as_deref() == Some(c.name.as_str());
+        if let Some(on) = e.fastest {
+            sub.addItem(&symbol(
+                item(target, mtm, "Fastest", TAG_FASTEST, true, Some(on)),
+                "bolt",
+            ));
+            sub.addItem(&NSMenuItem::separatorItem(mtm));
+        }
+        let base = if e.id == ExitId::Ai { TAG_AI } else { TAG_REST };
+        for (i, c) in e.choices.iter().enumerate() {
             sub.addItem(&item(
                 target,
                 mtm,
                 &Model::choice_label(c),
-                TAG_NODE + i as isize,
+                base + i as isize,
                 true,
-                Some(checked),
+                Some(c.checked),
             ));
-            if i == 0 {
-                sub.addItem(&NSMenuItem::separatorItem(mtm));
-            }
         }
+        sub.addItem(&NSMenuItem::separatorItem(mtm));
+        sub.addItem(&item(target, mtm, "All Servers…", TAG_ALL, true, None));
+        sub.addItem(&item(target, mtm, "Test Again", TAG_TEST, true, None));
         holder.setSubmenu(Some(&sub));
         menu.addItem(&holder);
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
+    menu.addItem(&item(target, mtm, "Mode", 0, false, None));
     for (i, mode) in Mode::ALL.iter().enumerate() {
         menu.addItem(&item(
             target,
@@ -178,6 +204,10 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
     menu.addItem(&symbol(
         item(target, mtm, "Open Kairo", TAG_SHOW, true, None),
         "macwindow",
+    ));
+    menu.addItem(&symbol(
+        item(target, mtm, "Settings…", TAG_SETTINGS, true, None),
+        "gearshape",
     ));
     menu.addItem(&symbol(
         item(target, mtm, "Quit Kairo", TAG_QUIT, true, None),

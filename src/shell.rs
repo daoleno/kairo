@@ -16,32 +16,23 @@ const SIDEBAR_WIDTH: f32 = 212.0;
 fn page_icon(page: Page) -> Icon {
     match page {
         Page::Overview => Icon::Overview,
-        Page::Activity => Icon::Activity,
+        Page::Exits => Icon::Globe,
+        Page::Activity => Icon::Connections,
         Page::Apps => Icon::Layers,
-        Page::Proxies => Icon::Proxies,
         Page::Profiles => Icon::Profiles,
-        Page::Connections => Icon::Connections,
+        Page::Settings => Icon::Settings,
+        Page::Proxies => Icon::Proxies,
         Page::Rules => Icon::Rules,
         Page::Logs => Icon::Logs,
         Page::Dns => Icon::Dns,
-        Page::Settings => Icon::Settings,
+        Page::AiService => Icon::Connections,
     }
 }
 
 fn nav_item(page: Page) -> impl IntoElement {
     let store = store();
-    let selected = move || store.page.get() == page;
-    let count = move || match page {
-        Page::Connections => {
-            let n = store.live.with(|l| l.connections);
-            (n > 0).then(|| n.to_string())
-        }
-        Page::Profiles => {
-            let n = store.state.with(|s| s.profiles.profiles.len());
-            (n > 0).then(|| n.to_string())
-        }
-        _ => None,
-    };
+    // An Inspect view stands under Settings' row.
+    let selected = move || store.page.get().sidebar() == page;
     button()
         .selected(selected)
         .role(AccessibilityRole::Tab)
@@ -69,12 +60,6 @@ fn nav_item(page: Page) -> impl IntoElement {
                 .text_size(px(size::body()))
                 .flex_1()
                 .font_weight(FontWeight::MEDIUM),
-        )
-        .child(
-            text(move || count().unwrap_or_default())
-                .text_size(px(size::small()))
-                .tabular_nums()
-                .text_color(move || theme().muted_foreground),
         )
 }
 
@@ -114,15 +99,19 @@ fn core_footer() -> impl IntoElement {
                 .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
                 .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down))),
         )
-        // A downloaded Kairo update: one tap installs it and restarts.
-        .child(when(
-            move || {
-                store
-                    .state
-                    .with(|s| matches!(s.update, kairo_core::UpdateStatus::Ready { .. }))
-            },
-            pages::settings::update_button,
-        ))
+        // A newer Kairo: Download, its progress, then Restart to Update.
+        .child(dynamic(move || {
+            let b = store
+                .state
+                .with(|s| crate::chrome::update_button(&s.update));
+            untracked(move || match b {
+                Some(b) => ui::btn_icon(Icon::Download, b.label, ui::Variant::Primary)
+                    .disabled(!b.enabled)
+                    .on_press(move || crate::chrome::update_pressed(&store.svc()))
+                    .into_element(),
+                None => view().into_element(),
+            })
+        }))
 }
 
 fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
@@ -141,17 +130,13 @@ fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
 }
 
 fn sidebar() -> impl IntoElement {
-    let groups: [&[Page]; 3] = [
-        &[Page::Overview, Page::Activity, Page::Apps],
-        &[
-            Page::Proxies,
-            Page::Profiles,
-            Page::Connections,
-            Page::Rules,
-            Page::Logs,
-        ],
-        &[Page::Settings],
-    ];
+    let groups: [&[Page]; 1] = [&[
+        Page::Overview,
+        Page::Exits,
+        Page::Activity,
+        Page::Apps,
+        Page::Profiles,
+    ]];
     let glass = crate::chrome::glass_sidebar();
     view()
         .w(px(SIDEBAR_WIDTH))
@@ -188,6 +173,7 @@ fn sidebar() -> impl IntoElement {
                         .children(pages.iter().map(|p| nav_item(*p)))
                 })),
         )
+        .child(view().px_2().pb_2().child(nav_item(Page::Settings)))
         .child(core_footer())
 }
 
@@ -258,14 +244,15 @@ pub fn shell() -> impl IntoElement {
                     let page = store.page.get();
                     untracked(|| match page {
                         Page::Overview => pages::home::page().into_element(),
+                        Page::Exits => pages::exits::page().into_element(),
                         Page::Activity => pages::activity::page().into_element(),
                         Page::Apps => pages::apps::page().into_element(),
                         Page::Proxies => pages::proxies::page().into_element(),
                         Page::Profiles => pages::profiles::page().into_element(),
-                        Page::Connections => pages::connections::page().into_element(),
                         Page::Rules => pages::rules::page().into_element(),
                         Page::Logs => pages::logs::page().into_element(),
                         Page::Dns => pages::dns::page().into_element(),
+                        Page::AiService => pages::stats::ai_service().into_element(),
                         Page::Settings => pages::settings::page().into_element(),
                     })
                 })),

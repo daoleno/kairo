@@ -69,15 +69,12 @@ pub fn App() -> impl IntoElement {
 }
 
 /// The pages ⌘1… open, in the sidebar's order.
-pub const GO: [Page; 8] = [
+pub const GO: [Page; 5] = [
     Page::Overview,
+    Page::Exits,
     Page::Activity,
     Page::Apps,
-    Page::Proxies,
     Page::Profiles,
-    Page::Connections,
-    Page::Rules,
-    Page::Logs,
 ];
 
 /// Fastest, then the quickest places (the rest are a search away on Home).
@@ -124,7 +121,7 @@ fn location_items(store: Store) -> Vec<MenuItem> {
         );
     }
     items.push(MenuItem::separator());
-    items.push(MenuItem::new("All Locations…").on_select(move || store.page.set(Page::Overview)));
+    items.push(MenuItem::new("All Locations…").on_select(move || store.page.set(Page::Exits)));
     items
 }
 
@@ -142,14 +139,12 @@ fn menus(store: Store) {
                 "Kairo",
                 [
                     MenuItem::role(MenuRole::About),
-                    match store.state.with(|s| s.update.clone()) {
-                        kairo_core::UpdateStatus::Ready { version } => {
-                            MenuItem::new(format!("Restart to Update to {version}")).on_select({
-                                let svc = svc.clone();
-                                move || store.run(svc.restart_to_update())
-                            })
-                        }
-                        _ => MenuItem::new("Check for Updates…").on_select({
+                    match store.state.with(|s| chrome::update_button(&s.update)) {
+                        Some(b) => MenuItem::new(b.label).disabled(!b.enabled).on_select({
+                            let svc = svc.clone();
+                            move || chrome::update_pressed(&svc)
+                        }),
+                        None => MenuItem::new("Check for Updates…").on_select({
                             let svc = svc.clone();
                             move || {
                                 store.run_then(svc.check_for_update(), move |r| {
@@ -232,11 +227,7 @@ fn menus(store: Store) {
         ];
         go.extend(GO.into_iter().enumerate().map(|(i, page)| {
             MenuItem::new(page.title())
-                .shortcut(
-                    [
-                        "mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8",
-                    ][i],
-                )
+                .shortcut(["mod+1", "mod+2", "mod+3", "mod+4", "mod+5"][i])
                 .on_select(move || store.page.set(page))
         }));
         menus.push(MenuItem::submenu("Go", go));

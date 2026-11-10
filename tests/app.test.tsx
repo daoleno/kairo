@@ -46,47 +46,50 @@ test("the link in, connected out: the fastest location picked by itself", async 
   await app.type("text:https://… (your provider's subscription link)", SUB);
   await app.press("text:Connect");
   await app.waitFor("text:Connected", slow);
-  // Automatic: a place with its delay, and the plan from the provider's header.
-  await app.waitUntil(() => has(app.texts(), (t) => / · \d+ ms · automatic$/.test(t)), slow);
+  // Home: three exits, each with a place and how it is doing; the plan from the provider's header.
+  await app.waitUntil(() => has(app.texts(), (t) => /^Fastest · \S/.test(t)), slow);
+  expect(app.texts()).toContain("AI");
+  expect(app.texts()).toContain("Everything else");
+  expect(app.texts()).toContain("Downloads");
   expect(has(app.texts(), (t) => t.startsWith("Demo Cloud · ") && t.includes("of 200 GB"))).toBe(true);
   expect(app.shows("text:Apps & Sites")).toBe(true);
+  // The tests are not on Home any more: no speed graph, no milliseconds.
+  expect(has(app.texts(), (t) => /^\d+ ms$/.test(t))).toBe(false);
 });
 
-test("location: a place of one's own, then Fastest again", async () => {
+test("exits: a place of one's own for everything else, then Fastest again", async () => {
   const app = await open("..", desktop);
   await app.waitFor("text:Connected", slow);
-  await app.press("text:Location");
-  await app.waitFor("text:Search locations");
+  await app.press("Exits");
+  await app.waitFor("text:Where traffic leaves", slow);
+  // The tiles keep to a word; the servers' delays are in the picker, under each country.
+  await app.press("text:Everything else >> nth=0");
   await app.waitUntil(() => has(app.texts(), (t) => /^\d+ ms$/.test(t)), slow);
-  await app.type("text:Search locations", "Seattle");
-  await app.press("🇺🇸 Seattle 02");
-  await app.waitFor("text:Chosen by you", slow);
-  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("🇺🇸 Seattle 02")), slow);
-  await app.press("text:Location");
+  await app.press("text:All servers…");
+  await app.waitFor("text:Tokyo 02", slow);
+  await app.press("text:Tokyo 02");
+  await app.waitUntil(() => has(app.texts(), (t) => t === "Chosen · Tokyo 02"), slow);
   await app.press("text:Fastest");
-  await app.waitFor("text:Fastest, automatically", slow);
+  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Fastest · ")), slow);
+  // Quality is under the servers; with nothing recorded yet it says so.
+  expect(app.shows("text:Quality")).toBe(true);
+  await app.waitFor("text:Collecting data", slow);
 });
 
-test("route: Smart, All, Direct in plain words", async () => {
+test("mode: Smart, Everything, Direct, one press each, and Kairo stays connected", async () => {
   const app = await open("..", desktop);
-  await app.waitFor("text:Connected", slow);
-  await app.press("text:All");
-  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Everything goes through")), slow);
-  await app.press("text:Direct");
-  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Everything goes direct")), slow);
-  await app.press("text:Smart");
-  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Local sites go direct")), slow);
+  await app.press("Home");
+  await app.waitFor("text:Mode", slow);
+  for (const word of ["Everything", "Direct", "Smart"]) {
+    await app.press(`text:${word} >> nth=0`);
+    await app.wait(700);
+    expect(app.shows("text:Connected")).toBe(true);
+    // The three stay where they were: the choice is a mark, not a new page.
+    expect(app.shows("text:Mode")).toBe(true);
+  }
 });
 
-test("apps & sites: the subscription's per-app choices", async () => {
-  const app = await open("..", desktop);
-  await app.press("Apps & Sites");
-  await app.waitFor("text:Streaming", slow);
-  expect(app.texts()).toContain("AI");
-  expect(app.texts()).toContain("Same as Location");
-});
-
-test("connect switch: off and on again", async () => {
+test("connect: off and on again, and two quick presses end where the last one points", async () => {
   const app = await open("..", desktop);
   await app.press("Home");
   await app.waitFor("text:Connected", slow);
@@ -94,11 +97,31 @@ test("connect switch: off and on again", async () => {
   await app.waitFor("text:Not Connected", slow);
   await app.press("Connect");
   await app.waitFor("text:Connected", slow);
+  // Off, then on again within a breath, before the screen has caught up: it is on.
+  await app.press("Connect");
+  await app.wait(130);
+  await app.press("Connect");
+  await app.wait(3000);
+  await app.waitFor("text:Connected", slow);
+  expect(app.shows("text:Not Connected")).toBe(false);
 });
 
-test("groups: every group in config order, delays tested", async () => {
+test("apps & sites: a site of one's own, and its removal", async () => {
   const app = await open("..", desktop);
-  await app.press("Groups");
+  await app.press("Apps & Sites");
+  await app.waitFor("text:Nothing set apart", slow);
+  await app.press("Add Site…");
+  await app.waitFor("text:Add a site", slow);
+  await app.type("text:example.com", "kairo-sites.test");
+  await app.press("Add");
+  await app.waitFor("text:kairo-sites.test", slow);
+  expect(has(app.texts(), (t) => /^1 choices?$/.test(t))).toBe(true);
+  expect(app.shows("text:Nothing set apart")).toBe(false);
+});
+
+test("groups: the subscription's own, under Settings, with a way back", async () => {
+  const app = await open("..", desktop);
+  await goTo(app, "Groups");
   await app.waitFor("text:Fallback", slow);
   const texts = app.texts();
   for (const g of ["Proxy", "Auto", "Asia", "United States", "Streaming", "Final"]) {
@@ -111,13 +134,21 @@ test("groups: every group in config order, delays tested", async () => {
   await app.waitUntil(() => !app.shows("text:Testing…"), slow);
 });
 
-test("rules: the running configuration's, searchable", async () => {
+test("rules: the running configuration's, searchable; the AI layer's come with their group", async () => {
   const app = await open("..", desktop);
-  await app.press("Rules");
+  await goTo(app, "Rules");
   await app.waitUntil(() => has(app.texts(), (t) => /^\d+ rules$/.test(t)), slow);
-  // The layer for AI tools comes first: its rules show with their group.
-  expect(app.texts()).toContain("claude.ai");
-  await app.type("text:Type, payload or target", "MATCH");
+  await app.type("text:Filter rules", "claude");
+  await app.waitUntil(() => app.texts().includes("claude.ai"), slow);
+  expect(app.texts()).toContain("Kairo AI");
+  expect(has(app.texts(), (t) => / of \d+$/.test(t))).toBe(true);
+});
+
+test("rules: a filter narrows to what it matches", async () => {
+  const app = await open("..", desktop);
+  await goTo(app, "Rules");
+  await app.waitUntil(() => has(app.texts(), (t) => /^\d+ rules$/.test(t)), slow);
+  await app.type("text:Filter rules", "MATCH");
   await app.waitUntil(() => has(app.texts(), (t) => / of \d+$/.test(t)), slow);
   expect(app.texts()).toContain("Match");
   expect(app.texts()).not.toContain("claude.ai");
@@ -125,13 +156,13 @@ test("rules: the running configuration's, searchable", async () => {
 
 test("logs: the core's lines, live", async () => {
   const app = await open("..", desktop);
-  await app.press("Logs");
+  await goTo(app, "Diagnostics");
   // Debug shows the core's resolver at work: look something up, come back.
   await app.press("text:Debug");
   await goTo(app, "DNS");
   await app.type("text:example.com", "kairo-logs.test");
   await app.press("Query");
-  await app.press("Logs");
+  await goTo(app, "Diagnostics");
   await app.waitUntil(() => has(app.texts(), (t) => /^\d+ lines$/.test(t) && t !== "0 lines"), slow);
   await app.press("Pause");
   await app.waitUntil(() => has(app.texts(), (t) => t.endsWith("lines · paused")));
@@ -147,49 +178,57 @@ test("DNS: a lookup through the core's resolver", async () => {
   await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("localhost  A")), slow);
 });
 
-test("AI: a tile for each service on Home, the flow on Activity, the switches in Settings", async () => {
+test("AI: its exit beside the others, the flow on Activity, the switches in Settings, no promises", async () => {
   const app = await open("..", desktop);
+  const noPromises = () => {
+    for (const t of app.texts()) {
+      expect(/never (be )?(flagged|banned)|unlock|clean IP|safe/i.test(t)).toBe(false);
+    }
+  };
+  await app.press("Exits");
+  await app.waitFor("text:Where traffic leaves", slow);
+  // AI is an exit of its own: where it goes, and whether it stays when the Location changes.
+  await app.waitUntil(() => has(app.texts(), (t) => /· (follows Everything else|pinned )/.test(t)), slow);
+  expect(app.texts()).toContain("AI");
+  noPromises();
   await app.press("Home");
-  await app.waitFor("text:AI", slow);
-  for (const name of ["Claude", "ChatGPT", "Gemini", "Cursor", "Copilot"]) {
-    await app.waitFor(`text:${name}`, slow);
-  }
-  // What stays and what goes direct are said plainly.
-  expect(app.shows("text:Stays on this computer")).toBe(true);
-  expect(app.shows("text:Goes direct")).toBe(true);
-  // A tile opens its detail, with the note that the service's terms still apply.
-  await app.press("text:Claude");
-  await app.waitFor("text:Kairo shows what the service sees. Where you are, and the service's own terms, still apply.", slow);
-  expect(app.shows("text:A connection held open")).toBe(true);
-  await app.press("text:Claude");
-  // Nothing in the app promises anything.
-  for (const t of app.texts()) {
-    expect(/never (be )?(flagged|banned)|unlock|clean IP|safe/i.test(t)).toBe(false);
-  }
-  // Activity: nothing yet is an invitation, not an empty chart.
+  noPromises();
+  // Activity: by app, with what each talks to and where it goes through.
   await app.press("Activity");
-  await app.waitUntil(() => app.shows("text:No AI traffic yet") || app.shows("text:Which tools talk to which AI services, since Kairo opened."), slow);
+  await app.waitFor("text:By App", slow);
+  expect(app.shows("text:All Connections")).toBe(true);
+  for (const h of ["App", "Talks to", "Goes through", "Total"]) {
+    expect(app.texts()).toContain(h);
+  }
+  // Statistics: a fresh home has an hour to wait, and says so instead of drawing an empty chart.
+  expect(app.shows("text:Today")).toBe(true);
+  await app.waitFor("text:Collecting data", slow);
+  expect(app.shows("text:Clear History…")).toBe(false);
+  await app.press("text:7 days");
+  await app.waitFor("text:Collecting data", slow);
+  noPromises();
   await app.press("Settings");
   await app.waitFor("text:AI tools use one exit", slow);
   expect(app.shows("text:Domestic AI goes direct")).toBe(true);
-  expect(app.shows("text:Downloads follow the Location")).toBe(true);
+  noPromises();
   // What almost nobody changes is behind Advanced; what was cut is gone.
-  expect(app.shows("text:Proxy port")).toBe(false);
-  expect(app.shows("text:Start the core with Kairo")).toBe(false);
-  expect(app.shows("text:Locations from")).toBe(false);
+  expect(app.shows("text:Port (HTTP + SOCKS)")).toBe(false);
+  expect(app.shows("text:TUN stack")).toBe(false);
+  expect(app.shows("text:Log level")).toBe(false);
   await app.press("text:Advanced");
-  await app.waitFor("text:Proxy port", slow);
-  expect(app.shows("text:Locations from")).toBe(true);
-  expect(app.shows("text:Secret")).toBe(true);
-  await app.press("text:Advanced");
+  await app.waitFor("text:Port (HTTP + SOCKS)", slow);
+  expect(app.shows("text:The subscription's groups")).toBe(true);
+  expect(app.shows("text:Diagnostics")).toBe(true);
+  await app.press("text:General");
+  await app.waitFor("text:AI tools use one exit", slow);
 });
 
 test("settings: an edit waits for Apply, Revert puts it back", async () => {
   const app = await open("..", desktop);
   await app.press("Settings");
-  await app.waitFor("text:TUN Mode", slow);
+  await app.waitFor("text:Appearance", slow);
   await app.press("text:Advanced");
-  await app.waitFor("text:Controller port", slow);
+  await app.waitFor("text:Controller", slow);
   expect(has(app.texts(), (t) => t.startsWith("mihomo v") || t.startsWith("v1."))).toBe(true);
   expect(app.shows("text:Unapplied changes")).toBe(false);
   expect(app.value("id:mixed-port")).toBe(String(MIXED));
