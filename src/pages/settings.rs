@@ -33,14 +33,16 @@ thread_local! {
 }
 
 /// Settings › Advanced (where the Inspect views are opened from).
-pub fn show_advanced() {
+pub fn show_advanced(store: crate::store::Store) {
     TAB.with(|t| t.set(Tab::Advanced));
-    store().page.set(Page::Settings);
+    store.page.set(Page::Settings);
 }
 
-/// The toolbar's Back button of an Inspect view.
+/// The toolbar's Back button of an Inspect view (call it while the page is
+/// built: the store comes from the context here, not when the button is pressed).
 pub fn back() -> toolbar::Spec {
-    toolbar::button("back", "Settings", Glyph::Back, Icon::ChevronLeft, show_advanced)
+    let store = store();
+    toolbar::button("back", "Settings", Glyph::Back, Icon::ChevronLeft, move || show_advanced(store))
 }
 
 /// The typed settings, as text while they are edited.
@@ -137,7 +139,7 @@ pub fn page() -> impl IntoElement {
     // Leaving for an Inspect view keeps what was typed.
     cleanup(move || {
         let d = draft.get_untracked();
-        let keep = d != saved.get_untracked();
+        let keep = d != saved.get_untracked() && store.page.get_untracked().inspect();
         PENDING.with(|p| *p.borrow_mut() = keep.then_some(d));
     });
     let dirty = move || draft.with(|d| saved.with(|s| d != s));
