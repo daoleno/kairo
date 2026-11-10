@@ -26,7 +26,7 @@ $reported = & "$stage\mihomo.exe" -v | Select-Object -First 1
 if ($reported -notlike "Mihomo Meta $pinned *") { throw "the core reports '$reported', expected $pinned" }
 Copy-Item LICENSE "$stage\LICENSE.txt"
 @"
-Kairo $version: https://github.com/daoleno/kairo
+Kairo ${version}: https://github.com/daoleno/kairo
 Free software under the GNU GPL, version 3 or later (LICENSE.txt).
 
 It ships the mihomo core $pinned (mihomo.exe), the official MetaCubeX
