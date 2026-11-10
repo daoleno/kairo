@@ -1550,11 +1550,23 @@ mod tests {
         ]);
         let exe = install_windows(&dir, &zip, &tmp.path().join("work")).unwrap();
         assert_eq!(exe, dir.join("kairo.exe"));
-        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe")).unwrap(), "new kairo");
-        assert_eq!(std::fs::read_to_string(dir.join("mihomo.exe")).unwrap(), "new core");
-        assert_eq!(std::fs::read_to_string(dir.join("wintun.dll")).unwrap(), "wintun");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("kairo.exe")).unwrap(),
+            "new kairo"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("mihomo.exe")).unwrap(),
+            "new core"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("wintun.dll")).unwrap(),
+            "wintun"
+        );
         // What a running program held is still there, under another name.
-        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe.old")).unwrap(), "old kairo");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("kairo.exe.old")).unwrap(),
+            "old kairo"
+        );
         remove_leftovers(&dir);
         assert!(!dir.join("kairo.exe.old").exists());
         assert!(!dir.join("mihomo.exe.old").exists());
@@ -1569,7 +1581,10 @@ mod tests {
         std::fs::write(dir.join("kairo.exe"), "old kairo").unwrap();
         let zip = zip_of(&[("kairo.exe", "new kairo")]);
         assert!(install_windows(&dir, &zip, &tmp.path().join("work")).is_err());
-        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe")).unwrap(), "old kairo");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("kairo.exe")).unwrap(),
+            "old kairo"
+        );
     }
 
     #[test]
@@ -1587,8 +1602,14 @@ mod tests {
             ("zz/readme.txt", "licence"),
         ]);
         assert!(install_windows(&dir, &zip, &tmp.path().join("work")).is_err());
-        assert_eq!(std::fs::read_to_string(dir.join("kairo.exe")).unwrap(), "old kairo");
-        assert_eq!(std::fs::read_to_string(dir.join("mihomo.exe")).unwrap(), "old core");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("kairo.exe")).unwrap(),
+            "old kairo"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("mihomo.exe")).unwrap(),
+            "old core"
+        );
     }
 
     #[test]
@@ -1605,6 +1626,9 @@ mod tests {
                 dir: tmp.path().to_owned()
             }
         );
-        assert_eq!(found.package_key().unwrap().split('-').next(), Some("windows"));
+        assert_eq!(
+            found.package_key().unwrap().split('-').next(),
+            Some("windows")
+        );
     }
 }

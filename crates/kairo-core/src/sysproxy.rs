@@ -172,7 +172,9 @@ pub fn win_first_proxy(server: &str) -> (String, u16) {
     let first = server.split(';').next().unwrap_or("").trim();
     // `http=host:port` names the scheme; a bare `host:port` serves all.
     let addr = first.rsplit_once('=').map_or(first, |(_, a)| a);
-    let addr = addr.trim_start_matches("http://").trim_start_matches("socks=");
+    let addr = addr
+        .trim_start_matches("http://")
+        .trim_start_matches("socks=");
     match addr.rsplit_once(':') {
         Some((host, port)) => (host.to_owned(), port.parse().unwrap_or(0)),
         None => (addr.to_owned(), 0),
@@ -260,7 +262,8 @@ fn win_restore(w: &WinProxy) -> Result<(), String> {
 #[cfg(windows)]
 fn win_points_to(spec: &ProxySpec) -> bool {
     let w = win_read();
-    w.enabled && win_first_proxy(w.server.as_deref().unwrap_or("")) == (spec.host.clone(), spec.port)
+    w.enabled
+        && win_first_proxy(w.server.as_deref().unwrap_or("")) == (spec.host.clone(), spec.port)
 }
 
 fn run(program: &str, args: &[&str]) -> Result<String, String> {
@@ -1038,7 +1041,10 @@ mod tests {
 
     #[test]
     fn windows_proxy_server_is_read() {
-        assert_eq!(win_first_proxy("127.0.0.1:7890"), ("127.0.0.1".into(), 7890));
+        assert_eq!(
+            win_first_proxy("127.0.0.1:7890"),
+            ("127.0.0.1".into(), 7890)
+        );
         assert_eq!(
             win_first_proxy("http=127.0.0.1:7890;https=127.0.0.1:7890"),
             ("127.0.0.1".into(), 7890)

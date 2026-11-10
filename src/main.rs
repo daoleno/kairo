@@ -206,7 +206,8 @@ mod guardian {
 /// A windowed program has no console: its log goes to `logs/kairo.log`.
 #[cfg(windows)]
 fn init_logging() {
-    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
     let dir = Paths::default_home().join("logs");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("kairo.log");
@@ -214,7 +215,11 @@ fn init_logging() {
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > 1 << 20) {
         let _ = std::fs::remove_file(&path);
     }
-    if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         builder.target(env_logger::Target::Pipe(Box::new(file)));
     }
     builder.init();
@@ -530,7 +535,9 @@ mod platform {
     use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
     use nsh_platform_windows::{App, AppOptions, AppView, Appearance};
-    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::{
+        ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM,
+    };
     use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
     use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::HiDpi::{
@@ -540,8 +547,8 @@ mod platform {
     use windows::Win32::UI::WindowsAndMessaging::{
         AllowSetForegroundWindow, CallWindowProcW, DispatchMessageW, FindWindowW, GWLP_WNDPROC,
         GetMessageW, GetWindowThreadProcessId, IsIconic, MSG, PostMessageW, SW_HIDE, SW_RESTORE,
-        SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, TranslateMessage,
-        WM_APP, WM_CLOSE, WM_ENDSESSION,
+        SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, TranslateMessage, WM_APP,
+        WM_CLOSE, WM_ENDSESSION,
     };
     use windows::core::{HSTRING, w};
 
@@ -564,7 +571,9 @@ mod platform {
     fn first_instance() -> bool {
         let name = match std::env::var("KAIRO_HOME") {
             Ok(h) if !h.is_empty() => {
-                let sum: u32 = h.bytes().fold(5381u32, |a, b| a.wrapping_mul(33) ^ u32::from(b));
+                let sum: u32 = h
+                    .bytes()
+                    .fold(5381u32, |a, b| a.wrapping_mul(33) ^ u32::from(b));
                 format!("Local\\{APP_ID}.{sum:08x}")
             }
             _ => format!("Local\\{APP_ID}"),
@@ -596,14 +605,26 @@ mod platform {
     fn show_window(hwnd: HWND) {
         // SAFETY: plain calls on this process's window.
         unsafe {
-            let _ = ShowWindow(hwnd, if IsIconic(hwnd).as_bool() { SW_RESTORE } else { SW_SHOW });
+            let _ = ShowWindow(
+                hwnd,
+                if IsIconic(hwnd).as_bool() {
+                    SW_RESTORE
+                } else {
+                    SW_SHOW
+                },
+            );
             let _ = SetForegroundWindow(hwnd);
         }
     }
 
     /// Our window procedure, in front of NSH's: closing hides to the tray,
     /// the show message brings the window back, logging off cleans up.
-    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe extern "system" fn proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
         match msg {
             WM_SHOW => {
                 show_window(hwnd);
@@ -752,7 +773,9 @@ mod platform {
             Ok(handle) => {
                 let _ = handle.join();
             }
-            Err(e) => nsh_platform_windows::fatal_error(&format!("Cannot start the UI thread: {e}")),
+            Err(e) => {
+                nsh_platform_windows::fatal_error(&format!("Cannot start the UI thread: {e}"))
+            }
         }
         kairo_tray::stop();
         svc.shutdown();
