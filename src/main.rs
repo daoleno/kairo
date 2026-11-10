@@ -375,7 +375,7 @@ mod platform {
                 let view = AppView::new(AppOptions {
                     app_id: APP_ID.into(),
                     title: "Kairo".into(),
-                    size: (1180, 760),
+                    size: window_size(),
                     appearance: Appearance::System,
                     ..AppOptions::default()
                 });
@@ -514,7 +514,7 @@ mod platform {
             AppOptions {
                 components,
                 title: "Kairo".to_owned(),
-                size: (1180, 760),
+                size: window_size(),
                 appearance: Appearance::System,
                 keep_alive_on_close: tray_ok && settings.close_to_tray,
                 ..Default::default()
@@ -541,14 +541,14 @@ mod platform {
     use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
     use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::HiDpi::{
-        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem, SetProcessDpiAwarenessContext,
     };
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
     use windows::Win32::UI::WindowsAndMessaging::{
         AllowSetForegroundWindow, CallWindowProcW, DispatchMessageW, FindWindowW, GWLP_WNDPROC,
-        GetMessageW, GetWindowThreadProcessId, IsIconic, MSG, PostMessageW, SW_HIDE, SW_RESTORE,
-        SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, TranslateMessage, WM_APP,
-        WM_CLOSE, WM_ENDSESSION,
+        GetMessageW, GetWindowThreadProcessId, IsIconic, MSG, PostMessageW, SPI_GETWORKAREA,
+        SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow,
+        SystemParametersInfoW, TranslateMessage, WM_APP, WM_CLOSE, WM_ENDSESSION,
     };
     use windows::core::{HSTRING, w};
 
@@ -672,6 +672,33 @@ mod platform {
         }
     }
 
+    /// The first window size in points: 1180x760, or less on a small screen so
+    /// the window fits above the taskbar.
+    fn window_size() -> (i32, i32) {
+        let mut work = windows::Win32::Foundation::RECT::default();
+        // SAFETY: fills a RECT; the process is DPI aware by now, so it is in pixels.
+        let ok = unsafe {
+            SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                Some(&mut work as *mut _ as *mut core::ffi::c_void),
+                Default::default(),
+            )
+        }
+        .is_ok();
+        if !ok {
+            return (1180, 760);
+        }
+        // SAFETY: no arguments.
+        let scale = f64::from(unsafe { GetDpiForSystem() }.max(96)) / 96.0;
+        let fit =
+            |pixels: i32, wanted: i32| ((f64::from(pixels) / scale) as i32 - 24).clamp(640, wanted);
+        (
+            fit(work.right - work.left, 1180),
+            fit(work.bottom - work.top, 760),
+        )
+    }
+
     /// The UI thread: the window, the tray and the message loop.
     fn ui(svc: Service, minimized: bool) {
         // SAFETY: process setup before any window exists (what NSH's runner does).
@@ -686,7 +713,7 @@ mod platform {
             AppOptions {
                 app_id: APP_ID.into(),
                 title: "Kairo".into(),
-                size: (1180, 760),
+                size: window_size(),
                 appearance: Appearance::System,
                 limits: nsh_platform_windows::Limits::default(),
                 ..AppOptions::default()

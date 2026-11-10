@@ -14,10 +14,9 @@ fn home() -> PathBuf {
 
 /// The command that starts this app (inside an .app bundle, its executable).
 fn executable() -> Result<String, String> {
-    std::env::current_exe()
-        .and_then(|p| p.canonicalize())
+    crate::paths::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|e| e.to_string())
+        .ok_or_else(|| "cannot find this program".to_string())
 }
 
 #[cfg(target_os = "linux")]
