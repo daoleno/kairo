@@ -986,7 +986,14 @@ rules:
     // A tool of its own (curl, a separate process; Kairo's own requests are
     // not tools and are left out) shows in the tally under its name.
     let mut tool = tokio::process::Command::new("curl")
-        .args(["-s", "-m", "30", "-o", "/dev/null", "-x"])
+        .args([
+            "-s",
+            "-m",
+            "30",
+            "-o",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+            "-x",
+        ])
         .arg(format!("http://127.0.0.1:{mixed}"))
         .arg(format!("http://claude.ai:{}/long", origin_addr.port()))
         .kill_on_drop(true)

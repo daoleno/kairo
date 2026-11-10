@@ -176,7 +176,8 @@ pub async fn stop_pid(pid: i32) {
     {
         let pid = pid as u32;
         if crate::winapi::terminate(pid) {
-            let _ = tokio::task::spawn_blocking(move || crate::winapi::wait_for_exit(pid, 4000)).await;
+            let _ =
+                tokio::task::spawn_blocking(move || crate::winapi::wait_for_exit(pid, 4000)).await;
         }
     }
     #[cfg(unix)]
