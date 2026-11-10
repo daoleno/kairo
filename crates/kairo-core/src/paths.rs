@@ -106,6 +106,10 @@ impl Paths {
     pub fn core_pid(&self) -> PathBuf {
         self.state_dir().join("core.pid")
     }
+    /// What the statistics pages show, kept 30 days; nothing else reads it.
+    pub fn stats_file(&self) -> PathBuf {
+        self.home.join("stats.json")
+    }
     pub fn logs_dir(&self) -> PathBuf {
         self.home.join("logs")
     }

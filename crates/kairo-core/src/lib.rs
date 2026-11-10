@@ -21,6 +21,7 @@ pub mod profile;
 pub mod routes;
 pub mod service;
 pub mod settings;
+pub mod stats;
 pub mod supervisor;
 pub mod sysproxy;
 pub mod tun;

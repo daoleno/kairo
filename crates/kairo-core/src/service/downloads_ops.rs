@@ -162,6 +162,7 @@ impl Service {
         name: String,
     ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
+        self.stats_manual(2);
         self.run(async move {
             let Some(group) = svc.downloads_group() else {
                 return Err("Downloads have no exit of their own while the AI layer is off".into());

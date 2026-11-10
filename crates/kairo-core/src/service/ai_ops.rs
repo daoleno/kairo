@@ -218,6 +218,7 @@ impl Service {
     /// connections go there; open ones finish where they are.
     pub fn set_ai_exit(&self, name: String) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
+        self.stats_manual(0);
         self.run(async move {
             let Some((group, _)) = svc.ai_group() else {
                 return Err("This subscription has no AI group to pin".into());
@@ -353,6 +354,7 @@ impl Service {
         let port = st.settings.mixed_port;
         let checks = ai_check::check_all(port, now).await;
         self.modify(|s| s.ai.checks = checks.clone());
+        self.stats_ai(&checks);
         let due = forced || now - self.0.ai_hold_at.load(Ordering::SeqCst) >= HOLD_EVERY;
         if due {
             self.0.ai_hold_at.store(now, Ordering::SeqCst);
@@ -379,6 +381,7 @@ impl Service {
                         unix,
                     )
                     .await;
+                    me.stats_hold(id, &hold);
                     me.modify(|s| {
                         s.ai.holds.retain(|(k, _)| k != id);
                         s.ai.holds.push((id.to_owned(), hold));

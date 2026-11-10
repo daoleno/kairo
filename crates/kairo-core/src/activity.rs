@@ -263,7 +263,8 @@ struct Seen {
 
 impl Tally {
     /// Takes one snapshot of the open connections at `now` (unix seconds).
-    pub fn ingest(&mut self, conns: &[Connection], now: i64) {
+    pub fn ingest(&mut self, conns: &[Connection], now: i64) -> Vec<crate::stats::Delta> {
+        let mut deltas = Vec::new();
         for f in self.flows.values_mut() {
             f.open = 0;
             f.longest = 0;
@@ -291,6 +292,21 @@ impl Tally {
             app.open_exits.insert(kind);
             *app.exits.entry(kind).or_default() += du + dd;
             let target = target_of(c);
+            deltas.push(crate::stats::Delta {
+                app: tool.clone(),
+                slot: match kind {
+                    ExitKind::Ai => Some(crate::stats::Slot::Ai),
+                    ExitKind::Rest => Some(crate::stats::Slot::Rest),
+                    ExitKind::Downloads => Some(crate::stats::Slot::Downloads),
+                    ExitKind::Direct => Some(crate::stats::Slot::Direct),
+                    ExitKind::Blocked | ExitKind::Local => None,
+                },
+                service: match &target {
+                    Some(Target::Service(id)) => Some(*id),
+                    _ => None,
+                },
+                bytes: du + dd,
+            });
             match &target {
                 Some(Target::Service(id)) => *app.services.entry(id).or_default() += du + dd,
                 Some(_) => {}
@@ -336,6 +352,7 @@ impl Tally {
                 f.short += 1;
             }
         }
+        deltas
     }
 
     /// Every pair seen, most traffic first.

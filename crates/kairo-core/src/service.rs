@@ -15,6 +15,7 @@ mod ai_ops;
 mod bypass_ops;
 mod downloads_ops;
 mod route_ops;
+mod stats_ops;
 
 use crate::activity::Tally;
 use crate::ai_check;
@@ -217,6 +218,9 @@ struct Inner {
     fresh: std::sync::atomic::AtomicBool,
     /// Which tools talk to which AI services (counts since Kairo opened).
     activity: watch::Sender<Arc<Tally>>,
+    /// What is recorded for the statistics pages, and the copy they read.
+    stats: Mutex<stats_ops::Recorder>,
+    stats_tx: watch::Sender<Arc<crate::stats::Store>>,
     /// The running config as a mapping, for what the AI layer reads of it.
     ai_cfg: Mutex<Option<serde_yaml::Mapping>>,
     /// One AI check at a time, and when the last 90 s hold ran (unix s).
@@ -323,6 +327,8 @@ impl Service {
             quit: Mutex::new(None),
             fresh: std::sync::atomic::AtomicBool::new(false),
             activity: watch::Sender::new(Arc::new(Tally::default())),
+            stats: Mutex::new(stats_ops::Recorder::new(crate::stats::Store::default())),
+            stats_tx: watch::Sender::new(Arc::new(crate::stats::Store::default())),
             ai_cfg: Mutex::new(None),
             ai_busy: std::sync::atomic::AtomicBool::new(false),
             ai_hold_at: std::sync::atomic::AtomicI64::new(0),
@@ -337,6 +343,9 @@ impl Service {
         rt.spawn(async move { boot.boot().await });
         let sched = svc.clone();
         rt.spawn(async move { sched.scheduler().await });
+        svc.stats_load();
+        let rec = svc.clone();
+        rt.spawn(async move { rec.stats_task().await });
         let places = svc.clone();
         rt.spawn(async move { places.location_loop().await });
         let checks = svc.clone();
@@ -1048,11 +1057,13 @@ impl Service {
                 downloads: st.downloads.group.clone(),
             }
         };
+        let mut deltas = Vec::new();
         self.0.activity.send_modify(|a| {
             let a = Arc::make_mut(a);
             a.names = names;
-            a.ingest(&tools, now);
+            deltas = a.ingest(&tools, now);
         });
+        self.stats_traffic(now, &deltas);
         self.0.connections.send_replace(Arc::new(Connections {
             upload_total: resp.upload_total,
             download_total: resp.download_total,
@@ -1094,6 +1105,7 @@ impl Service {
             let _ = tx.send(());
         });
         let _ = rx.recv_timeout(Duration::from_secs(6));
+        self.stats_close();
         // Whatever happened above, never leave the proxy pointing at a dead core.
         if self.0.paths.sysproxy_state().exists() {
             let _ = sysproxy::disable(&self.0.paths);
@@ -1461,6 +1473,9 @@ impl Service {
     ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
+            if name.is_some() {
+                svc.stats_manual(1);
+            }
             let mut next = svc.settings();
             if next.auto_location != name.is_none() {
                 next.auto_location = name.is_none();
@@ -1684,6 +1699,7 @@ impl Service {
                 stats,
             };
             svc.insert_profile(profile).await;
+            svc.stats_usage(&id);
             Ok(id)
         })
     }
@@ -1803,6 +1819,7 @@ impl Service {
             });
             svc.save_profiles();
             result?;
+            svc.stats_usage(&id);
             let active = svc.0.state.borrow().profiles.active.as_deref() == Some(id.as_str());
             if active && svc.running() {
                 svc.write_config(true).await?;
