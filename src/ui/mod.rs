@@ -509,17 +509,15 @@ pub fn setting_row(
     detail: Option<&'static str>,
     control: impl IntoElement,
 ) -> View {
-    view()
-        .flex_row()
-        .items_center()
-        .gap_4()
-        .px_4()
-        .py_2p5()
-        .min_h(px(ROW_MIN))
+    let phone = phone();
+    // On a phone a wide control wraps under its label instead of squeezing the label.
+    let row = view().flex_row().items_center().gap_4().px_4().py_2p5().min_h(px(ROW_MIN));
+    let row = if phone { row.flex_wrap().gap_y_2() } else { row };
+    row
         .child(
             view()
                 .flex_1()
-                .min_w(px(0.0))
+                .min_w(px(if phone { 150.0 } else { 0.0 }))
                 .gap_0p5()
                 .child(body(label))
                 .child(detail.map(|d| muted(d))),
@@ -533,17 +531,15 @@ pub fn setting_row_dyn(
     detail: impl Fn() -> SharedString + 'static,
     control: impl IntoElement,
 ) -> View {
-    view()
-        .flex_row()
-        .items_center()
-        .gap_4()
-        .px_4()
-        .py_2p5()
-        .min_h(px(ROW_MIN))
+    let phone = phone();
+    // On a phone a wide control wraps under its label instead of squeezing the label.
+    let row = view().flex_row().items_center().gap_4().px_4().py_2p5().min_h(px(ROW_MIN));
+    let row = if phone { row.flex_wrap().gap_y_2() } else { row };
+    row
         .child(
             view()
                 .flex_1()
-                .min_w(px(0.0))
+                .min_w(px(if phone { 150.0 } else { 0.0 }))
                 .gap_0p5()
                 .child(body(label))
                 .child(muted(detail)),

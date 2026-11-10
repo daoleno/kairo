@@ -556,13 +556,11 @@ fn choices() -> impl IntoElement {
 }
 
 fn labelled(label: &'static str, control: impl IntoElement) -> impl IntoElement {
-    view()
-        .flex_row()
-        .items_center()
-        .justify_end()
-        .gap_3()
-        .child(ui::muted(label))
-        .child(control)
+    let phone = ui::phone();
+    // On a phone the label and its control wrap rather than push the label off the edge.
+    let row = view().flex_row().flex_wrap().items_center().gap_3();
+    let row = if phone { row.justify_start() } else { row.justify_end() };
+    row.child(ui::muted(label)).child(control)
 }
 
 /// How apps reach Kairo: those that follow the system's proxy settings, or every

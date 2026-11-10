@@ -191,28 +191,26 @@ pub fn page() -> impl IntoElement {
                     .w_full()
                     .max_w(px(780.0))
                     .self_center()
-                    .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap_3()
-                            .px_1()
-                            .child(
-                                ui::muted("Everything not listed uses its usual exit.").flex_1(),
-                            )
+                    .child({
+                        let phone = ui::phone();
+                        // On a phone the sentence has the width to itself and the buttons sit below it.
+                        let row = view().flex_row().items_center().gap_3().px_1();
+                        let row = if phone { row.flex_wrap() } else { row };
+                        let note = ui::muted("Everything not listed uses its usual exit.");
+                        row.child(if phone { note.w_full() } else { note.flex_1() })
                             .child(
                                 ui::capsule("Add App…", false)
-                                    .h(px(30.0))
+                                    .h(px(ui::touch_h(30.0)))
                                     .px_4()
                                     .on_press(move || adding.set(Some(Adding::App))),
                             )
                             .child(
                                 ui::capsule("Add Site…", false)
-                                    .h(px(30.0))
+                                    .h(px(ui::touch_h(30.0)))
                                     .px_4()
                                     .on_press(move || adding.set(Some(Adding::Site))),
-                            ),
-                    )
+                            )
+                    })
                     .child(dynamic(move || {
                         let all = routes.get();
                         let q = query.get().to_lowercase();
