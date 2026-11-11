@@ -166,6 +166,30 @@ impl Icons {
         }
     }
 
+    /// The display name kept for `name` (an app's: "Firefox"), when the lookup found one.
+    pub fn label(&self, kind: &str, name: &str) -> Option<String> {
+        let key = file_key(name)?;
+        let text = std::fs::read_to_string(self.folder(kind).join(format!("{key}.label"))).ok()?;
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_owned())
+    }
+
+    /// Whether a lookup has said anything about the display name (an empty answer counts).
+    pub fn label_known(&self, kind: &str, name: &str) -> bool {
+        file_key(name)
+            .is_some_and(|key| self.folder(kind).join(format!("{key}.label")).is_file())
+    }
+
+    /// Keeps the display name found for `name`, or that there is none.
+    pub fn store_label(&self, kind: &str, name: &str, label: Option<&str>) {
+        if let Some(key) = file_key(name) {
+            let _ = crate::paths::write_atomic(
+                &self.folder(kind).join(format!("{key}.label")),
+                label.unwrap_or_default().as_bytes(),
+            );
+        }
+    }
+
     /// Takes the right to fetch `kind/name` (one at a time for each name).
     pub fn begin(&self, kind: &str, name: &str) -> bool {
         self.busy
@@ -517,6 +541,24 @@ mod tests {
             .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
             .unwrap();
         out
+    }
+
+    #[test]
+    fn a_display_name_is_kept_beside_the_picture() {
+        let dir = tempfile::tempdir().unwrap();
+        let icons = Icons::new(dir.path().to_path_buf());
+        assert!(!icons.label_known("apps", "firefox"));
+        assert_eq!(icons.label("apps", "firefox"), None);
+        icons.store_label("apps", "firefox", Some("Firefox"));
+        assert!(icons.label_known("apps", "firefox"));
+        assert_eq!(icons.label("apps", "firefox").as_deref(), Some("Firefox"));
+        // "no name" is an answer too: it is not asked again.
+        icons.store_label("apps", "node", None);
+        assert!(icons.label_known("apps", "node"));
+        assert_eq!(icons.label("apps", "node"), None);
+        // A name is a file name only after it is made safe.
+        icons.store_label("apps", "../x", Some("No"));
+        assert!(!dir.path().join("x.label").exists());
     }
 
     #[test]

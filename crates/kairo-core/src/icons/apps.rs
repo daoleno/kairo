@@ -13,8 +13,27 @@
 
 use super::{Icon, normalize, trusted};
 
-/// The icon of the program called `name`, if the system has one.
-pub fn lookup(name: &str) -> Option<Icon> {
+/// What the system knows of an installed app: its icon and the name it shows people (the
+/// program is `firefox`, the app is "Firefox").
+#[derive(Debug, Clone, Default)]
+pub struct Found {
+    pub icon: Option<Icon>,
+    pub label: Option<String>,
+}
+
+/// A display name made safe to show: one line, no control characters, at most 60 characters.
+pub fn clean_label(text: &str) -> Option<String> {
+    let one: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let one = one.split_whitespace().collect::<Vec<_>>().join(" ");
+    let one: String = one.chars().take(60).collect();
+    (!one.is_empty()).then_some(one)
+}
+
+/// The app called `name`, if the system has one: its icon and its display name.
+pub fn lookup(name: &str) -> Option<Found> {
     let n = program_name(name);
     if n.is_empty() {
         return None;
@@ -47,9 +66,10 @@ pub fn program_name(name: &str) -> String {
 }
 
 #[cfg(target_os = "android")]
-fn android_lookup(name: &str) -> Option<Icon> {
-    let png = crate::android::app_icon(name)?;
-    normalize(&png).ok()
+fn android_lookup(name: &str) -> Option<Found> {
+    let icon = crate::android::app_icon(name).and_then(|png| normalize(&png).ok());
+    let label = crate::android::app_label(name).and_then(|l| clean_label(&l));
+    (icon.is_some() || label.is_some()).then_some(Found { icon, label })
 }
 
 // --- Linux -------------------------------------------------------------------------------
@@ -58,7 +78,7 @@ fn android_lookup(name: &str) -> Option<Icon> {
 pub mod linux {
     use std::path::{Path, PathBuf};
 
-    use super::{Icon, normalize, trusted};
+    use super::{normalize, trusted};
 
     /// What a `.desktop` file says about a program.
     #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -397,12 +417,16 @@ pub mod linux {
         None
     }
 
-    pub fn lookup(n: &str) -> Option<Icon> {
+    pub fn lookup(n: &str) -> Option<super::Found> {
         let entry = find(&app_dirs(), n)?;
-        let path = find_icon(&entry.icon, &icon_roots(), current_theme().as_deref())?;
-        let bytes = std::fs::read(&path).ok()?;
-        // The system's own file: an SVG of a theme is taken as it is.
-        trusted(&bytes).or_else(|| normalize(&bytes).ok())
+        let icon = find_icon(&entry.icon, &icon_roots(), current_theme().as_deref())
+            .and_then(|path| std::fs::read(&path).ok())
+            // The system's own file: an SVG of a theme is taken as it is.
+            .and_then(|bytes| trusted(&bytes).or_else(|| normalize(&bytes).ok()));
+        Some(super::Found {
+            icon,
+            label: super::clean_label(&entry.name),
+        })
     }
 
     #[cfg(test)]
@@ -439,6 +463,22 @@ pub mod linux {
             assert_eq!(icon("fire"), None);
             assert_eq!(icon("nope"), None);
             assert_eq!(icon("quiet"), None);
+        }
+
+        #[test]
+        fn the_display_name_is_the_desktop_files_and_is_made_safe() {
+            let dir = tempfile::tempdir().unwrap();
+            let apps = dir.path().join("applications");
+            write(&apps.join("firefox.desktop"), "[Desktop Entry]\nType=Application\nName=Firefox\nName[zh_CN]=火狐\nExec=firefox %u\nIcon=firefox\n");
+            write(&apps.join("code.desktop"), "[Desktop Entry]\nType=Application\nName=Visual Studio Code\nExec=/usr/share/code/code %F\nIcon=vscode\n");
+            let dirs = vec![apps];
+            let name = |n: &str| find(&dirs, n).and_then(|e| super::super::clean_label(&e.name));
+            assert_eq!(name("firefox").as_deref(), Some("Firefox"));
+            assert_eq!(name("code").as_deref(), Some("Visual Studio Code"));
+            assert_eq!(name("nothing"), None);
+            assert_eq!(super::super::clean_label("  A\nB\t C  ").as_deref(), Some("A B C"));
+            assert_eq!(super::super::clean_label("   "), None);
+            assert_eq!(super::super::clean_label(&"x".repeat(100)).unwrap().len(), 60);
         }
 
         /// A Chrome web app ("Linear") has its own entry whose `Exec` is Chrome's own `chrome`
@@ -512,7 +552,7 @@ mod mac {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use super::{Icon, normalize};
+    use super::{Found, normalize};
 
     fn app_folders() -> Vec<PathBuf> {
         let mut out: Vec<PathBuf> = vec![
@@ -555,7 +595,7 @@ mod mac {
         p.is_file().then_some(p)
     }
 
-    pub fn lookup(n: &str) -> Option<Icon> {
+    pub fn lookup(n: &str) -> Option<Found> {
         let all = bundles();
         // By the bundle's name first, then by the program it runs.
         let by_name = all.iter().find(|b| {
@@ -569,19 +609,27 @@ mod mac {
                 (exe == n).then(|| (b.clone(), i))
             })?,
         };
-        let icns = icns_of(&bundle, &plist)?;
-        let tmp = std::env::temp_dir().join(format!("kairo-icon-{}.png", std::process::id()));
-        let ok = Command::new("/usr/bin/sips")
-            .args(["-s", "format", "png", "-Z", "128"])
-            .arg(&icns)
-            .arg("--out")
-            .arg(&tmp)
-            .output()
-            .ok()
-            .is_some_and(|o| o.status.success());
-        let bytes = ok.then(|| std::fs::read(&tmp).ok()).flatten();
-        let _ = std::fs::remove_file(&tmp);
-        normalize(&bytes?).ok()
+        // The name the Finder shows: the display name, else the bundle's name, else its file's.
+        let label = ["CFBundleDisplayName", "CFBundleName"]
+            .iter()
+            .find_map(|k| plist.get(k)?.as_str().map(str::to_owned))
+            .or_else(|| bundle.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .and_then(|l| super::clean_label(&l));
+        let icon = icns_of(&bundle, &plist).and_then(|icns| {
+            let tmp = std::env::temp_dir().join(format!("kairo-icon-{}.png", std::process::id()));
+            let ok = Command::new("/usr/bin/sips")
+                .args(["-s", "format", "png", "-Z", "128"])
+                .arg(&icns)
+                .arg("--out")
+                .arg(&tmp)
+                .output()
+                .ok()
+                .is_some_and(|o| o.status.success());
+            let bytes = ok.then(|| std::fs::read(&tmp).ok()).flatten();
+            let _ = std::fs::remove_file(&tmp);
+            normalize(&bytes?).ok()
+        });
+        Some(Found { icon, label })
     }
 }
 
@@ -592,32 +640,42 @@ mod win {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
 
-    use super::Icon;
+    use super::Found;
 
     /// No console window for the helper.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    pub fn lookup(n: &str) -> Option<Icon> {
-        // A running program of this name: its executable's icon.
+    pub fn lookup(n: &str) -> Option<Found> {
+        // A running program of this name: its executable's icon and the name it gives itself.
         let proc = crate::bypass::list_processes()
             .into_iter()
             .find(|p| super::program_name(&p.name) == n)?;
         let out = std::env::temp_dir().join(format!("kairo-icon-{}.png", std::process::id()));
+        let label_out = std::env::temp_dir().join(format!("kairo-icon-{}.txt", std::process::id()));
         // `ExtractAssociatedIcon` is Windows' own: the icon Explorer shows for the file. The paths
         // go in the environment, so nothing of a file name is ever part of the script.
         let script = "Add-Type -AssemblyName System.Drawing; \
              $i = [System.Drawing.Icon]::ExtractAssociatedIcon($env:KAIRO_ICON_EXE); \
-             if ($i -ne $null) { $i.ToBitmap().Save($env:KAIRO_ICON_OUT, [System.Drawing.Imaging.ImageFormat]::Png) }";
+             if ($i -ne $null) { $i.ToBitmap().Save($env:KAIRO_ICON_OUT, [System.Drawing.Imaging.ImageFormat]::Png) }; \
+             $d = (Get-Item -LiteralPath $env:KAIRO_ICON_EXE).VersionInfo.FileDescription; \
+             if ($d) { [System.IO.File]::WriteAllText($env:KAIRO_ICON_LABEL, $d, (New-Object System.Text.UTF8Encoding $false)) }";
         let ok = Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .env("KAIRO_ICON_EXE", &proc.path)
             .env("KAIRO_ICON_OUT", &out)
+            .env("KAIRO_ICON_LABEL", &label_out)
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .ok()
             .is_some_and(|o| o.status.success());
         let bytes = ok.then(|| std::fs::read(&out).ok()).flatten();
         let _ = std::fs::remove_file(&out);
-        super::normalize(&bytes?).ok()
+        let label = ok
+            .then(|| std::fs::read_to_string(&label_out).ok())
+            .flatten()
+            .and_then(|l| super::clean_label(&l));
+        let _ = std::fs::remove_file(&label_out);
+        let icon = bytes.and_then(|b| super::normalize(&b).ok());
+        (icon.is_some() || label.is_some()).then_some(Found { icon, label })
     }
 }

@@ -72,6 +72,16 @@ fn resolve(subject: &Subject) -> Shown {
     }
 }
 
+/// The name to show for an app: what the system calls the installed app ("Firefox" for the program
+/// `firefox`) once it has said, else the name as it is. The program's name stays the key.
+pub fn app_name(name: String) -> impl Fn() -> SharedString + 'static {
+    let rev = store().icons_rev;
+    move || {
+        let _ = rev.get();
+        untracked(|| store().svc().app_label(&name)).unwrap_or_else(|| name.clone()).into()
+    }
+}
+
 /// A square of `side` points holding the subject's picture.
 pub fn logo(subject: Subject, side: f32) -> AnyElement {
     let rev = store().icons_rev;

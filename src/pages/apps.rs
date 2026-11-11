@@ -117,6 +117,13 @@ fn route_row(r: Route) -> impl IntoElement {
         RouteKind::Site { domain } => domain.clone(),
     };
     let label = name.clone();
+    // An installed app shows the name the system gives it; the program's name stays the key.
+    let shown = match &r.kind {
+        RouteKind::App { .. } => ui::body(ui::logo::app_name(name.clone()))
+            .number_of_lines(1)
+            .into_element(),
+        RouteKind::Site { .. } => ui::body(name).number_of_lines(1).into_element(),
+    };
     let kind = stored(r.kind.clone());
     let id = stored(r.id.clone());
     let exit = stored(r.exit.clone());
@@ -140,7 +147,7 @@ fn route_row(r: Route) -> impl IntoElement {
                 } else {
                     0.0
                 }))
-                .child(ui::body(name).number_of_lines(1)),
+                .child(shown),
         )
         .child(ui::popup_button(
             move || choices(&current),
@@ -235,6 +242,8 @@ pub fn page() -> impl IntoElement {
                             let keep = |r: &Route| {
                                 q.is_empty()
                                     || r.id.to_lowercase().contains(&q)
+                                    || matches!(&r.kind, RouteKind::App { name }
+                                        if store.svc().app_label(name).is_some_and(|l| l.to_lowercase().contains(&q)))
                                     || exit_title(&r.exit).to_lowercase().contains(&q)
                             };
                             let apps: Vec<Route> = all

@@ -370,7 +370,7 @@ fn phone_app(r: AppRow) -> impl IntoElement {
                     view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .child(ui::body(r.name.clone()).font_weight(FontWeight::MEDIUM))
+                        .child(ui::body(ui::logo::app_name(r.name.clone())).font_weight(FontWeight::MEDIUM))
                         .child(ui::muted(r.open.clone()).text_size(px(size::small()))),
                 )
                 .child(
@@ -504,7 +504,7 @@ fn app_row(r: AppRow) -> impl IntoElement {
             cell(0).child(ui::logo::logo(ui::logo::Subject::App(name.clone()), 28.0)).child(
                 view()
                     .min_w(px(0.0))
-                    .child(ui::body(r.name.clone()).number_of_lines(1))
+                    .child(ui::body(ui::logo::app_name(r.name.clone())).number_of_lines(1))
                     .child(ui::muted(r.open.clone()).text_size(px(size::small()))),
             ),
         )

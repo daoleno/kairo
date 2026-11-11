@@ -202,6 +202,34 @@ pub fn app_icon(name: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// The name the installed app called `name` (a package, or its label) shows people.
+pub fn app_label(name: &str) -> Option<String> {
+    let bridge = BRIDGE.get()?;
+    let mut env = bridge.vm.attach_current_thread().ok()?;
+    let class: &JClass<'_> = bridge.class.as_obj().into();
+    let name = env.new_string(name).ok()?;
+    let result = env
+        .call_static_method(
+            class,
+            "appLabel",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            &[(&name).into()],
+        )
+        .and_then(|v| v.l());
+    match result {
+        Ok(label) if !label.is_null() => {
+            let label = jni::objects::JString::from(label);
+            let text = env.get_string(&label).ok().map(String::from);
+            text
+        }
+        Ok(_) => None,
+        Err(_) => {
+            let _ = env.exception_clear();
+            None
+        }
+    }
+}
+
 /// Takes the VPN down and closes our copy of its descriptor.
 pub fn teardown() {
     let fd = TUN_FD.swap(-1, Ordering::SeqCst);

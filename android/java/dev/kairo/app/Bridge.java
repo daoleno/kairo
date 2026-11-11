@@ -179,6 +179,30 @@ public final class Bridge {
         }
     }
 
+    /**
+     * The name an installed app shows people: its label, for a package name or a label given
+     * in any letter case. Null when no installed app is called that.
+     */
+    public static String appLabel(String name) {
+        try {
+            android.content.pm.PackageManager pm = app.getPackageManager();
+            try {
+                return pm.getApplicationLabel(pm.getApplicationInfo(name, 0)).toString();
+            } catch (android.content.pm.PackageManager.NameNotFoundException notAPackage) {
+                for (android.content.pm.ApplicationInfo info : pm.getInstalledApplications(0)) {
+                    String label = pm.getApplicationLabel(info).toString();
+                    if (label.equalsIgnoreCase(name)) {
+                        return label;
+                    }
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            android.util.Log.w("Kairo", "appLabel failed", e);
+            return null;
+        }
+    }
+
     /** Stops the VPN and its notification. */
     public static void teardown() {
         KairoVpnService.stop(app);
