@@ -4,6 +4,8 @@
 pub mod accent;
 pub mod chrome;
 mod flags;
+pub mod logos;
+mod logos_table;
 mod pages;
 pub mod palette;
 mod shell;

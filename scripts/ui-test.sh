@@ -53,4 +53,4 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 sleep 1
-KAIRO_HOME="$home" KAIRO_NO_SYSPROXY=1 KAIRO_NO_UPDATE=1 nsh test "$@"
+KAIRO_HOME="$home" KAIRO_NO_SYSPROXY=1 KAIRO_NO_UPDATE=1 KAIRO_NO_ICON_FETCH=1 nsh test "$@"

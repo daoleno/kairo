@@ -3,6 +3,7 @@
 
 pub mod charts;
 pub mod icons;
+pub mod logo;
 pub mod menu;
 pub mod toolbar;
 

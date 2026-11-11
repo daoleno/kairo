@@ -143,6 +143,8 @@ pub struct Store {
     /// The AI service the detail page shows (an `ai::SERVICES` id).
     pub ai_service: Signal<&'static str>,
     pub log_seq: Signal<u64>,
+    /// Goes up when a picture of an app or a site has been kept (see `ui::logo`).
+    pub icons_rev: Signal<u64>,
     pub page: Signal<Page>,
     /// Activity shows the raw connection list (otherwise: by app).
     pub all_connections: Signal<bool>,
@@ -161,6 +163,7 @@ impl Store {
         let activity_rx = svc.activity();
         let stats_rx = svc.stats();
         let log_rx = svc.log_seq();
+        let icons_rx = svc.icons_rev();
         let store = Store {
             state: signal(state_rx.borrow().clone()),
             live: signal(live_rx.borrow().clone()),
@@ -170,6 +173,7 @@ impl Store {
             stats: signal(Snap(stats_rx.borrow().clone())),
             ai_service: signal("claude"),
             log_seq: signal(*log_rx.borrow()),
+            icons_rev: signal(*icons_rx.borrow()),
             page: signal(*crate::chrome::bridge().page.borrow()),
             all_connections: signal(false),
             toast: signal(None),
@@ -197,6 +201,7 @@ impl Store {
             store.stats.set(Snap(s.clone()))
         });
         follow(log_rx, move |n: &u64| store.log_seq.set(*n));
+        follow(icons_rx, move |n: &u64| store.icons_rev.set(*n));
         if crate::chrome::native() {
             // The platform's sidebar and menus select pages too.
             follow(crate::chrome::bridge().page.subscribe(), move |p: &Page| {

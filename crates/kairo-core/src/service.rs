@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 mod ai_ops;
 mod bypass_ops;
 mod downloads_ops;
+mod icon_ops;
 mod route_ops;
 mod stats_ops;
 
@@ -206,6 +207,9 @@ struct Inner {
     proxies: watch::Sender<Arc<Proxies>>,
     logs: Mutex<VecDeque<LogEntry>>,
     log_seq: watch::Sender<u64>,
+    /// The pictures of apps and sites on disk, and a counter of what has been kept (`icon_ops`).
+    icons: crate::icons::Icons,
+    icons_rev: watch::Sender<u64>,
     core_tx: mpsc::UnboundedSender<CoreCmd>,
     notice_seq: Mutex<u64>,
     /// Serializes config applies.
@@ -299,6 +303,7 @@ impl Service {
         let settings = Settings::load(&paths);
         let profiles = ProfileIndex::load(&paths);
         let (core_tx, core_rx) = mpsc::unbounded_channel();
+        let icons = crate::icons::Icons::new(paths.icons_dir());
         let state = State {
             downloads: crate::downloads::DownloadsInfo {
                 fastest: settings.downloads.fastest,
@@ -319,6 +324,8 @@ impl Service {
             proxies: watch::Sender::new(Arc::new(Proxies::default())),
             logs: Mutex::new(VecDeque::with_capacity(LOG_CAPACITY)),
             log_seq: watch::Sender::new(0),
+            icons,
+            icons_rev: watch::Sender::new(0),
             core_tx,
             notice_seq: Mutex::new(0),
             apply_lock: tokio::sync::Mutex::new(()),

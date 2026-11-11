@@ -627,7 +627,7 @@ fn phone_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(mono(r.mono))
+                .child(mono(r.id, r.mono))
                 .child(ui::body(r.name).number_of_lines(1).flex_1())
                 .child(ui::dot(move || tone_color(tone)))
                 .child(ui::body(r.status.clone()).number_of_lines(1)),
@@ -703,7 +703,7 @@ fn table_row_wide(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoEl
         .hover(|s| s.bg(move || theme().accent.opacity(0.5)))
         .child(
             cell(0)
-                .child(mono(r.mono))
+                .child(mono(r.id, r.mono))
                 .child(ui::body(r.name).number_of_lines(1)),
         )
         .child(
@@ -863,21 +863,12 @@ fn banner(title: String, detail: String, actions: Vec<Option<AnyElement>>) -> im
         .children(actions.into_iter().flatten())
 }
 
-/// The service's initial, in a soft circle.
-pub fn mono(s: &'static str) -> impl IntoElement {
-    view()
-        .size(px(28.0 * size::scale().max(1.0) * font_scale().max(1.0)))
-        .flex_shrink_0()
-        .rounded_full()
-        .items_center()
-        .justify_center()
-        .bg(ui::subtle)
-        .child(
-            text(s)
-                .text_size(px(size::small()))
-                .number_of_lines(1)
-                .font_weight(FontWeight::SEMIBOLD),
-        )
+/// The service's logo (its letters when it has none).
+pub fn mono(id: &'static str, s: &'static str) -> AnyElement {
+    ui::logo::logo(
+        ui::logo::Subject::Service(id, s),
+        (28.0 * size::scale().max(1.0) * font_scale().max(1.0)).round(),
+    )
 }
 
 /// What goes direct: a fact, not a control.
@@ -963,7 +954,7 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
                         .flex_row()
                         .items_center()
                         .gap_3()
-                        .child(mono(service.mono))
+                        .child(mono(service.id, service.mono))
                         .child(
                             view()
                                 .flex_1()

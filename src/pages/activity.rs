@@ -365,7 +365,7 @@ fn phone_app(r: AppRow) -> impl IntoElement {
                 .flex_row()
                 .items_center()
                 .gap_3()
-                .child(letter(&r.name))
+                .child(ui::logo::logo(ui::logo::Subject::App(r.name.clone()), 28.0))
                 .child(
                     view()
                         .flex_1()
@@ -501,7 +501,7 @@ fn app_row(r: AppRow) -> impl IntoElement {
         .border_t_1()
         .border_color(move || theme().border.opacity(0.7))
         .child(
-            cell(0).child(letter(&name)).child(
+            cell(0).child(ui::logo::logo(ui::logo::Subject::App(name.clone()), 28.0)).child(
                 view()
                     .min_w(px(0.0))
                     .child(ui::body(r.name.clone()).number_of_lines(1))
@@ -576,25 +576,6 @@ fn app_row(r: AppRow) -> impl IntoElement {
 }
 
 /// The first letter of an app in a soft square.
-fn letter(name: &str) -> impl IntoElement {
-    let l: String = name
-        .chars()
-        .find(|c| c.is_alphanumeric())
-        .map(|c| c.to_uppercase().to_string())
-        .unwrap_or_else(|| "·".into());
-    view()
-        .size(px(28.0))
-        .flex_shrink_0()
-        .rounded(px(8.0))
-        .items_center()
-        .justify_center()
-        .bg(ui::subtle)
-        .child(
-            text(l)
-                .text_size(px(size::small()))
-                .font_weight(FontWeight::SEMIBOLD),
-        )
-}
 
 #[cfg(test)]
 mod tests {

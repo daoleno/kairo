@@ -37,6 +37,9 @@ pub const SIDE: u32 = 128;
 /// How long a fetched picture is trusted, and how long a failure is remembered.
 pub const KEEP: Duration = Duration::from_secs(30 * 24 * 3600);
 pub const RETRY: Duration = Duration::from_secs(3 * 24 * 3600);
+/// How long a failure is remembered when it may be only that the core was not up yet (the site's
+/// own route was not there to take).
+pub const RETRY_SOON: Duration = Duration::from_secs(10 * 60);
 
 /// A stored picture.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,8 +131,14 @@ impl Icons {
                 };
             }
         }
-        match age(&folder.join(format!("{key}.none")), now) {
-            Some(a) if a < RETRY => Cached::Missing,
+        let marker = folder.join(format!("{key}.none"));
+        let wait = if std::fs::metadata(&marker).is_ok_and(|m| m.len() > 0) {
+            RETRY_SOON
+        } else {
+            RETRY
+        };
+        match age(&marker, now) {
+            Some(a) if a < wait => Cached::Missing,
             _ => Cached::Unknown,
         }
     }
@@ -148,10 +157,12 @@ impl Icons {
         Ok(path)
     }
 
-    /// Remembers that nothing was found, so it is not asked again for a while.
-    pub fn store_none(&self, kind: &str, name: &str) {
+    /// Remembers that nothing was found, so it is not asked again for a while (`soon`: only for
+    /// ten minutes, the failure being one the core's coming up may cure).
+    pub fn store_none(&self, kind: &str, name: &str, soon: bool) {
         if let Some(key) = file_key(name) {
-            let _ = crate::paths::write_atomic(&self.folder(kind).join(format!("{key}.none")), b"");
+            let marker: &[u8] = if soon { b"soon" } else { b"" };
+            let _ = crate::paths::write_atomic(&self.folder(kind).join(format!("{key}.none")), marker);
         }
     }
 
@@ -619,13 +630,21 @@ mod tests {
         let icons = Icons::new(dir.path().to_path_buf());
         let now = SystemTime::now();
         assert_eq!(icons.look("sites", "example.com", now), Cached::Unknown);
-        icons.store_none("sites", "example.com");
+        icons.store_none("sites", "example.com", false);
         assert_eq!(icons.look("sites", "example.com", now), Cached::Missing);
         // A failure is tried again after three days.
         assert_eq!(
             icons.look("sites", "example.com", now + RETRY + Duration::from_secs(60)),
             Cached::Unknown
         );
+        // One that the core's coming up may cure is tried again after ten minutes.
+        icons.store_none("sites", "example.com", true);
+        assert_eq!(icons.look("sites", "example.com", now), Cached::Missing);
+        assert_eq!(
+            icons.look("sites", "example.com", now + RETRY_SOON + Duration::from_secs(60)),
+            Cached::Unknown
+        );
+        icons.store_none("sites", "example.com", false);
         let icon = Icon { ext: "png", bytes: png(32, 32) };
         let path = icons.store("sites", "Example.com", &icon).unwrap();
         assert_eq!(
