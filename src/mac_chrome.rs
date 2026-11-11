@@ -858,19 +858,25 @@ impl Footer {
                 self.ring.setHidden(!coming);
                 match b.progress {
                     Some(p) => {
-                        self.ring.stopAnimation(None);
+                        unsafe {
+                            self.ring.stopAnimation(None);
+                        }
                         self.ring.setIndeterminate(false);
                         self.ring.setDoubleValue(f64::from(p));
                     }
                     None => {
                         self.ring.setIndeterminate(true);
-                        self.ring.startAnimation(None);
+                        unsafe {
+                            self.ring.startAnimation(None);
+                        }
                     }
                 }
             }
             None => {
                 self.update.setHidden(true);
-                self.ring.stopAnimation(None);
+                unsafe {
+                    self.ring.stopAnimation(None);
+                }
                 self.ring.setHidden(true);
             }
         }
