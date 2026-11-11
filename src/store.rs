@@ -83,6 +83,28 @@ impl Page {
         matches!(self, Page::Proxies | Page::Rules | Page::Logs | Page::Dns)
     }
 
+    /// Where an Inspect view was opened from after `now` is shown with `prev` before it:
+    /// the page it came from (Subscriptions, Apps ...), kept while one Inspect view leads to
+    /// another, and forgotten on any other page.
+    pub fn origin_after(prev: Page, origin: Option<Page>, now: Page) -> Option<Page> {
+        if !now.inspect() {
+            None
+        } else if prev.inspect() {
+            origin
+        } else {
+            Some(prev)
+        }
+    }
+
+    /// The sidebar row that stands for `self` when it was opened from `origin`: an Inspect view
+    /// stays on the row of the page it came from, else it stands under Settings.
+    pub fn row_from(self, origin: Option<Page>) -> Page {
+        match origin.map(Page::sidebar) {
+            Some(row) if self.inspect() && !row.inspect() => row,
+            _ => self.sidebar(),
+        }
+    }
+
     /// The sidebar row that stands for this page.
     pub fn sidebar(self) -> Page {
         if self.inspect() {
@@ -145,6 +167,9 @@ pub struct Store {
     pub log_seq: Signal<u64>,
     /// Goes up when a picture of an app or a site has been kept (see `ui::logo`).
     pub icons_rev: Signal<u64>,
+    /// The page an Inspect view (Groups, Rules ...) was opened from: its sidebar row stays on
+    /// that page and Back returns to it (see `Page::origin_after`).
+    pub origin: Signal<Option<Page>>,
     pub page: Signal<Page>,
     /// Activity shows the raw connection list (otherwise: by app).
     pub all_connections: Signal<bool>,
@@ -155,6 +180,11 @@ pub struct Store {
 }
 
 impl Store {
+    /// The sidebar row that stands for the page shown.
+    pub fn row(&self) -> Page {
+        self.page.get().row_from(self.origin.get())
+    }
+
     pub fn new(svc: Service) -> Store {
         let state_rx = svc.state();
         let live_rx = svc.live();
@@ -174,6 +204,7 @@ impl Store {
             ai_service: signal("claude"),
             log_seq: signal(*log_rx.borrow()),
             icons_rev: signal(*icons_rx.borrow()),
+            origin: signal(None),
             page: signal(*crate::chrome::bridge().page.borrow()),
             all_connections: signal(false),
             toast: signal(None),
@@ -202,6 +233,15 @@ impl Store {
         });
         follow(log_rx, move |n: &u64| store.log_seq.set(*n));
         follow(icons_rx, move |n: &u64| store.icons_rev.set(*n));
+        {
+            let last = std::rc::Rc::new(std::cell::Cell::new(store.page.get_untracked()));
+            effect(move || {
+                let now = store.page.get();
+                let prev = last.replace(now);
+                let origin = Page::origin_after(prev, store.origin.get_untracked(), now);
+                store.origin.set(origin);
+            });
+        }
         if crate::chrome::native() {
             // The platform's sidebar and menus select pages too.
             follow(crate::chrome::bridge().page.subscribe(), move |p: &Page| {
@@ -316,4 +356,29 @@ fn follow<T: Clone + Send + Sync + 'static>(
 
 pub fn store() -> Store {
     use_context::<Store>().expect("the root provides the store")
+}
+
+#[cfg(test)]
+mod page_tests {
+    use super::Page;
+
+    #[test]
+    fn an_inspect_view_stays_on_the_row_of_the_page_it_came_from() {
+        // Opened from Subscriptions: the row stays there, and the origin is Subscriptions.
+        let origin = Page::origin_after(Page::Profiles, None, Page::Proxies);
+        assert_eq!(origin, Some(Page::Profiles));
+        assert_eq!(Page::Proxies.row_from(origin), Page::Profiles);
+        // One Inspect view leading to another keeps the origin.
+        let origin = Page::origin_after(Page::Proxies, origin, Page::Rules);
+        assert_eq!(origin, Some(Page::Profiles));
+        assert_eq!(Page::Rules.row_from(origin), Page::Profiles);
+        // Any other page forgets it; the pages of the sidebar are their own row.
+        assert_eq!(Page::origin_after(Page::Rules, origin, Page::Apps), None);
+        assert_eq!(Page::Apps.row_from(origin), Page::Apps);
+        // From Settings, or with no origin, an Inspect view stands under Settings.
+        assert_eq!(Page::Logs.row_from(Some(Page::Settings)), Page::Settings);
+        assert_eq!(Page::Dns.row_from(None), Page::Settings);
+        // An AI service stays under Activity.
+        assert_eq!(Page::AiService.row_from(None), Page::Activity);
+    }
 }

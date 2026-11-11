@@ -147,6 +147,17 @@ test("groups: the subscription's own, under Settings, with a way back", async ()
   await app.waitUntil(() => !app.shows("text:Testing…"), slow);
 });
 
+test("groups opened from Subscriptions: the way back is Subscriptions", async () => {
+  const app = await open("..", desktop);
+  await app.press("text:Subscriptions >> nth=0");
+  await app.waitFor("text:In use", slow);
+  await app.press("text:Groups");
+  await app.waitFor("text:Fallback", slow);
+  await app.press("Back");
+  await app.waitFor("text:In use", slow);
+  expect(app.shows("text:Fallback")).toBe(false);
+});
+
 test("rules: the running configuration's, searchable; the AI layer's come with their group", async () => {
   const app = await open("..", desktop);
   await goTo(app, "Rules");

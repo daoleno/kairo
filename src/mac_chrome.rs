@@ -158,7 +158,7 @@ impl Sidebar {
             return;
         };
         self.ivars().quiet.set(true);
-        let page = page.sidebar();
+        let page = chrome::row_of(page);
         match ROWS
             .iter()
             .position(|r| matches!(r, Row::Item(p) if *p == page))
