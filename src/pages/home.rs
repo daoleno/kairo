@@ -122,7 +122,7 @@ fn welcome() -> impl IntoElement {
                     .self_center()
                     .mt_4()
                     .child(ui::muted("Have a config file instead?"))
-                    .child(ui::link_btn("Import File…").on_press(move || store.page.set(Page::Profiles))),
+                    .child(ui::link_btn("Import File").on_press(move || store.page.set(Page::Profiles))),
             ),
     )
 }
@@ -464,7 +464,7 @@ fn fix_button(message: impl Fn() -> String + Copy + 'static, failed: bool) -> im
                     })
                     .into_element()
             } else if m.contains("tun") && (m.contains("permission") || m.contains("privilege")) {
-                ui::capsule("Allow TUN…", true)
+                ui::capsule("Allow TUN", true)
                     .on_press(move || store.run(store.svc().grant_tun()))
                     .into_element()
             } else if failed {

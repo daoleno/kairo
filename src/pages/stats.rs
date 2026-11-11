@@ -345,7 +345,7 @@ fn clear_footer() -> impl IntoElement {
                 if sure.get() {
                     "Press again to clear".into()
                 } else {
-                    "Clear History…".into()
+                    "Clear History".into()
                 }
             })
             .on_press(move || {

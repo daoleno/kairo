@@ -65,7 +65,7 @@ test("exits: a place of one's own for everything else, then Fastest again", asyn
   // The tiles keep to a word; the servers' delays are in the picker, under each country.
   await app.press("text:Everything else >> nth=0");
   await app.waitUntil(() => has(app.texts(), (t) => /^\d+ ms$/.test(t)), slow);
-  await app.press("text:All servers…");
+  await app.press("text:All servers");
   await app.waitFor("text:Tokyo 02", slow);
   await app.press("text:Tokyo 02");
   await app.waitUntil(() => has(app.texts(), (t) => t === "Chosen · Tokyo 02"), slow);
@@ -216,7 +216,7 @@ test("AI: its exit beside the others, the flow on Activity, the switches in Sett
   // Statistics: a fresh home has an hour to wait, and says so instead of drawing an empty chart.
   expect(app.shows("text:Today")).toBe(true);
   await app.waitFor("text:Collecting data", slow);
-  expect(app.shows("text:Clear History…")).toBe(false);
+  expect(app.shows("text:Clear History")).toBe(false);
   await app.press("text:7 days");
   await app.waitFor("text:Collecting data", slow);
   noPromises();

@@ -233,13 +233,13 @@ pub fn page() -> impl IntoElement {
                         let note = ui::muted("Everything not listed uses its usual exit.");
                         row.child(if phone { note.w_full() } else { note.flex_1() })
                             .child(
-                                ui::capsule("Add App…", false)
+                                ui::capsule("Add App", false)
                                     .h(px(ui::touch_h(30.0)))
                                     .px_4()
                                     .on_press(move || adding.set(Some(Adding::App))),
                             )
                             .child(
-                                ui::capsule("Add Site…", false)
+                                ui::capsule("Add Site", false)
                                     .h(px(ui::touch_h(30.0)))
                                     .px_4()
                                     .on_press(move || adding.set(Some(Adding::Site))),
