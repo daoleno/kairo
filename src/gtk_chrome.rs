@@ -100,6 +100,17 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     list.select_row(list.row_at_index(first_row as i32).as_ref());
     list.connect_row_selected(|_, row| {
         if let Some(page) = row.and_then(|r| PAGES.get(r.index() as usize)) {
+            // An Inspect view (Groups, Rules ...) stands under Settings' row: the app selecting that row
+            // for it is not the person choosing Settings.
+            if chrome::bridge().page.borrow().sidebar() == *page {
+                return;
+            }
+            chrome::select(*page);
+        }
+    });
+    // A press on the row of the page being shown (Settings, while Groups is open) still goes there.
+    list.connect_row_activated(|_, row| {
+        if let Some(page) = PAGES.get(row.index() as usize) {
             chrome::select(*page);
         }
     });
