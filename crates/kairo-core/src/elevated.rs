@@ -81,9 +81,11 @@ pub fn ps_quote(s: &str) -> String {
 pub fn elevation_script(exe: &str, args: &[String]) -> Result<String, String> {
     let line = quote_args(args)?;
     Ok(format!(
+        // `try` and `catch` on ONE line: Windows PowerShell reading its script from
+        // stdin (`-Command -`) runs a `try` block that has its `catch` on the next
+        // line as nothing at all, silently (found by running the real grant).
         "$ErrorActionPreference='Stop'\n\
-         try {{ $p = Start-Process -FilePath {exe} -ArgumentList {line} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }}\n\
-         catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}\n",
+         try {{ $p = Start-Process -FilePath {exe} -ArgumentList {line} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}\n",
         exe = ps_quote(exe),
         line = ps_quote(&line),
     ))
@@ -823,6 +825,8 @@ mod tests {
         assert!(script.contains("-ArgumentList '\"--grant-tun\" \"--user\" \"PC\\Jo Ann\""));
         assert!(!script.contains("@("));
         assert!(script.contains("-Verb RunAs -Wait"));
+        // Read from stdin, a `catch` that starts a line makes PowerShell skip the `try`.
+        assert!(!script.lines().any(|l| l.trim_start().starts_with("catch")));
         // What cannot be carried is refused, not mangled.
         assert!(elevation_script("e", &["a\\".to_string()]).is_err());
         assert!(elevation_script("e", &["a\"b".to_string()]).is_err());

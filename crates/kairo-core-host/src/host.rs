@@ -290,7 +290,16 @@ fn serve(mut c: TcpStream, sh: &Shared) {
     // Only the installing user's processes: the connection's owner is looked up.
     match peer_sid(&c, sh.user_port) {
         Some(sid) if sid.eq_ignore_ascii_case(&sh.sid) => {}
-        _ => return reply(&mut c, 403, "Forbidden", &message("not the user this core was set up for")),
+        _ => {
+            reply(&mut c, 403, "Forbidden", &message("not the user this core was set up for"));
+            // Say it cleanly: end our side, read what was sent, so the caller sees
+            // the 403 and not a reset connection.
+            let _ = c.shutdown(Shutdown::Write);
+            let mut sink = [0u8; 4096];
+            let _ = c.set_read_timeout(Some(Duration::from_millis(300)));
+            let _ = c.read(&mut sink);
+            return;
+        }
     }
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
