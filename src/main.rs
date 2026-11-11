@@ -203,6 +203,109 @@ mod guardian {
     }
 }
 
+/// `kairo.exe --tun-selftest [home]`: the TUN permission and the core's start and
+/// stop through its task, without a window (a diagnostic, and how the Windows
+/// test in a standard account is run). Prints `status`, `paths`, then starts the
+/// core, prints READY when its controller answers, waits for the file
+/// `<home>\stop-now` (or 90 s), stops it and prints STOPPED or STILL-RUNNING.
+#[cfg(windows)]
+mod tun_selftest {
+    use super::*;
+    use kairo_core::{elevated, supervisor::CoreProcess, tun::{self, Privilege}};
+    use std::io::{Read, Write};
+    use std::time::{Duration, Instant};
+
+    const CONFIG: &str = r#"mixed-port: 17891
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:19091
+dns:
+  enable: true
+  listen: 127.0.0.1:1054
+  enhanced-mode: fake-ip
+  nameserver: [1.1.1.1, 8.8.8.8]
+tun:
+  enable: true
+  stack: mixed
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack: ["any:53", "tcp://any:53"]
+  route-exclude-address: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 20.20.20.0/24]
+proxies: []
+rules:
+  - MATCH,DIRECT
+"#;
+
+    fn controller_version() -> Option<String> {
+        let mut s = std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:19091".parse().ok()?,
+            Duration::from_millis(500),
+        )
+        .ok()?;
+        s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+        s.write_all(b"GET /version HTTP/1.0\r\n\r\n").ok()?;
+        let mut out = String::new();
+        s.read_to_string(&mut out).ok()?;
+        out.contains("version").then_some(out.lines().last().unwrap_or("").to_owned())
+    }
+
+    pub fn run(args: &[String]) -> i32 {
+        let home = args
+            .first()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(Paths::default_home);
+        let paths = Paths::new(&home);
+        println!("user {:?}", elevated::current_user());
+        println!("paths dir={} config={} log={}", paths.runtime_dir().display(), paths.runtime_config().display(), paths.logs_dir().join("core.log").display());
+        let status = tun::status(&paths.core_bin());
+        println!("status {status:?}");
+        if status != Privilege::Granted {
+            return 3;
+        }
+        let _ = paths.ensure();
+        let _ = std::fs::create_dir_all(paths.runtime_dir());
+        if let Err(e) = std::fs::write(paths.runtime_config(), CONFIG) {
+            println!("cannot write the config: {e}");
+            return 4;
+        }
+        let Ok(rt) = kairo_core::tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+            return 5;
+        };
+        rt.block_on(async {
+            let mut p = match CoreProcess::spawn_elevated(&paths).await {
+                Ok(p) => p,
+                Err(e) => {
+                    println!("spawn failed: {e}");
+                    return 6;
+                }
+            };
+            println!("started; running={}", p.running());
+            let t = Instant::now();
+            let mut version = None;
+            while t.elapsed() < Duration::from_secs(20) {
+                version = controller_version();
+                if version.is_some() {
+                    break;
+                }
+                kairo_core::tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+            println!("READY {version:?} after {:?}", t.elapsed());
+            let stop_file = home.join("stop-now");
+            let _ = std::fs::remove_file(&stop_file);
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_secs(90) && !stop_file.exists() {
+                kairo_core::tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            println!("core_alive before stop: {}", kairo_core::supervisor::core_alive(&paths));
+            p.stop(&paths).await;
+            println!("{}", if p.running() { "STILL-RUNNING" } else { "STOPPED" });
+            println!("log tail: {:?}", p.tail().into_iter().rev().take(3).collect::<Vec<_>>());
+            0
+        })
+    }
+}
+
 /// A windowed program has no console: its log goes to `logs/kairo.log`.
 #[cfg(windows)]
 fn init_logging() {
@@ -244,6 +347,7 @@ fn main() {
         match a.get(1).map(String::as_str) {
             Some("--grant-tun") => std::process::exit(kairo_core::elevated::run_grant(&a[2..])),
             Some("--revoke-tun") => std::process::exit(kairo_core::elevated::run_revoke(&a[2..])),
+            Some("--tun-selftest") => std::process::exit(tun_selftest::run(&a[2..])),
             _ => {}
         }
     }
