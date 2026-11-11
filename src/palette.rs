@@ -118,7 +118,7 @@ fn commands(store: Store) -> Vec<Command> {
         "Subscriptions",
         Icon::Refresh,
         |s| {
-            s.run_then(s.svc().update_all_profiles(), move |r| {
+            s.run_update_then(s.svc().update_all_profiles(), move |r| {
                 if r.is_ok() {
                     s.info("Subscriptions updated");
                 }

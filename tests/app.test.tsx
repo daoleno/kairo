@@ -119,6 +119,7 @@ test("apps & sites: an app and a site of one's own, each removed by its own butt
   expect(app.shows("text:Nothing set apart")).toBe(false);
   await app.press("Add App");
   await app.waitFor("text:Add an app", slow);
+  await app.waitFor("text:Telegram", slow);
   await app.type("text:Telegram", "kairo-app");
   await app.press("Add");
   await app.waitFor("text:kairo-app", slow);
@@ -270,4 +271,36 @@ test("follows the system's dark appearance", async () => {
   await app.setColorScheme("dark");
   const dark = app.spanStyle("text:Home >> nth=0").color;
   expect(dark).not.toBe(light);
+});
+
+// Last of the file: the provider's server fails for a while, then recovers. The fixture has a switch, flipped
+// here by "adding" its address as a subscription link (the headless host has no network of its own).
+const flip = async (app: any, path: string) => {
+  await app.press("Add");
+  await app.waitFor("text:Add a Subscription", slow);
+  await app.type("text:https://example.com/subscribe?token=…", `http://127.0.0.1:${FIXTURE}/${path}`);
+  await app.keyboard.press("Enter");
+  await app.wait(1500);
+  await app.press("Cancel");
+  await app.waitUntil(() => !app.shows("text:Add a Subscription"), slow);
+};
+
+test("a failed update: the card says it once, and no toast says it again", async () => {
+  const app = await open("..", desktop);
+  await app.press("text:Subscriptions >> nth=0");
+  await app.waitFor("text:In use", slow);
+  await flip(app, "down-on");
+  try {
+    await app.press("text:Update");
+    await app.waitUntil(() => has(app.texts(), (t) => t.includes("couldn't update")), slow);
+    // Update again: the card already says it, so no toast repeats the words.
+    await app.press("text:Update");
+    await app.wait(2500);
+    expect(has(app.texts(), (t) => t.startsWith("The server answered"))).toBe(false);
+    expect(has(app.texts(), (t) => t.includes("couldn't update"))).toBe(true);
+  } finally {
+    await flip(app, "down-off");
+  }
+  await app.press("Retry");
+  await app.waitUntil(() => !has(app.texts(), (t) => t.includes("couldn't update")), slow);
 });
