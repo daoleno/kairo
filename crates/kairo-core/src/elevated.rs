@@ -8,58 +8,34 @@
 //! 1. copies the core (`mihomo.exe`), the wintun driver library (`wintun.dll`) and
 //!    a small host (`kairo-core-host.exe`) to `%ProgramData%\Kairo\core`, which
 //!    only administrators can write to (so what runs as SYSTEM is never a file
-//!    the user can replace);
+//!    the user can replace), and makes the folders the core works in (also
+//!    administrator-owned, created locked);
 //! 2. registers a scheduled task `KairoCore-<user>` that runs the host as SYSTEM
-//!    with the arguments fixed (core, runtime directory, config, log), and gives
-//!    that one user the right to run and end it (a security descriptor on the
-//!    task). If the Task Scheduler cannot be used it registers a service of the
-//!    same name instead, with the same right to start and stop it;
-//! 3. records what it did in `grant-<user>.json` next to the files (readable by
-//!    all), with the SHA-256 of the three files.
+//!    with one fixed argument, its name, and gives that one user the right to run
+//!    and end it (a security descriptor on the task). If the Task Scheduler cannot
+//!    be used it registers a service of the same name instead;
+//! 3. records what it did in `grant-<user>.json` next to the files, with the
+//!    SHA-256 of the three files; the host refuses to start when they differ.
 //!
-//! After that Kairo needs no prompt: `schtasks /run` and `schtasks /end` (or
-//! `sc start`/`sc stop`). A user cannot open a SYSTEM process (not even to ask if
-//! it is alive), so whether the core runs is read from a named event the host
-//! holds, `Global\KairoCoreHost-<name>`. When an app update brings another core,
-//! host or driver library, the recorded hashes no longer match and Kairo asks for
-//! the permission again, like on Linux.
+//! The user hands the host data, never a path: Kairo writes its config into the
+//! one file the user may write in the inbox, and the host reduces it to what the
+//! core may run, writes its own copy, and fronts the core's controller (see
+//! `kairo-core-host`). After the grant Kairo needs no prompt: `schtasks /run` and
+//! `/end` (or `sc`). A user cannot open a SYSTEM process, so whether the core runs
+//! is read from a named event the host holds. When an app update brings another
+//! core, host or driver library, the recorded hashes no longer match and Kairo
+//! asks for the permission again, like on Linux: an update never reaches SYSTEM
+//! except through that prompt.
 //!
-//! The pure parts (names, descriptors, argument lines, what counts as granted)
-//! are plain functions and are tested everywhere; the Windows calls are below.
+//! The pure parts (argument lines, what counts as granted) are plain functions and
+//! are tested everywhere; the Windows calls are below.
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
-pub const CORE_EXE: &str = "mihomo.exe";
-pub const HOST_EXE: &str = "kairo-core-host.exe";
-pub const WINTUN_DLL: &str = "wintun.dll";
-
-/// How the user starts the core.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Route {
-    Task,
-    Service,
-}
-
-/// What the grant recorded (`grant-<name>.json`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Grant {
-    pub route: Route,
-    /// The task or service name, and the host's event name suffix.
-    pub name: String,
-    pub user: String,
-    pub sid: String,
-    /// The runtime directory, config and log the core is started with.
-    pub dir: String,
-    pub config: String,
-    pub log: String,
-    /// SHA-256 (hex) of the files in `%ProgramData%\Kairo\core`.
-    pub core: String,
-    pub host: String,
-    pub wintun: String,
-}
+pub use kairo_core_host::names::{
+    CORE_EXE, Grant, HOST_EXE, Layout, Route, WINTUN_DLL, host_args, object_name, sanitize_user as sanitize,
+    valid_sid,
+};
 
 /// The files Kairo ships for TUN, next to its executable.
 #[derive(Debug, Clone, PartialEq)]
@@ -78,54 +54,6 @@ pub fn bundle_of(exe: &Path) -> Option<Bundle> {
         wintun: dir.join(WINTUN_DLL),
     };
     (b.core.is_file() && b.host.is_file() && b.wintun.is_file()).then_some(b)
-}
-
-/// A user name as part of a task, service and object name: letters, digits,
-/// `-` and `_` only.
-pub fn sanitize(user: &str) -> String {
-    let short = user.rsplit('\\').next().unwrap_or(user);
-    short
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect()
-}
-
-/// `KairoCore-<user>`: the task, the service, and (after `KairoCoreHost-`) the event.
-pub fn object_name(user: &str) -> String {
-    format!("KairoCore-{}", sanitize(user))
-}
-
-/// Where the permission's files live, below `%ProgramData%`.
-pub fn install_dir_in(program_data: &Path) -> PathBuf {
-    program_data.join("Kairo").join("core")
-}
-
-pub fn grant_file_in(dir: &Path, name: &str) -> PathBuf {
-    dir.join(format!("grant-{name}.json"))
-}
-
-/// The arguments the host is started with, fixed in the task or service.
-pub fn host_args(
-    mode: &str,
-    name: &str,
-    install: &Path,
-    dir: &str,
-    config: &str,
-    log: &str,
-) -> Vec<String> {
-    vec![
-        mode.to_owned(),
-        "--name".into(),
-        name.to_owned(),
-        "--core".into(),
-        install.join(CORE_EXE).to_string_lossy().into_owned(),
-        "--dir".into(),
-        dir.to_owned(),
-        "--config".into(),
-        config.to_owned(),
-        "--log".into(),
-        log.to_owned(),
-    ]
 }
 
 /// Arguments as one string: each in double quotes (no Windows path can hold one).
@@ -193,9 +121,6 @@ pub fn parse_whoami(csv: &str) -> Option<(String, String)> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expected {
     pub name: String,
-    pub dir: String,
-    pub config: String,
-    pub log: String,
     pub core: String,
     pub host: String,
     pub wintun: String,
@@ -203,9 +128,6 @@ pub struct Expected {
 
 pub fn grant_matches(g: &Grant, e: &Expected) -> bool {
     g.name == e.name
-        && g.dir == e.dir
-        && g.config == e.config
-        && g.log == e.log
         && g.core.eq_ignore_ascii_case(&e.core)
         && g.host.eq_ignore_ascii_case(&e.host)
         && g.wintun.eq_ignore_ascii_case(&e.wintun)
@@ -237,6 +159,8 @@ mod win {
     use std::sync::{Mutex, OnceLock};
     use std::time::SystemTime;
 
+    use kairo_core_host::names::{READ_AND_LIST, READ_ALL, READ_WRITE_DATA, owner_and_dacl};
+    use kairo_core_host::winfs;
     use sha2::{Digest, Sha256};
 
     use super::*;
@@ -265,8 +189,9 @@ mod win {
             .unwrap_or_else(|| PathBuf::from("C:\\ProgramData"))
     }
 
-    pub fn install_dir() -> PathBuf {
-        install_dir_in(&program_data())
+    /// Every path of this user's grant.
+    pub fn layout(name: &str) -> Option<Layout> {
+        Layout::new(&program_data(), name)
     }
 
     /// The signed-in user's name and SID.
@@ -310,7 +235,8 @@ mod win {
     pub fn recorded() -> Option<Grant> {
         let (user, _) = current_user().ok()?;
         let name = object_name(&user);
-        let text = std::fs::read_to_string(grant_file_in(&install_dir(), &name)).ok()?;
+        let l = layout(&name)?;
+        let text = std::fs::read_to_string(l.grant_file(&name)).ok()?;
         serde_json::from_str(&text).ok()
     }
 
@@ -384,12 +310,28 @@ mod win {
         registered(g.route, &g.name).then_some((g.route, g.name))
     }
 
-    fn expected(paths: &Paths, b: &Bundle, name: &str) -> Option<Expected> {
+    /// Where the core's log is (the host writes it; the user may read it).
+    pub fn log_path(name: &str) -> Option<PathBuf> {
+        layout(name).map(|l| l.log())
+    }
+
+    /// Hands the config to the host: written in place into the inbox file, the one
+    /// file the user may write (not delete, rename or re-ACL). The host reads it
+    /// when it starts and when the controller is asked to reload.
+    pub fn deliver_config(name: &str, bytes: &[u8]) -> Result<(), String> {
+        let l = layout(name).ok_or("not a Kairo core name")?;
+        let path = l.inbox_file();
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .map_err(|e| format!("The TUN helper's config file: {e}"))?;
+        f.write_all(bytes).map_err(|e| format!("The TUN helper's config file: {e}"))
+    }
+
+    fn expected(b: &Bundle, name: &str) -> Option<Expected> {
         Some(Expected {
             name: name.to_owned(),
-            dir: paths.runtime_dir().to_string_lossy().into_owned(),
-            config: paths.runtime_config().to_string_lossy().into_owned(),
-            log: paths.logs_dir().join("core.log").to_string_lossy().into_owned(),
             core: sha256_of(&b.core)?,
             host: sha256_of(&b.host)?,
             wintun: sha256_of(&b.wintun)?,
@@ -398,11 +340,9 @@ mod win {
 
     /// Whether the core can be started with TUN without asking.
     ///
-    /// Off unless `KAIRO_WINDOWS_TUN=1`: the SYSTEM host still opens files under
-    /// folders a standard user controls (the runtime and logs folders), which a
-    /// directory junction can redirect. Until the host works only in an
-    /// administrator-owned folder this stays a test switch.
-    pub fn status(paths: &Paths) -> Privilege {
+    /// Off unless `KAIRO_WINDOWS_TUN=1`, until the design in `RESULT-windows-slice2.md`
+    /// (slice 2b) has been independently reviewed.
+    pub fn status(_paths: &Paths) -> Privilege {
         if std::env::var_os("KAIRO_WINDOWS_TUN").is_none_or(|v| v != "1") {
             return Privilege::Unsupported;
         }
@@ -413,14 +353,20 @@ mod win {
             return Privilege::Unsupported;
         };
         let name = object_name(&user);
-        let (Some(g), Some(e)) = (recorded(), expected(paths, &b, &name)) else {
+        let (Some(g), Some(e), Some(l)) = (recorded(), expected(&b, &name), layout(&name)) else {
             return Privilege::Needed;
         };
-        let dir = install_dir();
-        let placed = [CORE_EXE, HOST_EXE, WINTUN_DLL]
+        // The administrators' copies are what runs: they must still be what was
+        // approved (the host checks too and would refuse), and this release's
+        // files must be the same ones.
+        let placed = [(l.core(), &g.core), (l.host(), &g.host), (l.wintun(), &g.wintun)]
             .iter()
-            .all(|f| dir.join(f).is_file());
-        if placed && grant_matches(&g, &e) && registered(g.route, &g.name) {
+            .all(|(p, h)| sha256_of(p).is_some_and(|x| x.eq_ignore_ascii_case(h)));
+        if placed
+            && l.inbox_file().is_file()
+            && grant_matches(&g, &e)
+            && registered(g.route, &g.name)
+        {
             Privilege::Granted
         } else {
             Privilege::Needed
@@ -430,37 +376,22 @@ mod win {
     /// Asks for administrator approval (UAC) and has an elevated copy of Kairo
     /// do the one-time setup (`run_grant`).
     pub fn grant(paths: &Paths) -> Result<(), String> {
-        let b = bundle().ok_or(
+        bundle().ok_or(
             "This copy of Kairo has no TUN helper next to it. Reinstall Kairo to get it back.",
         )?;
         let (user, sid) = current_user()?;
         let exe = crate::paths::current_exe().ok_or("Cannot find Kairo's own program")?;
-        let result = paths.state_dir().join("tun-grant-result.txt");
-        let _ = std::fs::create_dir_all(paths.state_dir());
-        let _ = std::fs::remove_file(&result);
-        let s = |p: &Path| p.to_string_lossy().into_owned();
-        let args: Vec<String> = vec![
-            "--grant-tun".into(),
-            "--user".into(),
-            user,
-            "--sid".into(),
-            sid,
-            "--dir".into(),
-            s(&paths.runtime_dir()),
-            "--config".into(),
-            s(&paths.runtime_config()),
-            "--log".into(),
-            s(&paths.logs_dir().join("core.log")),
-            "--core".into(),
-            s(&b.core),
-            "--host".into(),
-            s(&b.host),
-            "--wintun".into(),
-            s(&b.wintun),
-            "--result".into(),
-            s(&result),
-        ];
-        let script = elevation_script(&s(&exe), &args)?;
+        let name = object_name(&user);
+        let l = layout(&name).ok_or("Cannot name the TUN helper")?;
+        let nonce = hex::encode(rand::random::<[u8; 16]>());
+        // No path goes to the elevated side: it works from its own folder and
+        // from `%ProgramData%`, and says what it did in a file only it can write.
+        let args: Vec<String> = ["--grant-tun", "--user", &user, "--sid", &sid, "--nonce", &nonce]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let _ = paths;
+        let script = elevation_script(&exe.to_string_lossy(), &args)?;
         let ps = system32("WindowsPowerShell\\v1.0\\powershell.exe");
         let mut child = quiet(&ps.to_string_lossy())
             .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"])
@@ -474,15 +405,32 @@ mod win {
             .write_all(script.as_bytes())
             .map_err(|e| e.to_string())?;
         let out = child.wait_with_output().map_err(|e| e.to_string())?;
-        let said = std::fs::read_to_string(&result).unwrap_or_default();
-        let said = said.trim();
-        if said.starts_with("ok") && status(paths) == Privilege::Granted {
-            return Ok(());
-        }
-        if let Some(e) = said.strip_prefix("error:") {
-            return Err(e.trim().to_owned());
+        let said = std::fs::read_to_string(l.grant_result(&name)).unwrap_or_default();
+        if let Some(rest) = said.trim().strip_prefix(&nonce) {
+            let rest = rest.trim();
+            if rest.starts_with("ok") && status_for_grant() == Privilege::Granted {
+                return Ok(());
+            }
+            if let Some(e) = rest.strip_prefix("error:") {
+                return Err(e.trim().to_owned());
+            }
         }
         Err(explain_elevation_failure(&String::from_utf8_lossy(&out.stderr)))
+    }
+
+    /// `status` as the grant itself needs it (the gate is for the product).
+    fn status_for_grant() -> Privilege {
+        let Some(b) = bundle() else { return Privilege::Unsupported };
+        let Ok((user, _)) = current_user() else { return Privilege::Unsupported };
+        let name = object_name(&user);
+        let (Some(g), Some(e)) = (recorded(), expected(&b, &name)) else {
+            return Privilege::Needed;
+        };
+        if grant_matches(&g, &e) && registered(g.route, &g.name) {
+            Privilege::Granted
+        } else {
+            Privilege::Needed
+        }
     }
 
     // --- The elevated side ------------------------------------------------------
@@ -500,9 +448,10 @@ mod win {
         m
     }
 
+    /// Re-asserts the access of a folder that was already ours: SYSTEM and
+    /// Administrators full, Users read and run. By SID, not by name (names are
+    /// translated).
     fn icacls(dir: &Path) -> Result<(), String> {
-        // SYSTEM, Administrators: full; Users: read and run. By SID, not by name
-        // (names are translated).
         let out = quiet(&system32("icacls.exe").to_string_lossy())
             .arg(dir)
             .args([
@@ -519,6 +468,25 @@ mod win {
         } else {
             Err(format!("icacls: {}", String::from_utf8_lossy(&out.stdout).trim()))
         }
+    }
+
+    /// A folder only administrators write to: kept when it is already theirs
+    /// (owner SYSTEM or Administrators, no link), otherwise removed and created
+    /// locked (`%ProgramData%` lets any user create a folder there and own it).
+    fn shared_dir(path: &Path) -> Result<(), String> {
+        let was_ours = winfs::is_trusted_dir(path);
+        let sddl = format!("{}{}", owner_and_dacl(None, "", "OICI"), READ_ALL);
+        winfs::ensure_trusted_dir(path, &sddl)?;
+        if was_ours {
+            icacls(path)?;
+        }
+        Ok(())
+    }
+
+    /// A folder of one user's grant, always made new.
+    fn user_dir(path: &Path, sid: Option<&str>, rights: &str, inherit: &str) -> Result<(), String> {
+        winfs::remove_any(path)?;
+        winfs::create_dir_with(path, &owner_and_dacl(sid, rights, inherit))
     }
 
     fn register_task(name: &str, host: &Path, args: &[String], sid: &str) -> Result<(), String> {
@@ -602,27 +570,24 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
             .output();
     }
 
-    /// Runs elevated (`kairo.exe --grant-tun ...`): the one-time setup. Writes the
-    /// outcome to `--result`. Returns the process exit code.
+    /// Runs elevated (`kairo.exe --grant-tun --user U --sid S --nonce N`): the
+    /// one-time setup. It takes no path: the files come from beside this program,
+    /// everything else is under `%ProgramData%\Kairo`. Returns the exit code.
     pub fn run_grant(args: &[String]) -> i32 {
         let o = opts(args);
-        let result_file = o.get("result").cloned();
-        let report = |text: String, code: i32| {
-            if let Some(p) = &result_file {
-                let _ = std::fs::write(p, &text);
-            }
-            code
-        };
         let get = |k: &str| o.get(k).cloned().ok_or_else(|| format!("--{k} is missing"));
+        let (user, sid, nonce) = match (get("user"), get("sid"), get("nonce")) {
+            (Ok(u), Ok(s), Ok(n)) => (u, s, n),
+            _ => return 2,
+        };
+        if !valid_sid(&sid) || nonce.len() > 64 || !nonce.chars().all(|c| c.is_ascii_hexdigit()) {
+            return 2;
+        }
+        let name = object_name(&user);
+        let Some(l) = layout(&name) else { return 2 };
         let go = || -> Result<Route, String> {
-            let (user, sid) = (get("user")?, get("sid")?);
-            if !sid.starts_with("S-1-") || sid.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '-')) {
-                return Err("not a user SID".into());
-            }
-            let (dir, config, log) = (get("dir")?, get("config")?, get("log")?);
-            let name = object_name(&user);
-            let install = install_dir();
-            std::fs::create_dir_all(&install).map_err(|e| format!("{}: {e}", install.display()))?;
+            let exe = crate::paths::current_exe().ok_or("cannot find this program")?;
+            let b = bundle_of(&exe).ok_or("no TUN helper beside this program")?;
             // An earlier grant may have the core running from these files.
             remove_routes(&name);
             for _ in 0..30 {
@@ -631,26 +596,36 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
                 }
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
+            // The folders: administrator-owned, locked as they are created.
+            shared_dir(&l.root)?;
+            shared_dir(&l.install)?;
+            for parent in [l.run.parent(), l.logs.parent(), l.inbox_dir.parent()].into_iter().flatten() {
+                shared_dir(parent)?;
+            }
+            // The core's home: SYSTEM and Administrators only (it holds the
+            // controller secret). The log folder the user may read; the inbox
+            // folder they may list, and its one file they may write.
+            user_dir(&l.run, None, "", "OICI")?;
+            user_dir(&l.logs, Some(&sid), READ_AND_LIST, "OICI")?;
+            user_dir(&l.inbox_dir, Some(&sid), READ_AND_LIST, "")?;
+            winfs::create_file_with(
+                &l.inbox_file(),
+                &owner_and_dacl(Some(&sid), READ_WRITE_DATA, ""),
+            )?;
             // Read, hash, then write the bytes just read: what lands in the
-            // protected directory is what was hashed.
+            // protected folder is what was hashed.
             let mut hashes = Vec::new();
-            for (key, target) in [("core", CORE_EXE), ("host", HOST_EXE), ("wintun", WINTUN_DLL)] {
-                let src = get(key)?;
-                let bytes = std::fs::read(&src).map_err(|e| format!("{src}: {e}"))?;
-                write_atomic(&install.join(target), &bytes)
-                    .map_err(|e| format!("{target}: {e}"))?;
+            for (src, target) in [(&b.core, CORE_EXE), (&b.host, HOST_EXE), (&b.wintun, WINTUN_DLL)] {
+                let bytes = std::fs::read(src).map_err(|e| format!("{}: {e}", src.display()))?;
+                write_atomic(&l.install.join(target), &bytes).map_err(|e| format!("{target}: {e}"))?;
                 hashes.push(hex::encode(Sha256::digest(&bytes)));
             }
-            icacls(&install)?;
-            let host = install.join(HOST_EXE);
-            let task_args = host_args("run", &name, &install, &dir, &config, &log);
-            let route = match register_task(&name, &host, &task_args, &sid) {
+            let host = l.host();
+            let route = match register_task(&name, &host, &host_args("run", &name), &sid) {
                 Ok(()) => Route::Task,
                 Err(task_err) => {
-                    let svc_args = host_args("service", &name, &install, &dir, &config, &log);
-                    let command = command_line(&host, &svc_args)?;
-                    register_service(&name, &command, &sid)
-                        .map_err(|e| format!("{task_err}; {e}"))?;
+                    let command = command_line(&host, &host_args("service", &name))?;
+                    register_service(&name, &command, &sid).map_err(|e| format!("{task_err}; {e}"))?;
                     Route::Service
                 }
             };
@@ -659,43 +634,61 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
                 name: name.clone(),
                 user,
                 sid,
-                dir,
-                config,
-                log,
                 core: hashes[0].clone(),
                 host: hashes[1].clone(),
                 wintun: hashes[2].clone(),
             };
             let json = serde_json::to_vec_pretty(&grant).map_err(|e| e.to_string())?;
-            write_atomic(&grant_file_in(&install, &name), &json).map_err(|e| e.to_string())?;
+            write_atomic(&l.grant_file(&name), &json).map_err(|e| e.to_string())?;
             Ok(route)
         };
-        match go() {
-            Ok(route) => report(format!("ok {route:?}"), 0),
-            Err(e) => report(format!("error: {e}"), 1),
+        let (text, code) = match go() {
+            Ok(route) => (format!("{nonce} ok {route:?}"), 0),
+            Err(e) => (format!("{nonce} error: {e}"), 1),
+        };
+        if winfs::is_trusted_dir(&l.install) {
+            let _ = write_atomic(&l.grant_result(&name), text.as_bytes());
         }
+        code
     }
 
     /// Runs elevated (`kairo.exe --revoke-tun --user U`): removes the task or
-    /// service and the grant; the files go with the last grant.
+    /// service, the grant and this user's folders; the files go with the last grant.
     pub fn run_revoke(args: &[String]) -> i32 {
         let o = opts(args);
         let Some(user) = o.get("user") else { return 2 };
         let name = object_name(user);
+        let Some(l) = layout(&name) else { return 2 };
         remove_routes(&name);
-        let install = install_dir();
-        let _ = std::fs::remove_file(grant_file_in(&install, &name));
-        let others = std::fs::read_dir(&install)
+        for _ in 0..30 {
+            if !running(&name) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let _ = std::fs::remove_file(l.grant_file(&name));
+        let _ = std::fs::remove_file(l.grant_result(&name));
+        for d in [&l.run, &l.logs, &l.inbox_dir] {
+            let _ = winfs::remove_any(d);
+        }
+        let others = std::fs::read_dir(&l.install)
             .map(|d| {
                 d.flatten()
-                    .any(|e| e.file_name().to_string_lossy().starts_with("grant-"))
+                    .any(|e| e.file_name().to_string_lossy().starts_with("grant-") && e.file_name().to_string_lossy().ends_with(".json"))
             })
             .unwrap_or(false);
         if !others {
             for f in [CORE_EXE, HOST_EXE, WINTUN_DLL] {
-                let _ = std::fs::remove_file(install.join(f));
+                let _ = std::fs::remove_file(l.install.join(f));
             }
-            let _ = std::fs::remove_dir(&install);
+            let _ = std::fs::remove_dir(&l.install);
+            // The shared parents go when nothing is left in them.
+            for p in [l.run.parent(), l.logs.parent(), l.inbox_dir.parent(), Some(l.root.as_path())]
+                .into_iter()
+                .flatten()
+            {
+                let _ = std::fs::remove_dir(p);
+            }
         }
         0
     }
@@ -704,14 +697,6 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn names_are_safe_to_put_in_a_task_and_an_event() {
-        assert_eq!(object_name("WIN-1\\tester"), "KairoCore-tester");
-        assert_eq!(object_name("Jo Ann"), "KairoCore-Jo_Ann");
-        assert_eq!(object_name("a\"b&c%"), "KairoCore-a_b_c_");
-        assert_eq!(sanitize("DOMAIN\\ma.ria"), "ma_ria");
-    }
 
     #[test]
     fn the_descriptors_give_one_user_the_right_to_start_and_stop() {
@@ -739,18 +724,17 @@ mod tests {
     }
 
     #[test]
-    fn the_host_is_started_with_fixed_quoted_arguments() {
-        let args = host_args(
-            "run",
-            "KairoCore-t",
-            Path::new("C:\\ProgramData\\Kairo\\core"),
-            "C:\\Users\\a b\\AppData\\Roaming\\Kairo\\runtime",
-            "C:\\Users\\a b\\AppData\\Roaming\\Kairo\\runtime\\config.yaml",
-            "C:\\Users\\a b\\AppData\\Roaming\\Kairo\\logs\\core.log",
+    fn the_task_carries_one_name_and_no_path() {
+        let args = host_args("run", "KairoCore-t");
+        let line = command_line(
+            Path::new("C:\\ProgramData\\Kairo\\core\\kairo-core-host.exe"),
+            &args,
+        )
+        .unwrap();
+        assert_eq!(
+            line,
+            "\"C:\\ProgramData\\Kairo\\core\\kairo-core-host.exe\" \"run\" \"--name\" \"KairoCore-t\""
         );
-        let line = command_line(Path::new("C:\\ProgramData\\Kairo\\core\\kairo-core-host.exe"), &args).unwrap();
-        assert!(line.starts_with("\"C:\\ProgramData\\Kairo\\core\\kairo-core-host.exe\" \"run\" \"--name\""));
-        assert!(line.contains("\"C:\\Users\\a b\\AppData\\Roaming\\Kairo\\runtime\""));
         let bad = vec!["x\" & calc".to_string()];
         assert!(command_line(Path::new("h"), &bad).is_err());
     }
@@ -758,9 +742,6 @@ mod tests {
     fn expected() -> Expected {
         Expected {
             name: "KairoCore-t".into(),
-            dir: "d".into(),
-            config: "c".into(),
-            log: "l".into(),
             core: "AA".into(),
             host: "BB".into(),
             wintun: "CC".into(),
@@ -773,9 +754,6 @@ mod tests {
             name: "KairoCore-t".into(),
             user: "u".into(),
             sid: "S-1-5-21-1".into(),
-            dir: "d".into(),
-            config: "c".into(),
-            log: "l".into(),
             core: "aa".into(),
             host: "bb".into(),
             wintun: "cc".into(),
@@ -783,14 +761,13 @@ mod tests {
     }
 
     #[test]
-    fn a_new_core_host_driver_or_place_needs_the_permission_again() {
+    fn a_new_core_host_or_driver_needs_the_permission_again() {
         assert!(grant_matches(&grant(), &expected()));
         for change in [
             |e: &mut Expected| e.core = "ZZ".into(),
             |e: &mut Expected| e.host = "ZZ".into(),
             |e: &mut Expected| e.wintun = "ZZ".into(),
-            |e: &mut Expected| e.dir = "other".into(),
-            |e: &mut Expected| e.log = "other".into(),
+            |e: &mut Expected| e.name = "KairoCore-other".into(),
         ] {
             let mut e = expected();
             change(&mut e);
@@ -815,28 +792,28 @@ mod tests {
 
     #[test]
     fn the_elevation_script_carries_spaces_and_apostrophes_as_one_quoted_line() {
-        let args: Vec<String> = [
-            "--grant-tun",
-            "--user",
-            "PC\\Jo Ann",
-            "--dir",
-            "C:\\Users\\Jo Ann\\AppData\\Roaming\\Kairo\\runtime",
-            "--log",
-            "C:\\Users\\O'Neil\\Kairo\\logs\\core.log",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+        let args: Vec<String> = ["--grant-tun", "--user", "PC\\Jo Ann", "--sid", "S-1-5-21-1", "--nonce", "ab12"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let script = elevation_script("C:\\Users\\O'Neil\\kairo.exe", &args).unwrap();
         // One -ArgumentList, a single PowerShell string; apostrophes doubled.
         assert!(script.contains("-FilePath 'C:\\Users\\O''Neil\\kairo.exe'"));
         assert!(script.contains("-ArgumentList '\"--grant-tun\" \"--user\" \"PC\\Jo Ann\""));
-        assert!(script.contains("\"C:\\Users\\O''Neil\\Kairo\\logs\\core.log\"'"));
         assert!(!script.contains("@("));
         assert!(script.contains("-Verb RunAs -Wait"));
         // What cannot be carried is refused, not mangled.
         assert!(elevation_script("e", &["a\\".to_string()]).is_err());
         assert!(elevation_script("e", &["a\"b".to_string()]).is_err());
+    }
+
+    #[test]
+    fn the_grant_takes_no_path_from_the_user() {
+        // The elevated side's arguments are a name, a SID and a nonce: nothing
+        // that is a path, so there is nothing for the SYSTEM side to open.
+        let args = ["--grant-tun", "--user", "--sid", "--nonce"];
+        assert!(args.iter().all(|a| a.starts_with("--")));
+        assert!(!args.iter().any(|a| ["--dir", "--config", "--log", "--core", "--host", "--wintun", "--result"].contains(a)));
     }
 
     #[test]
@@ -849,5 +826,36 @@ mod tests {
             std::fs::write(tmp.path().join(f), b"x").unwrap();
         }
         assert_eq!(bundle_of(&exe).unwrap().host, tmp.path().join(HOST_EXE));
+    }
+
+    /// What Kairo itself builds for TUN, run through the host's reduction: the
+    /// person's proxies, groups, rules, DNS (a profile's own resolver included)
+    /// and TUN settings survive; only what the SYSTEM core must not run is left out.
+    #[test]
+    fn kairos_own_tun_config_passes_the_hosts_reduction_whole() {
+        use crate::settings::Settings;
+        let profile = "dns:\n  enable: true\n  listen: 127.0.0.1:7874\n  nameserver: [1.1.1.1, 'tls://9.9.9.9:853']\n  proxy-server-nameserver: ['udp://127.0.0.1:7874']\nlisteners:\n  - {name: in, type: mixed, port: 7777}\ntunnels:\n  - tcp,127.0.0.1:6553,1.1.1.1:53,DIRECT\nproxies:\n  - {name: a, type: vless, server: h.example.com, port: 443, uuid: 11111111-1111-1111-1111-111111111111, tls: true, network: ws, ws-opts: {path: /ws}}\n  - {name: b, type: ss, server: s.example.com, port: 8388, cipher: aes-128-gcm, password: p}\nproxy-groups:\n  - {name: G, type: select, proxies: [a, b, DIRECT]}\nrules:\n  - DOMAIN,example.com,G\n  - MATCH,DIRECT\n";
+        let mut s = Settings::default();
+        s.tun = true;
+        s.secret = crate::settings::new_secret();
+        let (text, _) = crate::config::build_applied(profile, "", &s, &|_| false).unwrap();
+        let out = kairo_core_host::sanitize::sanitize(
+            &text,
+            &kairo_core_host::sanitize::Internal { port: 40000, secret: "host-only" },
+        )
+        .unwrap();
+        assert_eq!(out.controller_port, s.controller_port);
+        assert_eq!(out.secret, s.secret);
+        let m: serde_yaml::Value = serde_yaml::from_str(&out.text).unwrap();
+        assert_eq!(m["tun"]["enable"].as_bool(), Some(true));
+        assert_eq!(m["proxies"].as_sequence().unwrap().len(), 2);
+        assert!(m["proxy-groups"].as_sequence().unwrap().len() >= 1, "the profile's group and Kairo's own survive");
+        assert_eq!(m["dns"]["listen"].as_str(), Some("127.0.0.1:7874"));
+        assert!(m["rules"].as_sequence().unwrap().len() >= 2);
+        assert!(m.get("geox-url").is_some());
+        // Left out: only the profile's own inbound listeners and tunnels.
+        let mut gone = out.dropped.clone();
+        gone.sort();
+        assert_eq!(gone, ["listeners", "tunnels"], "{:?}", out.dropped);
     }
 }

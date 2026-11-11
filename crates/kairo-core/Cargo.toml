@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+kairo-core-host = { path = "../kairo-core-host" }
 anyhow = "1"
 thiserror = "2"
 log = "0.4"
