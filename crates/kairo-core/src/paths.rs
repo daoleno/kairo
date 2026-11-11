@@ -80,6 +80,10 @@ impl Paths {
     pub fn override_file(&self, id: &str) -> PathBuf {
         self.home.join("overrides").join(format!("{id}.yaml"))
     }
+    /// The pictures of apps and sites (`icons`).
+    pub fn icons_dir(&self) -> PathBuf {
+        self.home.join("icons")
+    }
     pub fn core_dir(&self) -> PathBuf {
         self.home.join("core")
     }
