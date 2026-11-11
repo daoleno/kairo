@@ -10,5 +10,6 @@ Issues and pull requests are welcome.
 - **Develop next to a proxy you rely on**: set `KAIRO_HOME` to a scratch directory and `KAIRO_NO_SYSPROXY=1`,
   and pick ports in Settings that your running proxy does not use.
 - **Style**: follow the code around you. The UI rules (one accent, dense rows, native frame) are in
-  [docs/DESIGN.md](docs/DESIGN.md). Product text is short, plain English.
+  [docs/DESIGN.md](docs/DESIGN.md). Product text is short, plain English, and a row has no second line
+  that only explains itself.
 - **Licence**: contributions are under the GPL-3.0-or-later, like the rest of Kairo.
