@@ -1,10 +1,10 @@
 # Kairo
 
-A proxy app for macOS, Windows, Linux and Android, made for AI work: Claude, ChatGPT, Gemini and Cursor always
-connect from the same server, everything else switches freely, and Kairo shows the country each AI service
-sees. It works with the proxy subscription you already have and is built on
-[mihomo](https://github.com/MetaCubeX/mihomo). AppKit on the Mac, GTK 4 and libadwaita on Linux, written in Rust
-on [NSH](https://nsh.dev).
+A proxy app for macOS, Windows, Linux and Android that runs itself: add your subscription once, and Kairo picks
+the fastest server, keeps AI tools on a fixed one, shows what every app is doing, restores your system settings
+on quit or crash, and updates itself. It works with the proxy subscription you already
+have and is built on [mihomo](https://github.com/MetaCubeX/mihomo). AppKit on the Mac, GTK 4 and libadwaita on
+Linux, written in Rust on [NSH](https://nsh.dev).
 
 ![Kairo on Linux](docs/screenshots/home-light.png)
 
