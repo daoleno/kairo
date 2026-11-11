@@ -1,8 +1,10 @@
 # Kairo
 
-A clean, native [mihomo](https://github.com/MetaCubeX/mihomo) client for macOS and Linux, made for AI work:
-your AI tools go out through one exit that stays put, and Kairo shows what each service sees. AppKit on the
-Mac, GTK 4 and libadwaita on Linux, written in Rust on [NSH](https://nsh.dev).
+A proxy app for macOS, Windows, Linux and Android, made for AI work: Claude, ChatGPT, Gemini and Cursor always
+connect from the same server, everything else switches freely, and Kairo shows the country each AI service
+sees. It works with the proxy subscription you already have and is built on
+[mihomo](https://github.com/MetaCubeX/mihomo). AppKit on the Mac, GTK 4 and libadwaita on Linux, written in Rust
+on [NSH](https://nsh.dev).
 
 ![Kairo on Linux](docs/screenshots/home-light.png)
 
@@ -71,6 +73,11 @@ Download the latest release from [Releases](https://github.com/daoleno/kairo/rel
   signed but not notarized, so macOS stops it the first time. Open Kairo once, then go to System Settings →
   Privacy & Security and click **Open Anyway** next to Kairo. Or run
   `xattr -dr com.apple.quarantine /Applications/Kairo.app` before opening it.
+- **Windows 10/11 (64-bit)**: run `Kairo-<version>-windows-x86_64-setup.exe` (a per-user installer) or unpack the
+  `.zip`. The build is not code-signed yet, so Windows shows "Unknown publisher" the first time: **More info →
+  Run anyway**.
+- **Android 9+ (arm64)**: install `Kairo-<version>-android-arm64-v8a.apk` (sideload; allow installs from your
+  browser or file manager when Android asks).
 - **Debian / Ubuntu 24.04+**: `sudo apt install ./kairo_<version>_amd64.deb` (or `_arm64`).
 - **Other Linux** (GTK 4.14+, libadwaita 1.5+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
   to `~/.local`; `./install.sh /usr/local` installs system-wide with sudo.
@@ -169,6 +176,15 @@ key is kept offline by the maintainer. Without it, a lost secret would leave eve
 update.
 
 To ship a newer mihomo, change `scripts/mihomo.env` (version and checksums) and release Kairo.
+
+Release checklist, part of every release:
+
+- The platform list on the website follows the assets of the release: `site/index.html` (hero line under the
+  button, the Download section's cards and links, the section subtitle, `<title>` and the meta and og
+  descriptions) and the README intro and Install section name exactly the platforms that have a file in the
+  release, no more and no fewer. A platform's download joins the Download section in the same release that
+  ships it; nothing is announced ahead of its release, and no "coming soon".
+- `site/shots/` still shows the screens as they are in this version.
 
 ## Licence
 
