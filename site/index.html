@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kairo — your AI tools, one way out</title>
-<meta name="description" content="A native proxy client for AI work on macOS and Linux. Your AI tools go out through one exit that stays put, and you see what each service sees.">
-<meta property="og:title" content="Kairo — your AI tools, one way out">
-<meta property="og:description" content="A native proxy client for AI work on macOS and Linux. One exit that stays put, and what each AI service sees.">
+<title>Kairo — keep your AI tools in one country</title>
+<meta name="description" content="A proxy app for Mac, Windows, Linux and Android. Claude, ChatGPT, Gemini and Cursor always connect from the same server, everything else switches freely, and Kairo shows the country each one sees.">
+<meta property="og:title" content="Kairo — keep your AI tools in one country">
+<meta property="og:description" content="A proxy app for Mac, Windows, Linux and Android. Your AI tools always connect from the same server, and Kairo shows the country each one sees.">
 <meta property="og:image" content="https://daoleno.github.io/kairo/shots/home-light.webp">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -66,7 +66,7 @@ header.top { display: flex; align-items: center; justify-content: space-between;
 .hero { text-align: center; padding: 56px 0 28px; }
 h1 {
   margin: 0 auto;
-  max-width: 14ch;
+  max-width: 15ch;
   font-size: clamp(44px, 8vw, 88px);
   line-height: 1.02;
   letter-spacing: -0.035em;
@@ -83,7 +83,8 @@ h1 {
 .btn svg { width: 16px; height: 16px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .btn:hover { filter: brightness(1.06); }
-.meta { margin-top: 14px; font-size: 13px; color: var(--muted); }
+.meta { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+.meta.need { margin-top: 4px; }
 
 .switch { display: flex; justify-content: center; margin: 44px 0 18px; }
 .seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--bg-soft); border: 1px solid var(--line); }
@@ -121,11 +122,13 @@ h2 { margin: 0; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.025em; lin
 .facts b { display: block; font-size: 15px; font-weight: 600; }
 .facts span { display: block; margin-top: 4px; font-size: 14px; color: var(--muted); }
 
-.downloads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 36px; }
+.downloads { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 36px; }
 .dl { border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; background: var(--bg); }
 .dl h3 { margin: 0; font-size: 17px; }
 .dl p { margin: 4px 0 16px; font-size: 13px; color: var(--muted); }
-.dl .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.dl .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dl .row + .row { margin-top: 10px; }
+.dl .arch { width: 64px; font-size: 13px; color: var(--muted); }
 .dl .btn { height: 36px; padding: 0 14px; font-size: 14px; }
 .note { margin-top: 18px; font-size: 13px; color: var(--muted); max-width: 52em; }
 .note code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-soft); border: 1px solid var(--line); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
@@ -160,8 +163,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 
 <main>
   <div class="wrap hero">
-    <h1>Your AI tools, one way out.</h1>
-    <p class="lede">Claude, ChatGPT, Gemini and Cursor go through the same exit, and stay there. Kairo shows what each service sees. A native mihomo client for macOS and Linux.</p>
+    <h1>Keep your AI tools in one country.</h1>
+    <p class="lede">A proxy app for the subscription you already have: Claude, ChatGPT, Gemini and Cursor always connect from the same server, everything else switches freely, and Kairo shows the country each one sees.</p>
     <div class="actions">
       <a class="btn primary" id="primary" href="https://github.com/daoleno/kairo/releases/latest">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7.5 8 11.5l4-4M3 14h10"/></svg>
@@ -169,7 +172,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
       </a>
       <a class="btn" href="#download" id="others">Other platforms</a>
     </div>
-    <p class="meta"><span id="version">Free and open source</span> · macOS 11+ · Linux (GTK 4) · GPL-3.0</p>
+    <p class="meta"><span id="version">Free and open source</span> · Mac, Windows, Linux, Android</p>
+    <p class="meta need">Needs a proxy subscription from your provider.</p>
 
     <div class="switch">
       <div class="seg" role="group" aria-label="Screenshot appearance">
@@ -179,10 +183,10 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     </div>
     <figure class="hero-shot">
       <div class="window">
-        <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo's Home: the connect switch with mode and apps, three exits (AI, Everything else, Downloads) with a country and how each is doing, and a row for each AI service with what Kairo measured.">
+        <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo's Home: a country for AI, one for everything else and one for downloads, and a row for each AI service.">
         <img class="shot-dark" src="shots/home-dark.webp" width="1180" height="760" alt="Kairo's Home in dark mode." loading="lazy">
       </div>
-      <figcaption><b>Home</b> <span style="color:var(--muted)">· three exits, and one row per AI service: what Kairo measured, nothing more</span></figcaption>
+      <figcaption><b>Home</b> <span style="color:var(--muted)">· one row per AI service, with what Kairo measured</span></figcaption>
     </figure>
   </div>
 
@@ -190,53 +194,53 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     <div class="gallery">
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/activity-light.webp" width="1180" height="1130" alt="Activity: traffic per hour stacked by the exit it left through, the top apps, each AI service's share, and a reachability row per service for the day." loading="lazy">
+          <img class="shot-light" src="shots/activity-light.webp" width="1180" height="1130" alt="Activity: traffic per hour, the top apps, each AI service's share, and whether each service worked today." loading="lazy">
           <img class="shot-dark" src="shots/activity-dark.webp" width="1180" height="1130" alt="Activity in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Activity</b> <span>· how much went through which exit, which apps and AI services used it, and how each service held up today. Recorded on your computer, kept 30 days</span></figcaption>
+        <figcaption><b>Activity</b> <span>· which apps and AI services used how much, and whether each worked</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/aiservice-light.webp" width="1180" height="860" alt="One AI service: reachability for every hour of the week, the API response time, and the country the service saw." loading="lazy">
+          <img class="shot-light" src="shots/aiservice-light.webp" width="1180" height="860" alt="One AI service: a week of checks, hour by hour, with how fast it answered and the country it saw." loading="lazy">
           <img class="shot-dark" src="shots/aiservice-dark.webp" width="1180" height="860" alt="One AI service in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Every AI service</b> <span>· a week of checks: reachable each hour, how fast the API answered, which country it saw</span></figcaption>
+        <figcaption><b>Every AI service</b> <span>· a week of checks, with the country it saw</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/exits-light.webp" width="1180" height="1130" alt="Exits: the three exits, the countries with their best servers, and under them the quality of the exit: response time, failed tests and changes." loading="lazy">
+          <img class="shot-light" src="shots/exits-light.webp" width="1180" height="1130" alt="Exits: a country and server for AI, for everything else and for downloads, and under them how the server has been doing." loading="lazy">
           <img class="shot-dark" src="shots/exits-dark.webp" width="1180" height="1130" alt="Exits in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Exits</b> <span>· AI, everything else and downloads each get a country; the AI exit stays when the others change. Below: how the server held up, and every switch</span></figcaption>
+        <figcaption><b>Exits</b> <span>· a country for AI, another for everything else; AI stays put when you change the other</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/profiles-light.webp" width="1180" height="980" alt="Subscriptions: usage, what is left, the recent pace, and a chart of use so far with where it ends if the pace continues." loading="lazy">
+          <img class="shot-light" src="shots/profiles-light.webp" width="1180" height="980" alt="Subscriptions: data used and left, and a chart of use so far." loading="lazy">
           <img class="shot-dark" src="shots/profiles-dark.webp" width="1180" height="980" alt="Subscriptions in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Subscriptions</b> <span>· usage and expiry, and whether the data lasts until the plan ends</span></figcaption>
+        <figcaption><b>Subscriptions</b> <span>· your provider's plans: data used, data left, when it ends</span></figcaption>
       </figure>
       <figure>
         <div class="window">
-          <img class="shot-light" src="shots/settings-light.webp" width="1180" height="760" alt="Settings: appearance, launch at login, how apps follow Kairo, and the AI switches." loading="lazy">
+          <img class="shot-light" src="shots/settings-light.webp" width="1180" height="760" alt="Settings: a short list of switches." loading="lazy">
           <img class="shot-dark" src="shots/settings-dark.webp" width="1180" height="760" alt="Settings in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Settings</b> <span>· a short list; groups, rules, logs and DNS are one click away under Advanced</span></figcaption>
+        <figcaption><b>Settings</b> <span>· a short list; the technical parts are under Advanced</span></figcaption>
       </figure>
     </div>
 
     <div class="facts">
-      <div><b>One exit, pinned</b><span>AI tools stay on it when everything else changes. Open connections are never cut.</span></div>
-      <div><b>Measured, not promised</b><span>Reachable, API answer, the country a service sees, a connection held for 90 seconds. Kept hour by hour for 30 days, on this computer only.</span></div>
-      <div><b>Direct where it should be</b><span>Domestic AI goes straight out. Local models never leave your computer.</span></div>
-      <div><b>Updates itself</b><span>When a new version is out, a download icon appears at the bottom left. mihomo ships inside and updates with the app.</span></div>
+      <div><b>One server for AI</b><span>Your AI tools keep the same server when you change anything else.</span></div>
+      <div><b>Measured, not promised</b><span>Is each service reachable, how fast it answers, which country it sees. Kept 30 days on this computer. Nothing is sent anywhere.</span></div>
+      <div><b>No detour</b><span>Domestic AI services connect directly. Local models never leave your computer.</span></div>
+      <div><b>Updates itself</b><span>A download icon appears when there is a new version.</span></div>
     </div>
-    <p class="note">Kairo shows what a service sees. Where you are, and the service's own terms, still apply.</p>
+    <p class="note">Kairo shows the country a service sees. Where you are, and the service's own terms, still apply.</p>
   </section>
 
   <section class="wrap" id="download">
     <h2>Download</h2>
-    <p class="sub" id="dl-sub">The latest release, for Apple silicon and Intel Macs and for Linux.</p>
+    <p class="sub" id="dl-sub">The latest release, for Mac, Windows, Linux and Android.</p>
     <div class="downloads">
       <div class="dl">
         <h3>macOS</h3>
@@ -247,34 +251,45 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
         </div>
       </div>
       <div class="dl">
-        <h3>Linux · x86_64</h3>
-        <p>GTK 4.14+ and WebKitGTK 6.0 (Ubuntu 24.04 and later)</p>
+        <h3>Windows</h3>
+        <p>Windows 10 or 11, 64-bit · not code-signed yet: More info → Run anyway</p>
         <div class="row">
-          <a class="btn primary" data-asset="_amd64.deb" href="https://github.com/daoleno/kairo/releases/latest">.deb</a>
-          <a class="btn" data-asset="linux-x86_64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">.tar.gz</a>
+          <a class="btn primary" data-asset="windows-x86_64-setup.exe" href="https://github.com/daoleno/kairo/releases/latest">Installer</a>
+          <a class="btn" data-asset="windows-x86_64.zip" href="https://github.com/daoleno/kairo/releases/latest">.zip</a>
         </div>
       </div>
       <div class="dl">
-        <h3>Linux · arm64</h3>
+        <h3>Linux</h3>
         <p>GTK 4.14+ and WebKitGTK 6.0 (Ubuntu 24.04 and later)</p>
         <div class="row">
+          <span class="arch">x86_64</span>
+          <a class="btn primary" data-asset="_amd64.deb" href="https://github.com/daoleno/kairo/releases/latest">.deb</a>
+          <a class="btn" data-asset="linux-x86_64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">.tar.gz</a>
+        </div>
+        <div class="row">
+          <span class="arch">arm64</span>
           <a class="btn primary" data-asset="_arm64.deb" href="https://github.com/daoleno/kairo/releases/latest">.deb</a>
           <a class="btn" data-asset="linux-aarch64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">.tar.gz</a>
         </div>
       </div>
+      <div class="dl">
+        <h3>Android</h3>
+        <p>Android 9 or later · arm64 phones</p>
+        <div class="row">
+          <a class="btn primary" data-asset="android-arm64-v8a.apk" href="https://github.com/daoleno/kairo/releases/latest">.apk</a>
+        </div>
+      </div>
     </div>
     <p class="note">
-      On macOS, Kairo is not notarized yet, so macOS stops it the first time. Open it once, then click
-      <b>Open Anyway</b> in System Settings → Privacy &amp; Security, or run
-      <code>xattr -dr com.apple.quarantine /Applications/Kairo.app</code> first.
-      The mihomo core is included. Checksums are in <a data-asset="SHA256SUMS" href="https://github.com/daoleno/kairo/releases/latest">SHA256SUMS</a>.
+      On a Mac, Kairo is not notarized yet: open it once, then click <b>Open Anyway</b> in System Settings →
+      Privacy &amp; Security. Checksums are in <a data-asset="SHA256SUMS" href="https://github.com/daoleno/kairo/releases/latest">SHA256SUMS</a>.
     </p>
   </section>
 </main>
 
 <footer>
   <div class="wrap">
-    <span>Kairo is free software under the GPL-3.0. mihomo is a separate project by MetaCubeX.</span>
+    <span>Kairo is free software under the GPL-3.0, built on mihomo by MetaCubeX.</span>
     <span><a href="https://github.com/daoleno/kairo">Source</a> · <a href="https://github.com/daoleno/kairo/releases">Releases</a> · <a href="https://github.com/daoleno/kairo/issues">Issues</a></span>
   </div>
 </footer>
@@ -294,8 +309,24 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 
   // The visitor's platform picks the main button.
   var ua = navigator.userAgent;
-  var platform = /Mac/.test(ua) && !/iPhone|iPad/.test(ua) ? "mac" : /Linux/.test(ua) && !/Android/.test(ua) ? (/aarch64|arm64/i.test(ua) ? "linux-arm" : "linux") : "";
-  var pick = { mac: ["macos-universal.dmg", "Download for macOS"], linux: ["_amd64.deb", "Download for Linux"], "linux-arm": ["_arm64.deb", "Download for Linux"] }[platform];
+  // Android first (its user agent also says Linux); iPhone and iPad get the plain button, and an iPad that
+  // says "Macintosh" is told apart by its touch screen.
+  function platformOf(ua, touchPoints) {
+    if (/Android/.test(ua)) return "android";
+    if (/iPhone|iPad|iPod/.test(ua)) return "";
+    if (/Macintosh|Mac OS X/.test(ua)) return touchPoints > 1 ? "" : "mac";
+    if (/Windows/.test(ua)) return "windows";
+    if (/Linux|X11/.test(ua)) return /aarch64|arm64/i.test(ua) ? "linux-arm" : "linux";
+    return "";
+  }
+  var platform = platformOf(ua, navigator.maxTouchPoints || 0);
+  var pick = {
+    mac: ["macos-universal.dmg", "Download for macOS"],
+    windows: ["windows-x86_64-setup.exe", "Download for Windows"],
+    android: ["android-arm64-v8a.apk", "Download for Android"],
+    linux: ["_amd64.deb", "Download for Linux"],
+    "linux-arm": ["_arm64.deb", "Download for Linux"]
+  }[platform];
   var label = document.getElementById("primary-label");
   var primary = document.getElementById("primary");
   if (pick) label.textContent = pick[1];
@@ -317,7 +348,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
       if (pick) { var url = find(pick[0]); if (url) primary.href = url; }
       var v = release.tag_name || "";
       document.getElementById("version").textContent = v + " · free and open source";
-      document.getElementById("dl-sub").textContent = "Kairo " + v.replace(/^v/, "") + ", for Apple silicon and Intel Macs and for Linux.";
+      document.getElementById("dl-sub").textContent = "Kairo " + v.replace(/^v/, "") + ", for Mac, Windows, Linux and Android.";
     })
     .catch(function () { /* the links stay on the releases page */ });
 })();
