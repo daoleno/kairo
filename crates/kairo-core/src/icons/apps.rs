@@ -529,13 +529,35 @@ mod mac {
 
 #[cfg(windows)]
 mod win {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+
     use super::Icon;
+
+    /// No console window for the helper.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     pub fn lookup(n: &str) -> Option<Icon> {
         // A running program of this name: its executable's icon.
         let proc = crate::bypass::list_processes()
             .into_iter()
             .find(|p| super::program_name(&p.name) == n)?;
-        crate::winapi::exe_icon_png(&proc.path).and_then(|png| super::normalize(&png).ok())
+        let out = std::env::temp_dir().join(format!("kairo-icon-{}.png", std::process::id()));
+        // `ExtractAssociatedIcon` is Windows' own: the icon Explorer shows for the file. The paths
+        // go in the environment, so nothing of a file name is ever part of the script.
+        let script = "Add-Type -AssemblyName System.Drawing; \
+             $i = [System.Drawing.Icon]::ExtractAssociatedIcon($env:KAIRO_ICON_EXE); \
+             if ($i -ne $null) { $i.ToBitmap().Save($env:KAIRO_ICON_OUT, [System.Drawing.Imaging.ImageFormat]::Png) }";
+        let ok = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .env("KAIRO_ICON_EXE", &proc.path)
+            .env("KAIRO_ICON_OUT", &out)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .ok()
+            .is_some_and(|o| o.status.success());
+        let bytes = ok.then(|| std::fs::read(&out).ok()).flatten();
+        let _ = std::fs::remove_file(&out);
+        super::normalize(&bytes?).ok()
     }
 }

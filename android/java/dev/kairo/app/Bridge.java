@@ -142,6 +142,43 @@ public final class Bridge {
         }
     }
 
+    /**
+     * The icon of an installed app as PNG bytes, for the pages of apps (Activity, Apps &amp; Sites):
+     * by package name (what the core reports for an app's traffic), else by the app's label.
+     * Null when no installed app is called that.
+     */
+    public static byte[] appIcon(String name) {
+        try {
+            android.content.pm.PackageManager pm = app.getPackageManager();
+            android.graphics.drawable.Drawable icon = null;
+            try {
+                icon = pm.getApplicationIcon(name);
+            } catch (android.content.pm.PackageManager.NameNotFoundException notAPackage) {
+                for (android.content.pm.ApplicationInfo info : pm.getInstalledApplications(0)) {
+                    if (pm.getApplicationLabel(info).toString().equalsIgnoreCase(name)) {
+                        icon = pm.getApplicationIcon(info);
+                        break;
+                    }
+                }
+            }
+            if (icon == null) {
+                return null;
+            }
+            int side = 128;
+            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
+                    side, side, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
+            icon.setBounds(0, 0, side, side);
+            icon.draw(canvas);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            android.util.Log.w("Kairo", "appIcon failed", e);
+            return null;
+        }
+    }
+
     /** Stops the VPN and its notification. */
     public static void teardown() {
         KairoVpnService.stop(app);
