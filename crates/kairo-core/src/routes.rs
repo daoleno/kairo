@@ -233,6 +233,17 @@ fn usable(target: &str) -> Option<&str> {
     clean_target(target).is_ok().then_some(target)
 }
 
+/// The rules for an app by its process name. On Windows the core names a
+/// process by its file, `claude.exe`, so the rule for `claude` is written for
+/// both names (an app given as `claude.exe` stays as it is).
+pub fn process_rules(name: &str, target: &str, windows: bool) -> Vec<String> {
+    let mut rules = vec![format!("PROCESS-NAME,{name},{target}")];
+    if windows && !name.to_ascii_lowercase().ends_with(".exe") {
+        rules.push(format!("PROCESS-NAME,{name}.exe,{target}"));
+    }
+    rules
+}
+
 /// Writes the rules: apps first, then sites (the longer name first, so
 /// `a.example.com` is read before `example.com`), each group in the order
 /// they were added. With the AI layer off `Ai` and `Downloads` fall back to
@@ -265,7 +276,7 @@ pub fn rules(routes: &[Route], targets: &Targets, node_exists: &dyn Fn(&str) -> 
         // Checked again here: a route built by hand is not trusted.
         match &r.kind {
             RouteKind::App { name } => match clean_app(name) {
-                Ok(n) if n == *name => apps.push(format!("PROCESS-NAME,{n},{target}")),
+                Ok(n) if n == *name => apps.extend(process_rules(&n, target, cfg!(windows))),
                 _ => {
                     log::warn!("route {} is not applied: the app name is not valid", r.id);
                     skipped.push(r.id.clone());
@@ -306,6 +317,19 @@ mod tests {
             everything: Some("Proxies"),
             downloads: Some("Kairo Downloads"),
         }
+    }
+
+    #[test]
+    fn on_windows_an_app_rule_covers_the_exe_name() {
+        assert_eq!(
+            process_rules("claude", "Kairo AI", true),
+            ["PROCESS-NAME,claude,Kairo AI", "PROCESS-NAME,claude.exe,Kairo AI"]
+        );
+        assert_eq!(
+            process_rules("Cursor.EXE", "DIRECT", true),
+            ["PROCESS-NAME,Cursor.EXE,DIRECT"]
+        );
+        assert_eq!(process_rules("claude", "DIRECT", false), ["PROCESS-NAME,claude,DIRECT"]);
     }
 
     fn known(n: &str) -> bool {
