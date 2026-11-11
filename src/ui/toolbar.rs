@@ -447,9 +447,9 @@ fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
                 .child(back.map(|to| {
                     super::icon_btn(Icon::ChevronLeft, "Back")
                         .on_press(move || {
-                            if to == Page::Settings {
-                                // The Inspect views open from Settings › Advanced.
-                                crate::pages::settings::show_advanced(store);
+                            if page.inspect() {
+                                // To the page the view was opened from, else Settings › Advanced.
+                                crate::pages::settings::go_back(store);
                             } else {
                                 store.page.set(to);
                             }

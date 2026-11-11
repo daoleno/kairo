@@ -32,8 +32,8 @@ fn page_icon(page: Page) -> Icon {
 
 fn nav_item(page: Page) -> impl IntoElement {
     let store = store();
-    // An Inspect view stands under Settings' row.
-    let selected = move || store.page.get().sidebar() == page;
+    // An Inspect view stands on the row of the page it was opened from, else under Settings.
+    let selected = move || store.row() == page;
     button()
         .selected(selected)
         .role(AccessibilityRole::Tab)
@@ -360,7 +360,7 @@ fn update_failure(store: crate::store::Store) -> impl IntoElement {
 /// One tab of the phone's bar: the icon over a small label.
 fn tab(page: Page) -> impl IntoElement {
     let store = store();
-    let selected = move || store.page.get().sidebar() == page;
+    let selected = move || store.row() == page;
     button()
         .selected(selected)
         .role(AccessibilityRole::Tab)

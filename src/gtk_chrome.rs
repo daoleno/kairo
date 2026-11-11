@@ -95,14 +95,15 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let first = *chrome::bridge().page.borrow();
     let first_row = PAGES
         .iter()
-        .position(|p| *p == first.sidebar())
+        .position(|p| *p == chrome::row_of(first))
         .unwrap_or(0);
     list.select_row(list.row_at_index(first_row as i32).as_ref());
     list.connect_row_selected(|_, row| {
         if let Some(page) = row.and_then(|r| PAGES.get(r.index() as usize)) {
-            // An Inspect view (Groups, Rules ...) stands under Settings' row: the app selecting that row
-            // for it is not the person choosing Settings.
-            if chrome::bridge().page.borrow().sidebar() == *page {
+            // An Inspect view (Groups, Rules ...) stands on the row of the page it was opened from
+            // (or Settings'): the app selecting that row for it is not the person choosing it.
+            let shown = *chrome::bridge().page.borrow();
+            if chrome::row_of(shown) == *page {
                 return;
             }
             chrome::select(*page);
@@ -258,8 +259,8 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     glib::spawn_future_local(async move {
         loop {
             let page = *pages.borrow_and_update();
-            // An Inspect view stands under Settings' row.
-            match PAGES.iter().position(|p| *p == page.sidebar()) {
+            // An Inspect view stands on the row of the page it was opened from, else Settings'.
+            match PAGES.iter().position(|p| *p == chrome::row_of(page)) {
                 Some(i) => {
                     if list_page.selected_row().map(|r| r.index() as usize) != Some(i) {
                         list_page.select_row(list_page.row_at_index(i as i32).as_ref());

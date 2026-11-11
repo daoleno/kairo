@@ -42,13 +42,17 @@ pub fn show_advanced(store: crate::store::Store) {
 /// built: the store comes from the context here, not when the button is pressed).
 pub fn back() -> toolbar::Spec {
     let store = store();
-    toolbar::button(
-        "back",
-        "Settings",
-        Glyph::Back,
-        Icon::ChevronLeft,
-        move || show_advanced(store),
-    )
+    toolbar::button("back", "Back", Glyph::Back, Icon::ChevronLeft, move || {
+        go_back(store)
+    })
+}
+
+/// Back from an Inspect view: to the page it was opened from, else to Settings › Advanced.
+pub fn go_back(store: crate::store::Store) {
+    match store.origin.get_untracked() {
+        Some(page) if page != Page::Settings => store.page.set(page),
+        _ => show_advanced(store),
+    }
 }
 
 /// The typed settings, as text while they are edited.

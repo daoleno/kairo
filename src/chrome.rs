@@ -190,6 +190,8 @@ pub struct Insets {
 
 pub struct Bridge {
     pub page: watch::Sender<Page>,
+    /// Where the Inspect view shown was opened from (`Page::origin_after`).
+    origin: Mutex<Option<Page>>,
     pub insets: watch::Sender<Insets>,
     pub toolbar: watch::Sender<Toolbar>,
     pub events: mpsc::UnboundedSender<ToolEvent>,
@@ -209,6 +211,7 @@ pub fn bridge() -> &'static Bridge {
         let (tx, rx) = mpsc::unbounded_channel();
         Bridge {
             page: watch::channel(Page::Overview).0,
+            origin: Mutex::new(None),
             insets: watch::channel(Insets::default()).0,
             toolbar: watch::channel(Toolbar::default()).0,
             events: tx,
@@ -219,9 +222,20 @@ pub fn bridge() -> &'static Bridge {
 
 /// Selects `page` from the chrome (a sidebar click, a menu).
 pub fn select(page: Page) {
-    bridge()
-        .page
+    let b = bridge();
+    if let Ok(mut origin) = b.origin.lock() {
+        let prev = *b.page.borrow();
+        *origin = Page::origin_after(prev, *origin, page);
+    }
+    b.page
         .send_if_modified(|p| std::mem::replace(p, page) != page);
+}
+
+/// The sidebar row that stands for `page` (the page being shown): an Inspect view stays on the
+/// row of the page it was opened from.
+pub fn row_of(page: Page) -> Page {
+    let origin = bridge().origin.lock().ok().and_then(|o| *o);
+    page.row_from(origin)
 }
 
 /// Reports a tool's event from the chrome.
