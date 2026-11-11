@@ -219,6 +219,7 @@ mod tun_selftest {
 allow-lan: false
 mode: rule
 log-level: info
+find-process-mode: always
 external-controller: 127.0.0.1:19091
 dns:
   enable: true
@@ -265,7 +266,9 @@ rules:
         }
         let _ = paths.ensure();
         let _ = std::fs::create_dir_all(paths.runtime_dir());
-        if let Err(e) = std::fs::write(paths.runtime_config(), CONFIG) {
+        // `<home>\selftest.yaml`, when there is one, is the config to run.
+        let config = std::fs::read_to_string(home.join("selftest.yaml")).unwrap_or_else(|_| CONFIG.to_owned());
+        if let Err(e) = std::fs::write(paths.runtime_config(), config) {
             println!("cannot write the config: {e}");
             return 4;
         }
