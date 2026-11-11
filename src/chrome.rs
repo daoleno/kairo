@@ -238,35 +238,107 @@ pub fn set_insets(insets: Insets) {
 
 // --- Kairo's own update, as the sidebar's foot shows it -----------------------------
 
-/// The one button of the update at the sidebar's foot: what it says, and
-/// whether it can be pressed now. `None`: nothing to offer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateButton {
-    pub label: String,
-    pub enabled: bool,
+/// Where the update is, as the one icon button at the foot draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateStage {
+    /// A newer Kairo exists: the arrow, ready to be pressed.
+    Download,
+    /// It is coming: the arrow with a ring that fills (or runs, when the size is not known).
+    Downloading,
+    /// It is here: the arrow on a filled disc; a press restarts into it.
+    Ready,
+    /// It is being put in place.
+    Installing,
 }
 
-/// What the foot offers for the updater's state: **Download** when a newer
-/// Kairo exists, its progress while it comes, then **Restart to Update**.
+/// The one button of the update at the sidebar's foot: an icon, whose words
+/// are only its tooltip and its accessibility label. `None`: nothing to offer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateButton {
+    /// "Download Kairo 0.3.2", "Downloading… 42%": for the tooltip and screen readers.
+    pub label: String,
+    pub enabled: bool,
+    pub stage: UpdateStage,
+    /// How much of the download is done (0 to 1), when it is known.
+    pub progress: Option<f32>,
+}
+
+/// What the foot offers for the updater's state: the download arrow when a newer
+/// Kairo exists, its progress as a ring while it comes, then the arrow on a disc
+/// (restart to update).
 pub fn update_button(u: &kairo_core::UpdateStatus) -> Option<UpdateButton> {
     use kairo_core::UpdateStatus as U;
-    let button = |label: String, enabled: bool| Some(UpdateButton { label, enabled });
+    let button = |label: String, enabled: bool, stage: UpdateStage, progress: Option<f32>| {
+        Some(UpdateButton {
+            label,
+            enabled,
+            stage,
+            progress,
+        })
+    };
     match u {
-        U::Available { version } | U::Manual { version, .. } => {
-            button(format!("Download Kairo {version}"), true)
-        }
+        U::Available { version } | U::Manual { version, .. } => button(
+            format!("Download Kairo {version}"),
+            true,
+            UpdateStage::Download,
+            None,
+        ),
         // Android installs it where it is: no restart of ours in it.
-        U::Ready { version } if cfg!(target_os = "android") => {
-            button(format!("Update to {version}"), true)
-        }
+        U::Ready { version } if cfg!(target_os = "android") => button(
+            format!("Update to {version}"),
+            true,
+            UpdateStage::Ready,
+            None,
+        ),
         U::Downloading {
             progress: Some(p), ..
-        } => button(format!("Downloading… {:.0}%", p * 100.0), false),
-        U::Downloading { .. } => button("Downloading…".into(), false),
-        U::Ready { version } => button(format!("Restart to Update to {version}"), true),
-        U::Installing { .. } => button("Installing…".into(), false),
+        } => button(
+            format!("Downloading… {:.0}%", p * 100.0),
+            false,
+            UpdateStage::Downloading,
+            Some(p.clamp(0.0, 1.0)),
+        ),
+        U::Downloading { .. } => {
+            button("Downloading…".into(), false, UpdateStage::Downloading, None)
+        }
+        U::Ready { version } => button(
+            format!("Restart to Update to {version}"),
+            true,
+            UpdateStage::Ready,
+            None,
+        ),
+        U::Installing { .. } => button("Installing…".into(), false, UpdateStage::Installing, None),
         _ => None,
     }
+}
+
+/// The update icon as an SVG (24 points, `currentColor`): the download arrow inside a ring. The
+/// ring is the whole circle thin while a download can start, an arc that fills with the
+/// download's progress, or dots when the size is not known; no ring when it is ready (the
+/// button's disc is the sign).
+pub fn update_icon_svg(b: &UpdateButton) -> String {
+    const R: f32 = 10.5;
+    let circ = 2.0 * std::f32::consts::PI * R;
+    let ring = match (b.stage, b.progress) {
+        (UpdateStage::Ready, _) => String::new(),
+        (UpdateStage::Download, _) => {
+            format!("<circle cx='12' cy='12' r='{R}' stroke-width='1.5'/>")
+        }
+        (_, Some(p)) => format!(
+            "<circle cx='12' cy='12' r='{R}' stroke-width='1.5' opacity='.25'/>\
+             <circle cx='12' cy='12' r='{R}' stroke-width='2' stroke-linecap='round' \
+             stroke-dasharray='{:.2} {:.2}' transform='rotate(-90 12 12)'/>",
+            (p.clamp(0.0, 1.0) * circ).max(0.01),
+            circ
+        ),
+        (_, None) => format!(
+            "<circle cx='12' cy='12' r='{R}' stroke-width='1.75' stroke-linecap='round' \
+             stroke-dasharray='1 4.4'/>"
+        ),
+    };
+    format!(
+        "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round'>{ring}<g stroke-width='1.75'><path d='M12 7v8.5'/><path d='M8.5 12.2l3.5 3.5 3.5-3.5'/></g></svg>"
+    )
 }
 
 /// The button pressed: does what it says for the state the updater is in now.
@@ -309,7 +381,7 @@ mod update_tests {
     use kairo_core::UpdateStatus as U;
 
     #[test]
-    fn the_foot_offers_download_then_progress_then_restart() {
+    fn the_foot_offers_an_arrow_then_a_ring_then_a_disc() {
         let v = || "0.3.1".to_owned();
         let b = |u: U| update_button(&u);
         assert_eq!(b(U::Idle), None);
@@ -324,7 +396,9 @@ mod update_tests {
             b(U::Available { version: v() }),
             Some(UpdateButton {
                 label: "Download Kairo 0.3.1".into(),
-                enabled: true
+                enabled: true,
+                stage: UpdateStage::Download,
+                progress: None,
             })
         );
         assert_eq!(
@@ -334,14 +408,18 @@ mod update_tests {
             }),
             Some(UpdateButton {
                 label: "Downloading… 42%".into(),
-                enabled: false
+                enabled: false,
+                stage: UpdateStage::Downloading,
+                progress: Some(0.42),
             })
         );
         assert_eq!(
             b(U::Ready { version: v() }),
             Some(UpdateButton {
                 label: "Restart to Update to 0.3.1".into(),
-                enabled: true
+                enabled: true,
+                stage: UpdateStage::Ready,
+                progress: None,
             })
         );
         assert_eq!(
@@ -350,5 +428,29 @@ mod update_tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn the_icon_draws_the_progress_as_a_ring() {
+        let of = |u: U| update_icon_svg(&update_button(&u).unwrap());
+        let v = || "0.3.1".to_owned();
+        // Half done: the arc is half the circle (2π·10.5 ≈ 65.97).
+        let half = of(U::Downloading {
+            version: v(),
+            progress: Some(0.5),
+        });
+        assert!(half.contains("stroke-dasharray='32.99 65.97'"), "{half}");
+        // Unknown size: dots; not yet started: a whole thin ring; ready: no ring (a disc is drawn around it).
+        assert!(
+            of(U::Downloading {
+                version: v(),
+                progress: None
+            })
+            .contains("stroke-dasharray='1 4.4'")
+        );
+        assert!(of(U::Available { version: v() }).contains("<circle"));
+        assert!(!of(U::Ready { version: v() }).contains("<circle"));
+        // A picture a data URI can carry: no characters that end it.
+        assert!(!half.contains('#') && !half.contains('"'));
     }
 }

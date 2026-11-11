@@ -747,7 +747,10 @@ impl UpdateTarget {
 /// The sidebar's foot: the core's state, the mode and the speeds.
 struct Footer {
     root: Retained<NSStackView>,
+    /// The update, one icon button at the bottom left; a ring (`ring`) takes its place while a
+    /// download comes.
     update: Retained<objc2_app_kit::NSButton>,
+    ring: Retained<objc2_app_kit::NSProgressIndicator>,
     dot: Retained<NSImageView>,
     status: Retained<NSTextField>,
     mode: Retained<NSTextField>,
@@ -790,23 +793,32 @@ impl Footer {
         );
         top.setSpacing(6.0);
         let speeds = label(11.0, true);
-        // A downloaded update, one click from installing.
+        // A newer Kairo: one icon button, no words (its tooltip and accessibility description say them).
         let update = unsafe {
             objc2_app_kit::NSButton::buttonWithTitle_target_action(
-                ns_string!("Download"),
+                ns_string!(""),
                 Some(&*UpdateTarget::shared(mtm)),
                 Some(sel!(restartToUpdate:)),
                 mtm,
             )
         };
-        update.setBezelStyle(objc2_app_kit::NSBezelStyle::Push);
+        update.setBordered(false);
+        update.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageOnly);
         update.setKeyEquivalent(ns_string!(""));
         update.setHidden(true);
+        // The download's progress: a round indicator that fills.
+        let ring = objc2_app_kit::NSProgressIndicator::new(mtm);
+        ring.setStyle(objc2_app_kit::NSProgressIndicatorStyle::Spinning);
+        ring.setControlSize(objc2_app_kit::NSControlSize::Small);
+        ring.setMinValue(0.0);
+        ring.setMaxValue(1.0);
+        ring.setHidden(true);
         let root = NSStackView::stackViewWithViews(
             &NSArray::from_retained_slice(&[
-                Retained::into_super(Retained::into_super(update.clone())),
                 Retained::into_super(top),
                 Retained::into_super(Retained::into_super(speeds.clone())),
+                Retained::into_super(Retained::into_super(update.clone())),
+                Retained::into_super(ring.clone()),
             ]),
             mtm,
         );
@@ -816,6 +828,7 @@ impl Footer {
         Footer {
             root,
             update,
+            ring,
             dot,
             status,
             mode,
@@ -826,11 +839,40 @@ impl Footer {
     fn update(&self, s: &kairo_core::State, l: &kairo_core::Live) {
         match chrome::update_button(&s.update) {
             Some(b) => {
-                self.update.setTitle(&NSString::from_str(&b.label));
+                use chrome::UpdateStage as Stage;
+                let coming = matches!(b.stage, Stage::Downloading | Stage::Installing);
+                let words = NSString::from_str(&b.label);
+                let symbol = if b.stage == Stage::Ready {
+                    "arrow.down.circle.fill"
+                } else {
+                    "arrow.down.circle"
+                };
+                self.update
+                    .setImage(symbol_image(symbol, &b.label).as_deref());
+                self.update
+                    .setContentTintColor(Some(&NSColor::controlAccentColor()));
+                self.update.setToolTip(Some(&words));
                 self.update.setEnabled(b.enabled);
-                self.update.setHidden(false);
+                self.update.setHidden(coming);
+                self.ring.setToolTip(Some(&words));
+                self.ring.setHidden(!coming);
+                match b.progress {
+                    Some(p) => {
+                        self.ring.stopAnimation(None);
+                        self.ring.setIndeterminate(false);
+                        self.ring.setDoubleValue(f64::from(p));
+                    }
+                    None => {
+                        self.ring.setIndeterminate(true);
+                        self.ring.startAnimation(None);
+                    }
+                }
             }
-            None => self.update.setHidden(true),
+            None => {
+                self.update.setHidden(true);
+                self.ring.stopAnimation(None);
+                self.ring.setHidden(true);
+            }
         }
         self.status.setStringValue(&NSString::from_str(s.plain()));
         self.mode.setStringValue(&NSString::from_str(&format!(

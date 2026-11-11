@@ -469,10 +469,95 @@ fn theme_json(probe: &impl IsA<gtk::Widget>) -> String {
     )
 }
 
+/// The update icon: the download arrow in a ring (a thin whole one to start, an arc that fills with
+/// the download, dots while its size is unknown), or on a disc of the accent when it is ready.
+/// The same picture as `chrome::update_icon_svg` draws for the pages NSH draws.
+#[allow(deprecated)]
+fn draw_update_icon(
+    area: &gtk::DrawingArea,
+    cr: &gtk::cairo::Context,
+    w: i32,
+    h: i32,
+    b: &chrome::UpdateButton,
+) {
+    use chrome::UpdateStage as Stage;
+    use std::f64::consts::PI;
+    let (w, h) = (w as f64, h as f64);
+    let k = w.min(h) / 24.0;
+    cr.translate((w - 24.0 * k) / 2.0, (h - 24.0 * k) / 2.0);
+    cr.scale(k, k);
+    let ctx = area.style_context();
+    let accent = ctx
+        .lookup_color("accent_bg_color")
+        .unwrap_or_else(|| gdk::RGBA::new(0.88, 0.33, 0.17, 1.0));
+    let accent_fg = ctx
+        .lookup_color("accent_fg_color")
+        .unwrap_or_else(|| gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
+    let set = |c: &gdk::RGBA, alpha: f64| {
+        cr.set_source_rgba(
+            c.red().into(),
+            c.green().into(),
+            c.blue().into(),
+            f64::from(c.alpha()) * alpha,
+        )
+    };
+    cr.set_line_cap(gtk::cairo::LineCap::Round);
+    cr.set_line_join(gtk::cairo::LineJoin::Round);
+    let ink = if b.stage == Stage::Ready {
+        accent_fg
+    } else {
+        accent
+    };
+    match (b.stage, b.progress) {
+        (Stage::Ready, _) => {
+            set(&accent, 1.0);
+            cr.arc(12.0, 12.0, 11.5, 0.0, 2.0 * PI);
+            let _ = cr.fill();
+        }
+        (Stage::Download, _) => {
+            set(&ink, 1.0);
+            cr.set_line_width(1.5);
+            cr.arc(12.0, 12.0, 10.5, 0.0, 2.0 * PI);
+            let _ = cr.stroke();
+        }
+        (_, Some(p)) => {
+            set(&ink, 0.25);
+            cr.set_line_width(1.5);
+            cr.arc(12.0, 12.0, 10.5, 0.0, 2.0 * PI);
+            let _ = cr.stroke();
+            set(&ink, 1.0);
+            cr.set_line_width(2.0);
+            let p = f64::from(p).clamp(0.0, 1.0).max(0.002);
+            cr.arc(12.0, 12.0, 10.5, -PI / 2.0, -PI / 2.0 + 2.0 * PI * p);
+            let _ = cr.stroke();
+        }
+        (_, None) => {
+            set(&ink, 1.0);
+            cr.set_line_width(1.75);
+            cr.set_dash(&[0.01, 4.4], 0.0);
+            cr.arc(12.0, 12.0, 10.5, 0.0, 2.0 * PI);
+            let _ = cr.stroke();
+            cr.set_dash(&[], 0.0);
+        }
+    }
+    set(&ink, 1.0);
+    cr.set_line_width(1.75);
+    cr.move_to(12.0, 7.0);
+    cr.line_to(12.0, 15.5);
+    let _ = cr.stroke();
+    cr.move_to(8.5, 12.2);
+    cr.line_to(12.0, 15.7);
+    cr.line_to(15.5, 12.2);
+    let _ = cr.stroke();
+}
+
 /// The sidebar's foot: the core's state, the mode and the speeds.
 struct Footer {
     root: gtk::Box,
     update: gtk::Button,
+    /// What the update icon draws (`None`: nothing to offer, the button is hidden).
+    update_now: Rc<std::cell::RefCell<Option<chrome::UpdateButton>>>,
+    update_area: gtk::DrawingArea,
     dot: gtk::Label,
     status: gtk::Label,
     mode: gtk::Label,
@@ -511,19 +596,37 @@ impl Footer {
             .margin_top(10)
             .margin_bottom(12)
             .build();
-        // A downloaded update, one click from installing.
+        // A newer Kairo: one round icon button at the bottom left, no words (they are its tooltip and
+        // its accessible label); its ring fills with the download.
+        let update_now = Rc::new(std::cell::RefCell::new(None::<chrome::UpdateButton>));
+        let update_area = gtk::DrawingArea::builder()
+            .content_width(28)
+            .content_height(28)
+            .build();
+        {
+            let now = update_now.clone();
+            update_area.set_draw_func(move |area, cr, w, h| {
+                if let Some(b) = now.borrow().as_ref() {
+                    draw_update_icon(area, cr, w, h, b);
+                }
+            });
+        }
         let update = gtk::Button::builder()
-            .css_classes(["suggested-action", "pill"])
-            .margin_bottom(8)
+            .css_classes(["flat", "circular"])
+            .halign(gtk::Align::Start)
+            .margin_top(8)
             .visible(false)
+            .child(&update_area)
             .build();
         update.connect_clicked(|_| chrome::update_pressed(&Service::global()));
-        root.append(&update);
         root.append(&top);
         root.append(&speeds);
+        root.append(&update);
         Footer {
             root,
             update,
+            update_now,
+            update_area,
             dot,
             status,
             mode,
@@ -535,11 +638,20 @@ impl Footer {
     fn update(&self, s: &State, l: &Live) {
         match chrome::update_button(&s.update) {
             Some(b) => {
-                self.update.set_label(&b.label);
-                self.update.set_sensitive(b.enabled);
+                self.update.set_tooltip_text(Some(&b.label));
+                self.update
+                    .update_property(&[gtk::accessible::Property::Label(&b.label)]);
+                let changed = self.update_now.borrow().as_ref() != Some(&b);
+                if changed {
+                    *self.update_now.borrow_mut() = Some(b);
+                    self.update_area.queue_draw();
+                }
                 self.update.set_visible(true);
             }
-            None => self.update.set_visible(false),
+            None => {
+                *self.update_now.borrow_mut() = None;
+                self.update.set_visible(false);
+            }
         }
         self.status.set_label(s.plain());
         self.mode.set_label(s.settings.mode.route());

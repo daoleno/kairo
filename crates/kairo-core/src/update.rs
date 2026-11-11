@@ -404,6 +404,23 @@ fn staged_info(dir: &Path) -> Option<Staged> {
         .and_then(|b| serde_json::from_slice(&b).ok())
 }
 
+/// `KAIRO_SHOW_UPDATE=available|downloading|downloading:0.42|ready|installing`: shows the update
+/// button in that state without a release (screenshots of the button's states).
+fn shown_for_screenshots(value: &str) -> Option<UpdateStatus> {
+    let version = "9.9.9".to_owned();
+    let (name, arg) = value.split_once(':').unwrap_or((value, ""));
+    Some(match name {
+        "available" => UpdateStatus::Available { version },
+        "downloading" => UpdateStatus::Downloading {
+            version,
+            progress: arg.parse().ok(),
+        },
+        "ready" => UpdateStatus::Ready { version },
+        "installing" => UpdateStatus::Installing { version },
+        _ => return None,
+    })
+}
+
 /// Starts the background checks (unless `KAIRO_NO_UPDATE` is set). A
 /// download left from an earlier run is offered again; one already
 /// installed is cleaned up.
@@ -417,6 +434,13 @@ pub fn spawn_checks(svc: Service) {
             let _ = std::fs::remove_dir_all(&dir);
         }
         None => {}
+    }
+    if let Some(shown) = std::env::var("KAIRO_SHOW_UPDATE")
+        .ok()
+        .and_then(|v| shown_for_screenshots(&v))
+    {
+        svc.set_update(shown);
+        return;
     }
     if std::env::var_os("KAIRO_NO_UPDATE").is_some_and(|v| !v.is_empty()) {
         return;

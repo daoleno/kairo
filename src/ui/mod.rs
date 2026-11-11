@@ -279,6 +279,58 @@ pub fn icon_btn(glyph: Icon, label: &'static str) -> Button {
         .child(icon(glyph, 16.0))
 }
 
+/// The update at the foot of the window: one round icon button, no words (they are the tooltip
+/// and the accessibility label). A ring around the arrow fills with the download; ready is the
+/// arrow on a disc of the accent.
+pub fn update_button(b: crate::chrome::UpdateButton, on_press: impl Fn() + 'static) -> View {
+    let ready = b.stage == crate::chrome::UpdateStage::Ready;
+    let hint = view()
+        .px_2()
+        .py_1()
+        .rounded(radius_small())
+        .bg(move || theme().popover)
+        .border_1()
+        .border_color(move || theme().border)
+        .child(
+            text(b.label.clone())
+                .text_size(px(size::small()))
+                .text_color(move || theme().popover_foreground)
+                .number_of_lines(1),
+        )
+        .into_element();
+    // The hint goes on a view around the button (a button takes none itself).
+    view().flex_shrink_0().tooltip(hint).child(
+        button()
+            .accessibility_label(b.label.clone())
+            .disabled(!b.enabled)
+            .items_center()
+            .justify_center()
+            .size(px(touch_h(32.0)))
+            .flex_shrink_0()
+            .rounded_full()
+            .cursor_pointer()
+            .bg(move || {
+                if ready {
+                    theme().primary.into()
+                } else {
+                    theme().background.opacity(0.0)
+                }
+            })
+            .text_color(move || {
+                if ready {
+                    theme().primary_foreground
+                } else {
+                    theme().primary
+                }
+            })
+            .hover(|s| s.opacity(0.85))
+            .active(|s| s.opacity(0.7))
+            .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+            .on_press(on_press)
+            .child(svg(crate::chrome::update_icon_svg(&b)).size(px(22.0))),
+    )
+}
+
 // --- Controls ----------------------------------------------------------------------
 
 /// An on/off switch in the platform's proportions.
