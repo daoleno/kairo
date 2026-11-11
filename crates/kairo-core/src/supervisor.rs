@@ -108,10 +108,14 @@ impl CoreProcess {
         let (route, name) = crate::elevated::current().ok_or_else(|| {
             std::io::Error::other("TUN needs permission first (Settings, Every app)")
         })?;
-        let log = paths.logs_dir().join("core.log");
-        let _ = std::fs::create_dir_all(paths.logs_dir());
-        // The host starts a fresh log; do not read the last one meanwhile.
-        let _ = std::fs::remove_file(&log);
+        // The host's log: it truncates it when it starts, and only it can write it.
+        let log = crate::elevated::log_path(&name)
+            .ok_or_else(|| std::io::Error::other("Cannot find the TUN helper's log"))?;
+        // What the core is started with reaches the host as data, through the one
+        // file the user may write.
+        let config = std::fs::read(paths.runtime_config())?;
+        crate::elevated::deliver_config(&name, &config).map_err(std::io::Error::other)?;
+        let began = std::time::SystemTime::now();
         let _ = std::fs::write(paths.core_pid(), ELEVATED_MARK);
         let n = name.clone();
         let started = tokio::task::spawn_blocking(move || crate::elevated::start(route, &n))
@@ -133,7 +137,11 @@ impl CoreProcess {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         let _ = std::fs::remove_file(paths.core_pid());
-        let tail = tail_of(&log, 3).join(" ");
+        // Not the last run's lines: the host starts a fresh log.
+        let fresh = std::fs::metadata(&log)
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t >= began);
+        let tail = if fresh { tail_of(&log, 3).join(" ") } else { String::new() };
         Err(std::io::Error::other(format!(
             "The core did not start through its task{}",
             if tail.is_empty() { String::new() } else { format!(": {tail}") }

@@ -1224,6 +1224,14 @@ impl Service {
         }
         std::fs::rename(paths.candidate_config(), paths.runtime_config())
             .map_err(|e| e.to_string())?;
+        // A SYSTEM core (Windows TUN) is handed the config as data: through the
+        // one file the user may write; it reduces it and loads its own copy.
+        #[cfg(windows)]
+        if settings.tun
+            && let Some((_, name)) = crate::elevated::current()
+        {
+            crate::elevated::deliver_config(&name, built.as_bytes())?;
+        }
         self.ai_config_loaded(&built, applied);
         self.modify(|s| s.routes_skipped = skipped_routes);
         if reload && self.running() {

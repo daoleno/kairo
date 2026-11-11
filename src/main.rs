@@ -221,6 +221,7 @@ mode: rule
 log-level: info
 find-process-mode: always
 external-controller: 127.0.0.1:19091
+secret: selftest-secret-0123456789
 dns:
   enable: true
   listen: 127.0.0.1:1054
@@ -238,17 +239,74 @@ rules:
   - MATCH,DIRECT
 "#;
 
-    fn controller_version() -> Option<String> {
+    const SECRET: &str = "selftest-secret-0123456789";
+
+    /// One call to the controller on the user's port: (status, body).
+    fn call(method: &str, path: &str, body: &str, secret: Option<&str>) -> Option<(u16, String)> {
         let mut s = std::net::TcpStream::connect_timeout(
             &"127.0.0.1:19091".parse().ok()?,
             Duration::from_millis(500),
         )
         .ok()?;
-        s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-        s.write_all(b"GET /version HTTP/1.0\r\n\r\n").ok()?;
+        s.set_read_timeout(Some(Duration::from_secs(20))).ok()?;
+        let auth = secret.map(|x| format!("Authorization: Bearer {x}\r\n")).unwrap_or_default();
+        let req = format!(
+            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:19091\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        s.write_all(req.as_bytes()).ok()?;
         let mut out = String::new();
         s.read_to_string(&mut out).ok()?;
-        out.contains("version").then_some(out.lines().last().unwrap_or("").to_owned())
+        let status = out.split_whitespace().nth(1)?.parse().ok()?;
+        let body = out.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+        Some((status, body))
+    }
+
+    fn controller_version() -> Option<String> {
+        let (status, body) = call("GET", "/version", "", Some(SECRET))?;
+        (status == 200 && body.contains("version")).then_some(body)
+    }
+
+    /// What the host's front of the controller must do, printed one line each.
+    fn probes(paths: &Paths, name: &str) {
+        let show = |label: &str, r: Option<(u16, String)>| {
+            let r = r.map(|(s, b)| format!("{s} {}", b.chars().take(80).collect::<String>())).unwrap_or("no answer".into());
+            println!("PROBE {label}: {r}");
+        };
+        show("GET /proxies (allowed)", call("GET", "/proxies", "", Some(SECRET)));
+        show("GET /version without the secret", call("GET", "/version", "", None));
+        show("GET /version with a wrong secret", call("GET", "/version", "", Some("not-the-secret-0123456789")));
+        show("POST /restart", call("POST", "/restart", "{}", Some(SECRET)));
+        show("POST /upgrade", call("POST", "/upgrade", "{}", Some(SECRET)));
+        show("GET /storage/x", call("GET", "/storage/x", "", Some(SECRET)));
+        show("PATCH /configs tcptun-config", call("PATCH", "/configs", r#"{"tcptun-config":"127.0.0.1:1,127.0.0.1:2"}"#, Some(SECRET)));
+        show("PATCH /configs mode (allowed)", call("PATCH", "/configs", r#"{"mode":"rule"}"#, Some(SECRET)));
+        // What Kairo does to change the config: write it to the inbox, ask to reload.
+        // The path in the call is not read.
+        if let Ok(text) = std::fs::read(paths.runtime_config()) {
+            let _ = elevated::deliver_config(name, &text);
+        }
+        show(
+            "PUT /configs path=C:\\evil.yaml (reloads the inbox)",
+            call("PUT", "/configs?force=true", r#"{"path":"C:\\Windows\\win.ini","payload":"external-ui: C:/x"}"#, Some(SECRET)),
+        );
+        show("GET /version after the reload", call("GET", "/version", "", Some(SECRET)));
+        // A name with a slash is one name (404 from the core is the right answer: no such node).
+        show("GET /proxies/JP%2FTokyo%2001 (a name with a slash)", call("GET", "/proxies/JP%2FTokyo%2001", "", Some(SECRET)));
+        // Two requests in one write, the first asking for an upgrade: only the first may be answered.
+        if let Ok(mut s) = std::net::TcpStream::connect("127.0.0.1:19091") {
+            let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+            let second_body = r#"{"path":"C:\\Windows\\win.ini"}"#;
+            let both = format!(
+                "GET /version HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {SECRET}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n\r\nPOST /restart HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {SECRET}\r\nContent-Length: {}\r\n\r\n{second_body}",
+                second_body.len()
+            );
+            let _ = s.write_all(both.as_bytes());
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+            println!("PROBE pipelined upgrade+POST /restart: {} HTTP response(s); first line {:?}", out.matches("HTTP/1.1 ").count(), out.lines().next().unwrap_or(""));
+        }
+        show("GET /version after the pipelined attempt (the core must still be up)", call("GET", "/version", "", Some(SECRET)));
     }
 
     pub fn run(args: &[String]) -> i32 {
@@ -258,7 +316,7 @@ rules:
             .unwrap_or_else(Paths::default_home);
         let paths = Paths::new(&home);
         println!("user {:?}", elevated::current_user());
-        println!("paths dir={} config={} log={}", paths.runtime_dir().display(), paths.runtime_config().display(), paths.logs_dir().join("core.log").display());
+        println!("config={} log={:?}", paths.runtime_config().display(), elevated::current().and_then(|(_, n)| elevated::log_path(&n)));
         let status = tun::status(&paths.core_bin());
         println!("status {status:?}");
         if status != Privilege::Granted {
@@ -294,6 +352,9 @@ rules:
                 kairo_core::tokio::time::sleep(Duration::from_millis(300)).await;
             }
             println!("READY {version:?} after {:?}", t.elapsed());
+            if let Some((_, name)) = elevated::current() {
+                probes(&paths, &name);
+            }
             let stop_file = home.join("stop-now");
             let _ = std::fs::remove_file(&stop_file);
             let t = Instant::now();
@@ -351,6 +412,15 @@ fn main() {
             Some("--grant-tun") => std::process::exit(kairo_core::elevated::run_grant(&a[2..])),
             Some("--revoke-tun") => std::process::exit(kairo_core::elevated::run_revoke(&a[2..])),
             Some("--tun-selftest") => std::process::exit(tun_selftest::run(&a[2..])),
+            // The app's own calls for the permission and for taking it away (the
+            // UAC path), for the acceptance run; the product's switch stays shut.
+            Some("--tun-grant-selftest") | Some("--tun-revoke-selftest") => {
+                let grant = a[1] == "--tun-grant-selftest";
+                let r = if grant { kairo_core::elevated::grant(&Paths::new(Paths::default_home())) } else { kairo_core::elevated::revoke() };
+                println!("{} {:?}", if grant { "GRANT" } else { "REVOKE" }, r);
+                println!("status {:?}", kairo_core::tun::status(&Paths::new(Paths::default_home()).core_bin()));
+                std::process::exit(if r.is_ok() { 0 } else { 1 });
+            }
             _ => {}
         }
     }

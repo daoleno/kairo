@@ -2489,6 +2489,7 @@ dependencies = [
  "hex",
  "image",
  "jni",
+ "kairo-core-host",
  "libc",
  "log",
  "rand 0.9.5",
@@ -2512,6 +2513,13 @@ dependencies = [
 name = "kairo-core-host"
 version = "0.3.2"
 dependencies = [
+ "hex",
+ "httparse",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
  "windows",
  "windows-service",
 ]
