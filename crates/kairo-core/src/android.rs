@@ -180,6 +180,28 @@ pub fn install_apk(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// The icon of the installed app called `name` (a package, or its label) as PNG bytes.
+pub fn app_icon(name: &str) -> Option<Vec<u8>> {
+    let bridge = BRIDGE.get()?;
+    let mut env = bridge.vm.attach_current_thread().ok()?;
+    let class: &JClass<'_> = bridge.class.as_obj().into();
+    let name = env.new_string(name).ok()?;
+    let result = env
+        .call_static_method(class, "appIcon", "(Ljava/lang/String;)[B", &[(&name).into()])
+        .and_then(|v| v.l());
+    match result {
+        Ok(bytes) if !bytes.is_null() => {
+            let array = jni::objects::JByteArray::from(bytes);
+            env.convert_byte_array(&array).ok()
+        }
+        Ok(_) => None,
+        Err(_) => {
+            let _ = env.exception_clear();
+            None
+        }
+    }
+}
+
 /// Takes the VPN down and closes our copy of its descriptor.
 pub fn teardown() {
     let fd = TUN_FD.swap(-1, Ordering::SeqCst);
