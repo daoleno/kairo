@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kairo — keep your AI tools in one country</title>
-<meta name="description" content="A proxy app for Mac, Windows, Linux and Android. Claude, ChatGPT, Gemini and Cursor always connect from the same server, everything else switches freely, and Kairo shows the country each one sees.">
-<meta property="og:title" content="Kairo — keep your AI tools in one country">
-<meta property="og:description" content="A proxy app for Mac, Windows, Linux and Android. Your AI tools always connect from the same server, and Kairo shows the country each one sees.">
+<title>Kairo — the proxy app that runs itself</title>
+<meta name="description" content="A proxy app for Mac, Windows, Linux and Android that runs itself: it picks the fastest server, keeps AI tools on a fixed one, and shows what every app is doing.">
+<meta property="og:title" content="Kairo — the proxy app that runs itself">
+<meta property="og:description" content="A proxy app for Mac, Windows, Linux and Android that runs itself: it picks the fastest server, keeps AI tools on a fixed one, and shows what every app is doing.">
 <meta property="og:image" content="https://daoleno.github.io/kairo/shots/home-light.webp">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -163,8 +163,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 
 <main>
   <div class="wrap hero">
-    <h1>Keep your AI tools in one country.</h1>
-    <p class="lede">A proxy app for the subscription you already have: Claude, ChatGPT, Gemini and Cursor always connect from the same server, everything else switches freely, and Kairo shows the country each one sees.</p>
+    <h1>The proxy app that runs itself.</h1>
+    <p class="lede">Add your subscription once. Kairo picks the fastest server, keeps AI tools on a fixed one, and shows what every app is doing.</p>
     <div class="actions">
       <a class="btn primary" id="primary" href="https://github.com/daoleno/kairo/releases/latest">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7.5 8 11.5l4-4M3 14h10"/></svg>
@@ -186,7 +186,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
         <img class="shot-light" src="shots/home-light.webp" width="1180" height="760" alt="Kairo's Home: a country for AI, one for everything else and one for downloads, and a row for each AI service.">
         <img class="shot-dark" src="shots/home-dark.webp" width="1180" height="760" alt="Kairo's Home in dark mode." loading="lazy">
       </div>
-      <figcaption><b>Home</b> <span style="color:var(--muted)">· one row per AI service, with what Kairo measured</span></figcaption>
+      <figcaption><b>Home</b> <span style="color:var(--muted)">· connect, and see where your traffic goes</span></figcaption>
     </figure>
   </div>
 
@@ -197,21 +197,14 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
           <img class="shot-light" src="shots/activity-light.webp" width="1180" height="1130" alt="Activity: traffic per hour, the top apps, each AI service's share, and whether each service worked today." loading="lazy">
           <img class="shot-dark" src="shots/activity-dark.webp" width="1180" height="1130" alt="Activity in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Activity</b> <span>· which apps and AI services used how much, and whether each worked</span></figcaption>
-      </figure>
-      <figure>
-        <div class="window">
-          <img class="shot-light" src="shots/aiservice-light.webp" width="1180" height="860" alt="One AI service: a week of checks, hour by hour, with how fast it answered and the country it saw." loading="lazy">
-          <img class="shot-dark" src="shots/aiservice-dark.webp" width="1180" height="860" alt="One AI service in dark mode." loading="lazy">
-        </div>
-        <figcaption><b>Every AI service</b> <span>· a week of checks, with the country it saw</span></figcaption>
+        <figcaption><b>Activity</b> <span>· what each app used, and where it went</span></figcaption>
       </figure>
       <figure>
         <div class="window">
           <img class="shot-light" src="shots/exits-light.webp" width="1180" height="1130" alt="Exits: a country and server for AI, for everything else and for downloads, and under them how the server has been doing." loading="lazy">
           <img class="shot-dark" src="shots/exits-dark.webp" width="1180" height="1130" alt="Exits in dark mode." loading="lazy">
         </div>
-        <figcaption><b>Exits</b> <span>· a country for AI, another for everything else; AI stays put when you change the other</span></figcaption>
+        <figcaption><b>Exits</b> <span>· a country and server for each kind of traffic</span></figcaption>
       </figure>
       <figure>
         <div class="window">
@@ -230,12 +223,12 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     </div>
 
     <div class="facts">
-      <div><b>One server for AI</b><span>Your AI tools keep the same server when you change anything else.</span></div>
-      <div><b>Measured, not promised</b><span>Is each service reachable, how fast it answers, which country it sees. Kept 30 days on this computer. Nothing is sent anywhere.</span></div>
-      <div><b>No detour</b><span>Domestic AI services connect directly. Local models never leave your computer.</span></div>
+      <div><b>Picks the fastest server</b><span>Checked every ten minutes, and changed when yours fails or gets slow.</span></div>
+      <div><b>AI on one server</b><span>AI tools keep the same server when you change anything else.</span></div>
+      <div><b>See what each app uses</b><span>Kept 30 days on this computer. Nothing is sent anywhere.</span></div>
       <div><b>Updates itself</b><span>A download icon appears when there is a new version.</span></div>
     </div>
-    <p class="note">Kairo shows the country a service sees. Where you are, and the service's own terms, still apply.</p>
+    <p class="note">Where you are, and each service's own terms, still apply.</p>
   </section>
 
   <section class="wrap" id="download">
