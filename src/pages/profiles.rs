@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use kairo_core::profile::{Profile, Source, Usage};
-use nsh_base::{alert_dialog, button, theme};
+use nsh_base::{ButtonElement as Button, alert_dialog, button, theme};
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
 
@@ -623,6 +623,8 @@ fn row(
                         .h(px(26.0))
                         .on_press(move || store.run(store.svc().activate(id.clone())))
                 }))
+                // The groups are the active subscription's own: one press from where it is.
+                .child(when(active, || groups_button().h(px(26.0))))
                 .child(when(remote, move || {
                     let id = id_update.clone();
                     ui::btn("Update", Variant::Secondary)
@@ -758,6 +760,7 @@ fn phone_row(
                             ui::btn("Use", Variant::Primary)
                                 .on_press(move || store.run(store.svc().activate(id.clone())))
                         }))
+                        .child(when(active, || groups_button()))
                         .child(when(remote, move || {
                             let id = id_update.clone();
                             ui::btn_icon(Icon::Refresh, "Update", Variant::Secondary)
@@ -788,6 +791,13 @@ fn phone_row(
             move || open() && has_usage(),
             move || usage_section(p),
         ))
+}
+
+/// Opens the subscription's groups (the Groups page).
+fn groups_button() -> Button {
+    let store = store();
+    ui::btn_icon(Icon::Layers, "Groups", Variant::Secondary)
+        .on_press(move || store.page.set(Page::Proxies))
 }
 
 fn in_use_tag() -> View {
