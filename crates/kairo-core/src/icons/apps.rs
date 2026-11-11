@@ -130,12 +130,39 @@ pub mod linux {
         String::new()
     }
 
+    /// A browser's web app ("Linear" in Chrome): its entry runs the browser's own binary with
+    /// `--app-id=`/`--app=`, is named `chrome-<32 letters>-<profile>` (or `msedge-`, `brave-` …) and
+    /// has the window class `crx_<id>`. It is an app of its own and never the browser.
+    pub fn is_web_app(e: &Entry) -> bool {
+        let id = e.id.to_lowercase();
+        let named = id.split_once('-').is_some_and(|(browser, rest)| {
+            matches!(
+                browser,
+                "chrome" | "msedge" | "brave" | "chromium" | "vivaldi" | "opera" | "google"
+            ) && {
+                // `google-chrome-<id>-Default` has one more word.
+                let rest = rest.strip_prefix("chrome-").unwrap_or(rest);
+                rest.split('-').next().is_some_and(|w| {
+                    w.len() == 32 && w.bytes().all(|b| (b'a'..=b'p').contains(&b))
+                })
+            }
+        });
+        named
+            || e.wm_class.to_lowercase().starts_with("crx_")
+            || e.exec
+                .split_whitespace()
+                .any(|w| w.starts_with("--app-id=") || w.starts_with("--app="))
+    }
+
     /// How well a desktop file stands for the program `n` (0: not at all).
     pub fn score(e: &Entry, n: &str) -> u32 {
-        let exec = exec_program(&e.exec);
         let id = e.id.trim_end_matches(".desktop").to_lowercase();
         let last = id.rsplit('.').next().unwrap_or(&id).to_owned();
-        if exec == n {
+        // A web app runs the browser's binary, so its `Exec` says nothing about which program
+        // it is: only its own class, id and name count.
+        let web = is_web_app(e);
+        let exec = if web { String::new() } else { exec_program(&e.exec) };
+        if !exec.is_empty() && exec == n {
             return 100;
         }
         if id == n || last == n || e.wm_class.to_lowercase() == n {
@@ -150,7 +177,7 @@ pub mod linux {
                 .map(str::to_owned)
                 .collect()
         };
-        if n.len() >= 4 && (tokens(&exec).iter().any(|t| t == n) || tokens(&last).iter().any(|t| t == n)) {
+        if n.len() >= 4 && !web && (tokens(&exec).iter().any(|t| t == n) || tokens(&last).iter().any(|t| t == n)) {
             return 60;
         }
         0
@@ -412,6 +439,39 @@ pub mod linux {
             assert_eq!(icon("fire"), None);
             assert_eq!(icon("nope"), None);
             assert_eq!(icon("quiet"), None);
+        }
+
+        /// A Chrome web app ("Linear") has its own entry whose `Exec` is Chrome's own `chrome`
+        /// binary: it must never be taken for the browser (the file names are a real machine's).
+        #[test]
+        fn a_chrome_web_app_is_never_the_browser() {
+            let dir = tempfile::tempdir().unwrap();
+            let apps = dir.path().join("applications");
+            let app_id = "bgdbmehlmdmddlgneophbcddadgknlpm";
+            write(
+                &apps.join(format!("chrome-{app_id}-Default.desktop")),
+                &format!("[Desktop Entry]\nType=Application\nName=Linear\nExec=/home/u/.agent-browser/browsers/chrome-154.0.8037.92/chrome --user-data-dir=/tmp/p --profile-directory=Default --app-id={app_id}\nIcon=/icons/chrome-{app_id}-Default.png\nStartupWMClass=crx_{app_id}\n"),
+            );
+            write(&apps.join("google-chrome.desktop"), "[Desktop Entry]\nType=Application\nName=Google Chrome\nStartupWMClass=Google-chrome\nExec=/usr/bin/google-chrome-stable %U\nIcon=google-chrome\n[Desktop Action new-window]\nName=New Window\nExec=/usr/bin/google-chrome-stable\n");
+            write(&apps.join("com.google.Chrome.desktop"), "[Desktop Entry]\nType=Application\nName=Google Chrome\nExec=/usr/bin/google-chrome-stable %U\nIcon=google-chrome\n");
+            for other in ["msedge-mjoklplbddabcmpepnokjaffbmgbkjal-Default", "brave-fmpnliohjhemenmnlpbfmorieiaiabbc-Default", "chromium-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-Profile 1"] {
+                let browser = other.split('-').next().unwrap();
+                write(
+                    &apps.join(format!("{other}.desktop")),
+                    &format!("[Desktop Entry]\nType=Application\nName=Some App\nExec=/opt/{browser}/{browser} --app-id=x\nIcon=/icons/{browser}-app.png\n"),
+                );
+            }
+            let dirs = vec![apps];
+            let icon = |n: &str| find(&dirs, n).map(|e| e.icon);
+            assert_eq!(icon("chrome").as_deref(), Some("google-chrome"));
+            assert_eq!(icon("google-chrome").as_deref(), Some("google-chrome"));
+            for browser in ["msedge", "brave", "chromium"] {
+                let got = icon(browser);
+                assert!(got.is_none() || !got.unwrap().contains("-app.png"), "{browser}: a web app is not the browser");
+            }
+            // The web app itself is still found by its own name and its own window class.
+            assert_eq!(icon("linear"), Some(format!("/icons/chrome-{app_id}-Default.png")));
+            assert_eq!(icon(&format!("crx_{app_id}")), Some(format!("/icons/chrome-{app_id}-Default.png")));
         }
 
         #[test]
