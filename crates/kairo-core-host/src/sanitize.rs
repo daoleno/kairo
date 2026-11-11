@@ -45,7 +45,9 @@ const PROXY_TYPES: &[&str] = &[
     "trusttunnel", "masque",
 ];
 
-/// Keys inside a proxy that name a file.
+/// Keys inside a proxy (at any depth) that the core takes for the path of a file
+/// unless the value is the data itself (a PEM block; for WireGuard and MASQUE a
+/// base64 key).
 const PROXY_FILE_KEYS: &[&str] = &[
     "ca",
     "certificate",
@@ -54,8 +56,45 @@ const PROXY_FILE_KEYS: &[&str] = &[
     "client-key",
     "state-dir",
     "planet",
-    "key",
 ];
+
+/// Whether `value` of a file-like key is data, not a path.
+fn inline_data(key: &str, ty: &str, value: &Value) -> bool {
+    let Some(text) = value.as_str() else { return false };
+    if text.len() <= 16 * 1024 && text.trim_start().starts_with("-----BEGIN ") {
+        return true;
+    }
+    // A WireGuard or MASQUE private key is 32 bytes in base64.
+    key == "private-key"
+        && matches!(ty, "wireguard" | "masque")
+        && (40..=64).contains(&text.len())
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+}
+
+/// A proxy's value with the file-like keys that are paths taken out, at any depth.
+fn scrub(v: &Value, ty: &str, dropped: &mut Vec<String>, label: &str, depth: usize) -> Option<Value> {
+    if !plain(v, depth) {
+        return None;
+    }
+    match v {
+        Value::Mapping(m) => {
+            let mut out = Mapping::new();
+            for (k, x) in m {
+                let key = key_of(k)?;
+                if PROXY_FILE_KEYS.contains(&key) && !inline_data(key, ty, x) {
+                    dropped.push(format!("{label}: {key}"));
+                    continue;
+                }
+                out.insert(k.clone(), scrub(x, ty, dropped, label, depth - 1)?);
+            }
+            Some(Value::Mapping(out))
+        }
+        Value::Sequence(l) => Some(Value::Sequence(
+            l.iter().map(|x| scrub(x, ty, dropped, label, depth - 1)).collect::<Option<Vec<_>>>()?,
+        )),
+        other => Some(other.clone()),
+    }
+}
 
 const GROUP_KEYS: &[&str] = &[
     "name", "type", "proxies", "use", "url", "interval", "lazy", "timeout", "max-failed-times",
@@ -116,7 +155,8 @@ const SCALARS: &[(&str, Scalar)] = &[
 ];
 
 fn text_ok(s: &str) -> bool {
-    s.len() <= 4096 && !s.chars().any(|c| c.is_control())
+    // Line breaks are data (a PEM block); other control characters are not.
+    s.len() <= 16 * 1024 && !s.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
 }
 
 fn scalar_ok(v: &Value, kind: &Scalar) -> bool {
@@ -194,14 +234,17 @@ fn proxy(p: &Value, dropped: &mut Vec<String>, label: &str) -> Option<Value> {
         return None;
     }
     let mut out = Mapping::new();
+    let label = format!("{label} {name}");
     for (k, x) in m {
         let Some(key) = key_of(k) else { continue };
-        if PROXY_FILE_KEYS.contains(&key) || key.starts_with("<<") {
-            dropped.push(format!("{label} {name}: {key}"));
-        } else if plain(x, 12) {
-            out.insert(k.clone(), x.clone());
+        if key.starts_with("<<") {
+            dropped.push(format!("{label}: {key}"));
+        } else if PROXY_FILE_KEYS.contains(&key) && !inline_data(key, ty, x) {
+            dropped.push(format!("{label}: {key}"));
+        } else if let Some(v) = scrub(x, ty, dropped, &label, 12) {
+            out.insert(k.clone(), v);
         } else {
-            dropped.push(format!("{label} {name}: {key} (not plain data)"));
+            dropped.push(format!("{label}: {key} (not plain data)"));
         }
     }
     Some(Value::Mapping(out))
@@ -517,6 +560,35 @@ proxies:
         assert_eq!(a["ws-opts"]["path"].as_str(), Some("/ws"), "a URL path is not a file path");
         assert!(a.get("ca").is_none() && a.get("private-key").is_none());
         assert!(list[1].as_mapping().unwrap().get("certificate").is_none());
+    }
+
+    #[test]
+    fn keys_and_certificates_given_as_data_stay() {
+        let key = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=";
+        let s = run(&with_base(&format!(
+            "proxies:\n  - {{name: w, type: wireguard, server: h, port: 51820, private-key: '{key}', public-key: p, ip: 10.0.0.2}}\n  - {{name: s, type: sudoku, server: h, port: 1, key: some-secret}}\n  - name: t\n    type: trojan\n    server: h\n    port: 443\n    password: p\n    ca-str: |\n      -----BEGIN CERTIFICATE-----\n      MIIB\n      -----END CERTIFICATE-----\n    certificate: |\n      -----BEGIN CERTIFICATE-----\n      MIIB\n      -----END CERTIFICATE-----\n    private-key: C:/Users/x/key.pem\n"
+        )));
+        let m = parsed(&s);
+        let list = m["proxies"].as_sequence().unwrap();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0]["private-key"].as_str(), Some(key), "a WireGuard key is data");
+        assert_eq!(list[1]["key"].as_str(), Some("some-secret"));
+        let t = list[2].as_mapping().unwrap();
+        assert!(t["ca-str"].as_str().unwrap().contains("BEGIN CERTIFICATE"));
+        assert!(t["certificate"].as_str().unwrap().contains("BEGIN CERTIFICATE"), "a PEM block is data");
+        assert!(t.get("private-key").is_none(), "a path is not");
+    }
+
+    #[test]
+    fn a_file_name_hidden_one_level_down_is_still_dropped() {
+        let s = run(&with_base(
+            "proxies:\n  - {name: a, type: vless, server: h, port: 443, uuid: u, tls-opts: {ca: C:/x.pem, client-key: C:/k, sni: h}, reality-opts: {public-key: pk}}\n",
+        ));
+        let m = parsed(&s);
+        let a = m["proxies"].as_sequence().unwrap()[0].as_mapping().unwrap();
+        let t = a["tls-opts"].as_mapping().unwrap();
+        assert!(!t.contains_key("ca") && !t.contains_key("client-key") && t.contains_key("sni"));
+        assert_eq!(a["reality-opts"]["public-key"].as_str(), Some("pk"));
     }
 
     #[test]

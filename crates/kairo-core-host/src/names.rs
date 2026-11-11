@@ -71,6 +71,24 @@ pub fn valid_name(name: &str) -> bool {
     }
 }
 
+/// Whether a file of this name may be in the `core` folder: the three binaries
+/// and the grants' own records. The host refuses to start next to anything else
+/// (the loader looks in the program's own folder for a DLL first), and the grant
+/// removes it.
+pub fn allowed_in_core(file: &str) -> bool {
+    if [CORE_EXE, HOST_EXE, WINTUN_DLL].iter().any(|n| n.eq_ignore_ascii_case(file)) {
+        return true;
+    }
+    let record = |prefix: &str, ext: &str| {
+        let lower = file.to_ascii_lowercase();
+        lower.starts_with(prefix)
+            && lower.ends_with(ext)
+            && file.len() <= 120
+            && file.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    };
+    record("grant-kairocore-", ".json") || record("grant-result-kairocore-", ".txt")
+}
+
 /// Whether `sid` is a SID string (`S-1-5-21-…`) and nothing else.
 pub fn valid_sid(sid: &str) -> bool {
     sid.starts_with("S-1-")
@@ -248,6 +266,16 @@ mod tests {
         assert!(is_install_dir(Path::new("c:\\programdata\\kairo\\core\\"), pd));
         assert!(!is_install_dir(Path::new("C:\\Users\\a\\kairo"), pd));
         assert!(!is_install_dir(Path::new("C:\\ProgramData\\Kairo\\core\\x"), pd));
+    }
+
+    #[test]
+    fn nothing_but_the_binaries_and_grant_records_may_sit_in_core() {
+        for ok in ["mihomo.exe", "kairo-core-host.exe", "wintun.dll", "MIHOMO.EXE", "grant-KairoCore-kstd.json", "grant-result-KairoCore-kstd.txt"] {
+            assert!(allowed_in_core(ok), "{ok}");
+        }
+        for bad in ["version.dll", "dwmapi.dll", "mihomo.exe.old", "grant-evil.json", "grant-KairoCore-x.dll", "kairo.exe", "..", "a\\b", "grant-KairoCore-a b.json", "wintun.dll:stream"] {
+            assert!(!allowed_in_core(bad), "{bad}");
+        }
     }
 
     #[test]

@@ -82,6 +82,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 type Log = Arc<Mutex<std::fs::File>>;
 
 fn note(log: &Log, line: &str) {
+    let line: String = line.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let _ = writeln!(lock(log), "time=\"-\" level=info msg=\"kairo-core-host: {line}\"");
 }
 
@@ -130,6 +131,12 @@ fn prepare(name: &str) -> Result<Ready, String> {
         if !winfs::is_trusted_dir(d) {
             return Err(format!("{} is not an administrator-owned folder", d.display()));
         }
+    }
+    // Nothing but what the administrator put there: not a DLL the loader would pick
+    // up before the system's, not a file owned by someone else.
+    if let Some(stray) = winfs::stray_in(&layout.install, names::allowed_in_core) {
+        fail_note(name, &format!("{} holds {stray}, which is not Kairo's; give Kairo the permission again", layout.install.display()));
+        return Err(format!("unexpected file {stray} in {}", layout.install.display()));
     }
     // The log first, so the rest can say why it failed.
     let file = std::fs::File::create(layout.log()).map_err(|e| format!("log: {e}"))?;
@@ -394,40 +401,57 @@ fn forward(mut c: TcpStream, sh: &Shared, head: &gate::Head, body: &[u8]) {
     let Ok(mut up) = TcpStream::connect(("127.0.0.1", sh.internal_port)) else {
         return reply(&mut c, 502, "Bad Gateway", &message("the core is not answering yet"));
     };
+    let stream = gate::wants_stream(head);
     let req = gate::forward_head(head, sh.internal_port, &sh.internal_secret, body.len());
     if up.write_all(req.as_bytes()).is_err() || up.write_all(body).is_err() {
         return;
     }
     let _ = c.set_read_timeout(None);
-    let (Ok(mut c2), Ok(mut up2)) = (c.try_clone(), up.try_clone()) else { return };
-    // The user's side only matters for a WebSocket (it has nothing more to say
-    // after a plain request); ending either side ends both.
-    let t = std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        while let Ok(n) = c2.read(&mut buf) {
-            if n == 0 || up2.write_all(&buf[..n]).is_err() {
-                break;
-            }
-        }
-        let _ = up2.shutdown(Shutdown::Write);
-    });
+    // One request, one answer: whatever else the client sent after it (a second,
+    // pipelined request) is never read, so it never reaches the core. Only a
+    // WebSocket the core has accepted (101) is then passed both ways.
     let mut buf = [0u8; 8192];
-    while let Ok(n) = up.read(&mut buf) {
-        if n == 0 || c.write_all(&buf[..n]).is_err() {
+    let mut first = Vec::new();
+    let mut copier = None;
+    loop {
+        let n = match up.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        if c.write_all(&buf[..n]).is_err() {
             break;
+        }
+        if stream && copier.is_none() && first.len() < 12 {
+            first.extend_from_slice(&buf[..n]);
+            if first.len() >= 12 && first.starts_with(b"HTTP/1.1 101") {
+                let (Ok(mut c2), Ok(mut up2)) = (c.try_clone(), up.try_clone()) else { break };
+                copier = Some(std::thread::spawn(move || {
+                    let mut buf = [0u8; 8192];
+                    while let Ok(n) = c2.read(&mut buf) {
+                        if n == 0 || up2.write_all(&buf[..n]).is_err() {
+                            break;
+                        }
+                    }
+                    let _ = up2.shutdown(Shutdown::Write);
+                }));
+            }
         }
     }
     let _ = c.shutdown(Shutdown::Both);
     let _ = up.shutdown(Shutdown::Both);
-    let _ = t.join();
+    if let Some(t) = copier {
+        let _ = t.join();
+    }
 }
 
 /// The SID of the user who owns the process at the other end of `c`.
 fn peer_sid(c: &TcpStream, server_port: u16) -> Option<String> {
-    let client_port = c.peer_addr().ok()?.port();
-    if !c.peer_addr().ok()?.ip().is_loopback() {
+    let (local, peer) = (c.local_addr().ok()?, c.peer_addr().ok()?);
+    if !local.ip().is_loopback() || !peer.ip().is_loopback() || local.port() != server_port {
         return None;
     }
+    let client_port = peer.port();
+    let loopback = u32::from_ne_bytes([127, 0, 0, 1]);
     let pid = unsafe {
         let mut size = 0u32;
         let _ = GetExtendedTcpTable(None, &mut size, false, 2, TCP_TABLE_OWNER_PID_ALL, 0);
@@ -447,10 +471,22 @@ fn peer_sid(c: &TcpStream, server_port: u16) -> Option<String> {
         let count = u32::from_ne_bytes(buf[..4].try_into().ok()?) as usize;
         let rows = buf.as_ptr().add(4) as *const MIB_TCPROW_OWNER_PID;
         let port = |p: u32| u16::from_be((p & 0xffff) as u16);
-        (0..count)
+        // The client's own end of this connection, on loopback both ways, and
+        // exactly one such row (a second one would be someone else's).
+        let mut found = (0..count)
             .map(|i| std::ptr::read_unaligned(rows.add(i)))
-            .find(|r| port(r.dwLocalPort) == client_port && port(r.dwRemotePort) == server_port)
-            .map(|r| r.dwOwningPid)?
+            .filter(|r| {
+                port(r.dwLocalPort) == client_port
+                    && port(r.dwRemotePort) == server_port
+                    && r.dwLocalAddr == loopback
+                    && r.dwRemoteAddr == loopback
+            })
+            .map(|r| r.dwOwningPid);
+        let pid = found.next()?;
+        if found.next().is_some() {
+            return None;
+        }
+        pid
     };
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;

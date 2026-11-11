@@ -291,6 +291,22 @@ rules:
             call("PUT", "/configs?force=true", r#"{"path":"C:\\Windows\\win.ini","payload":"external-ui: C:/x"}"#, Some(SECRET)),
         );
         show("GET /version after the reload", call("GET", "/version", "", Some(SECRET)));
+        // A name with a slash is one name (404 from the core is the right answer: no such node).
+        show("GET /proxies/JP%2FTokyo%2001 (a name with a slash)", call("GET", "/proxies/JP%2FTokyo%2001", "", Some(SECRET)));
+        // Two requests in one write, the first asking for an upgrade: only the first may be answered.
+        if let Ok(mut s) = std::net::TcpStream::connect("127.0.0.1:19091") {
+            let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+            let second_body = r#"{"path":"C:\\Windows\\win.ini"}"#;
+            let both = format!(
+                "GET /version HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {SECRET}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n\r\nPOST /restart HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {SECRET}\r\nContent-Length: {}\r\n\r\n{second_body}",
+                second_body.len()
+            );
+            let _ = s.write_all(both.as_bytes());
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+            println!("PROBE pipelined upgrade+POST /restart: {} HTTP response(s); first line {:?}", out.matches("HTTP/1.1 ").count(), out.lines().next().unwrap_or(""));
+        }
+        show("GET /version after the pipelined attempt (the core must still be up)", call("GET", "/version", "", Some(SECRET)));
     }
 
     pub fn run(args: &[String]) -> i32 {

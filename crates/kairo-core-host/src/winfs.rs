@@ -78,6 +78,29 @@ pub fn is_trusted_dir(path: &Path) -> bool {
     matches!(owner_sid(path).as_deref(), Ok("S-1-5-18") | Ok("S-1-5-32-544"))
 }
 
+/// A regular file (no link) that only SYSTEM or Administrators own.
+pub fn is_trusted_file(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else { return false };
+    let a = meta.file_attributes();
+    if a & FILE_ATTRIBUTE_REPARSE_POINT != 0 || a & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        return false;
+    }
+    matches!(owner_sid(path).as_deref(), Ok("S-1-5-18") | Ok("S-1-5-32-544"))
+}
+
+/// The first thing in `dir` that is not one of `allowed` names or is not a
+/// trusted file, if any (the loader looks in a program's own folder first).
+pub fn stray_in(dir: &Path, allowed: impl Fn(&str) -> bool) -> Option<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Some("(cannot list the folder)".into()) };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !allowed(&name) || !is_trusted_file(&e.path()) {
+            return Some(name);
+        }
+    }
+    None
+}
+
 /// Creates `path` (its parent must exist and be trusted) with this descriptor
 /// in the same call, so the directory is never visible with another one.
 pub fn create_dir_with(path: &Path, sddl: &str) -> Result<(), String> {

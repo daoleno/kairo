@@ -20,6 +20,13 @@ pub enum Verdict {
     Deny(&'static str),
 }
 
+/// The streams Kairo reads over a WebSocket; an upgrade on any other path is
+/// not passed on (it would keep the connection open for a second request).
+pub fn is_stream(method: &str, target: &str) -> bool {
+    let path = target.split_once('?').map_or(target, |(p, _)| p);
+    method == "GET" && matches!(path, "/traffic" | "/logs" | "/connections" | "/memory")
+}
+
 /// Biggest body the host reads from the user.
 pub const MAX_BODY: usize = 64 * 1024;
 
@@ -29,17 +36,24 @@ const LOG_LEVELS: &[&str] = &["silent", "error", "warning", "info", "debug"];
 
 /// One path segment of a name Kairo sends: percent-encoded text, never a path.
 fn segment_ok(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 1024 && !s.contains(['\\', '\0']) && s != "." && s != ".."
+    // Read an encoded slash as the slash it stands for: no part may be a dot or
+    // two (a core that decoded before routing would then walk up a path).
+    let decoded = s.replace("%2F", "/").replace("%2f", "/");
+    !s.is_empty()
+        && s.len() <= 1024
+        && !s.contains(['\\', '\0'])
+        && decoded.split('/').all(|part| part != "." && part != "..")
 }
 
 /// Decides on a request. `target` is the request target as sent (`/path?query`).
 pub fn decide(method: &str, target: &str, body: &[u8]) -> Verdict {
     let (path, _query) = target.split_once('?').unwrap_or((target, ""));
     let lower = path.to_ascii_lowercase();
-    // Encoded dots, slashes and backslashes are the ways to say a different path.
+    // Encoded dots, backslashes and NULs are the ways to say a different path.
+    // An encoded slash stays: a node's or group's name can hold one (Kairo encodes
+    // it), but only as part of a name, never as a way to reach another route.
     if !path.starts_with('/')
         || lower.contains("%2e")
-        || lower.contains("%2f")
         || lower.contains("%5c")
         || lower.contains("%00")
         || path.contains("//")
@@ -103,6 +117,12 @@ fn patch_body(body: &[u8]) -> Verdict {
     Verdict::Forward
 }
 
+/// Whether this request asks for a WebSocket the host will pass on.
+pub fn wants_stream(head: &Head) -> bool {
+    is_stream(&head.method, &head.target)
+        && head.header("upgrade").is_some_and(|u| u.eq_ignore_ascii_case("websocket"))
+}
+
 /// A parsed request head.
 #[derive(Debug)]
 pub struct Head {
@@ -160,9 +180,10 @@ pub fn authorized(head: &Head, secret: &str) -> bool {
 /// The request the core receives: the headers Kairo's calls need, the host's
 /// secret in place of the user's.
 pub fn forward_head(head: &Head, internal_port: u16, internal_secret: &str, body_len: usize) -> String {
-    let websocket = head
-        .header("upgrade")
-        .is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
+    let websocket = is_stream(&head.method, &head.target)
+        && head
+            .header("upgrade")
+            .is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
     let mut out = format!(
         "{} {} HTTP/1.1\r\nHost: 127.0.0.1:{internal_port}\r\nAuthorization: Bearer {internal_secret}\r\nConnection: {}\r\n",
         head.method,
@@ -253,6 +274,35 @@ mod tests {
     }
 
     #[test]
+    fn a_name_with_a_slash_is_one_name() {
+        // Kairo encodes a slash in a node's name (`controller::segment`).
+        assert_eq!(d("GET", "/proxies/Tokyo%2F03/delay?timeout=5000&url=x"), Verdict::Forward);
+        assert_eq!(decide("PUT", "/proxies/Auto%2FFast", br#"{"name":"JP%2F1"}"#), Verdict::Forward);
+        assert_eq!(d("PUT", "/providers/proxies/a%2Fb"), Verdict::Forward);
+    }
+
+    #[test]
+    fn only_the_streams_may_be_upgraded_to_a_websocket() {
+        let ws = |target: &str| {
+            let raw = format!("GET {target} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: k\r\n\r\n");
+            parse_head(raw.as_bytes()).unwrap().unwrap()
+        };
+        for t in ["/traffic", "/logs?level=info", "/connections", "/memory"] {
+            let h = ws(t);
+            assert!(wants_stream(&h), "{t}");
+            assert!(forward_head(&h, 1, "s", 0).contains("Upgrade: websocket"));
+        }
+        // An upgrade on a plain call is a way to keep the pipe open for a second
+        // request: it is passed on as a plain request, closing after the answer.
+        for t in ["/version", "/proxies", "/configs"] {
+            let h = ws(t);
+            assert!(!wants_stream(&h), "{t}");
+            let out = forward_head(&h, 1, "s", 0);
+            assert!(out.contains("Connection: close\r\n") && !out.to_lowercase().contains("upgrade"), "{t}: {out}");
+        }
+    }
+
+    #[test]
     fn put_configs_is_always_a_reload_from_the_inbox() {
         for body in [
             br#"{"path":"C:\\Users\\x\\evil.yaml","payload":""}"#.as_slice(),
@@ -292,6 +342,8 @@ mod tests {
         for t in [
             "/proxies/%2e%2e/restart",
             "/proxies/..%2frestart",
+            "/proxies/..%2Frestart",
+            "/proxies/a%2F..%2Frestart",
             "/proxies/a%5cb",
             "/proxies/../restart",
             "/proxies/./x",

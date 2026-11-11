@@ -161,7 +161,7 @@ mod win {
     use std::sync::{Mutex, OnceLock};
     use std::time::SystemTime;
 
-    use kairo_core_host::names::{READ_AND_LIST, READ_ALL, READ_WRITE_DATA, owner_and_dacl};
+    use kairo_core_host::names::{self, READ_AND_LIST, READ_ALL, READ_WRITE_DATA, owner_and_dacl};
     use kairo_core_host::winfs;
     use sha2::{Digest, Sha256};
 
@@ -622,6 +622,17 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
             // The folders: administrator-owned, locked as they are created.
             shared_dir(&l.root)?;
             shared_dir(&l.install)?;
+            // Whatever else is in there (a folder made the old way, or by someone
+            // who could write to it) goes: the loader looks in a program's own
+            // folder first, and a file owned by someone else is not ours.
+            if let Ok(entries) = std::fs::read_dir(&l.install) {
+                for e in entries.flatten() {
+                    let file = e.file_name().to_string_lossy().into_owned();
+                    if !names::allowed_in_core(&file) || !winfs::is_trusted_file(&e.path()) {
+                        winfs::remove_any(&e.path())?;
+                    }
+                }
+            }
             for parent in [l.run.parent(), l.logs.parent(), l.inbox_dir.parent()].into_iter().flatten() {
                 shared_dir(parent)?;
             }
@@ -882,5 +893,38 @@ mod tests {
         let mut gone = out.dropped.clone();
         gone.sort();
         assert_eq!(gone, ["listeners", "tunnels"], "{:?}", out.dropped);
+    }
+
+    /// The same, with everything Kairo adds on top: the AI layer, a route of each
+    /// kind, and the nodes real subscriptions carry (WireGuard with its inline key,
+    /// hysteria2, a name with a slash). Each must come out as it went in.
+    #[test]
+    fn kairos_config_with_the_ai_layer_routes_and_varied_nodes_passes_whole() {
+        use crate::routes::{Route, RouteExit, RouteKind};
+        use crate::settings::Settings;
+        let profile = "proxies:\n  - {name: 'JP/Tokyo 01', type: hysteria2, server: h.example.com, port: 443, password: p, sni: h.example.com}\n  - {name: wg, type: wireguard, server: w.example.com, port: 51820, private-key: 'yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=', public-key: 'UuF/iy3Vg3H4rfQxvH1/4mEdcdgDx0gQ1S9tw5xJ2ik=', ip: 10.0.0.2}\n  - {name: v, type: vless, server: v.example.com, port: 443, uuid: 11111111-1111-1111-1111-111111111111, tls: true, servername: v.example.com, reality-opts: {public-key: pk, short-id: ab}}\nproxy-groups:\n  - {name: G, type: select, proxies: ['JP/Tokyo 01', wg, v, DIRECT]}\nrules:\n  - MATCH,G\n";
+        let mut s = Settings::default();
+        s.tun = true;
+        s.secret = crate::settings::new_secret();
+        s.ai.enabled = true;
+        s.routes = vec![
+            Route::new(RouteKind::site("example.org"), RouteExit::Direct).unwrap(),
+            Route::new(RouteKind::app("claude"), RouteExit::Ai).unwrap(),
+            Route::new(RouteKind::site("blocked.example.com"), RouteExit::Block).unwrap(),
+        ];
+        let (text, _) = crate::config::build_applied(profile, "", &s, &|_| false).unwrap();
+        let out = kairo_core_host::sanitize::sanitize(
+            &text,
+            &kairo_core_host::sanitize::Internal { port: 40000, secret: "host-only" },
+        )
+        .unwrap();
+        let before: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
+        let after: serde_yaml::Value = serde_yaml::from_str(&out.text).unwrap();
+        for key in ["proxies", "proxy-groups", "rules", "tun", "dns", "mode", "find-process-mode", "mixed-port"] {
+            assert_eq!(before.get(key), after.get(key), "{key} changed");
+        }
+        assert_eq!(after["proxies"].as_sequence().unwrap().len(), 3);
+        assert!(out.text.contains("PROCESS-NAME,claude"), "the app rule is still there");
+        assert_eq!(out.dropped, Vec::<String>::new(), "nothing Kairo builds may be dropped: {:?}", out.dropped);
     }
 }
