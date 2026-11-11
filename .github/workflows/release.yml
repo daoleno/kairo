@@ -118,6 +118,7 @@ jobs:
           print(names)
           assert not any("\\" in n for n in names), names
           assert "Kairo/kairo.exe" in names and "Kairo/mihomo.exe" in names, names
+          assert "Kairo/kairo-core-host.exe" in names and "Kairo/wintun.dll" in names, names
           PY
       - uses: actions/upload-artifact@v4
         with:

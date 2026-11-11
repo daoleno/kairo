@@ -799,7 +799,16 @@ impl Service {
             self.set_core(CoreStatus::Failed { message: e.clone() });
             return Err(e);
         }
-        let mut child = match CoreProcess::spawn(&core, &self.0.paths).await {
+        // Windows TUN: the core runs as SYSTEM, through its task (see elevated.rs).
+        #[cfg(windows)]
+        let spawned = if self.settings().tun {
+            CoreProcess::spawn_elevated(&self.0.paths).await
+        } else {
+            CoreProcess::spawn(&core, &self.0.paths).await
+        };
+        #[cfg(not(windows))]
+        let spawned = CoreProcess::spawn(&core, &self.0.paths).await;
+        let mut child = match spawned {
             Ok(c) => c,
             Err(e) => {
                 let message = format!("Could not start the core: {e}");

@@ -236,6 +236,17 @@ fn main() {
     if guardian::is_guardian() {
         guardian::run();
     }
+    // Elevated copy of Kairo (UAC): the one-time TUN permission, then it exits
+    // (kairo_core::elevated).
+    #[cfg(windows)]
+    {
+        let a: Vec<String> = std::env::args().collect();
+        match a.get(1).map(String::as_str) {
+            Some("--grant-tun") => std::process::exit(kairo_core::elevated::run_grant(&a[2..])),
+            Some("--revoke-tun") => std::process::exit(kairo_core::elevated::run_revoke(&a[2..])),
+            _ => {}
+        }
+    }
     // At login (see kairo_core::autostart::install_restore): put the system
     // proxy back if a Kairo that is gone left it pointing at a dead port.
     if std::env::args().nth(1).as_deref() == Some("--restore-network") {

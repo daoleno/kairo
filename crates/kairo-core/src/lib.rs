@@ -27,6 +27,7 @@ pub mod settings;
 pub mod stats;
 pub mod supervisor;
 pub mod sysproxy;
+pub mod elevated;
 pub mod tun;
 pub mod update;
 #[cfg(windows)]

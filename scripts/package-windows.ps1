@@ -16,6 +16,8 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 cargo build --release
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 Copy-Item target\release\kairo.exe "$stage\kairo.exe"
+# What gives the core the rights TUN needs (a scheduled task or service runs it).
+Copy-Item target\release\kairo-core-host.exe "$stage\kairo-core-host.exe"
 
 # The core and its licence.
 bash scripts/fetch-mihomo.sh windows-x86_64 "dist/stage/Kairo"
@@ -24,6 +26,10 @@ Move-Item "$stage\LICENSE.mihomo" "$stage\LICENSE.mihomo.txt"
 $pinned = (Select-String -Path scripts\mihomo.env -Pattern '^MIHOMO_VERSION=(.*)').Matches.Groups[1].Value
 $reported = & "$stage\mihomo.exe" -v | Select-Object -First 1
 if ($reported -notlike "Mihomo Meta $pinned *") { throw "the core reports '$reported', expected $pinned" }
+# The wintun driver library (TUN) and its licence.
+bash scripts/fetch-wintun.sh "dist/stage/Kairo"
+if ($LASTEXITCODE -ne 0) { throw "fetching wintun failed" }
+$wintun = (Select-String -Path scripts\mihomo.env -Pattern '^WINTUN_VERSION=(.*)').Matches.Groups[1].Value
 Copy-Item LICENSE "$stage\LICENSE.txt"
 @"
 Kairo ${version}: https://github.com/daoleno/kairo
@@ -33,6 +39,11 @@ It ships the mihomo core $pinned (mihomo.exe), the official MetaCubeX
 build, unmodified. mihomo is free software under the GNU GPL, version 3
 (LICENSE.mihomo.txt). Its source code:
 https://github.com/MetaCubeX/mihomo/tree/$pinned
+
+For TUN ("Every app") it ships wintun.dll $wintun, the official signed build
+from https://www.wintun.net, unmodified, under the Prebuilt Binaries License
+(LICENSE.wintun.txt), and kairo-core-host.exe, part of Kairo, which runs the
+core when Windows is asked to start it.
 "@ | Set-Content -Encoding utf8 "$stage\NOTICE.txt"
 
 New-Item -ItemType Directory -Force dist | Out-Null

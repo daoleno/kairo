@@ -11,10 +11,19 @@ use crate::paths::Paths;
 const TAIL: usize = 300;
 
 pub struct CoreProcess {
-    child: tokio::process::Child,
+    /// The core as Kairo's own child; none when it runs as SYSTEM (Windows TUN),
+    /// where a user can neither open its process nor wait on it: it is started and
+    /// ended through its task or service, and seen through its named event.
+    child: Option<tokio::process::Child>,
+    #[cfg(windows)]
+    elevated: Option<(crate::elevated::Route, String)>,
     pub pid: u32,
     log: PathBuf,
 }
+
+/// What the pid file holds when the core was started by the task or service.
+#[cfg(windows)]
+const ELEVATED_MARK: &str = "elevated";
 
 /// How the core ended.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,7 +90,54 @@ impl CoreProcess {
         let child = command.spawn()?;
         let pid = child.id().unwrap_or(0);
         let _ = std::fs::write(paths.core_pid(), pid.to_string());
-        Ok(CoreProcess { child, pid, log })
+        Ok(CoreProcess {
+            child: Some(child),
+            #[cfg(windows)]
+            elevated: None,
+            pid,
+            log,
+        })
+    }
+
+    /// Starts the core through its scheduled task or service (Windows TUN): no
+    /// prompt, the one-time grant gave this user the right. Waits until the host is
+    /// up, so `wait` can tell "ended" from "not started yet".
+    #[cfg(windows)]
+    pub async fn spawn_elevated(paths: &Paths) -> std::io::Result<CoreProcess> {
+        stop_stale(paths).await;
+        let (route, name) = crate::elevated::current().ok_or_else(|| {
+            std::io::Error::other("TUN needs permission first (Settings, Every app)")
+        })?;
+        let log = paths.logs_dir().join("core.log");
+        let _ = std::fs::create_dir_all(paths.logs_dir());
+        // The host starts a fresh log; do not read the last one meanwhile.
+        let _ = std::fs::remove_file(&log);
+        let _ = std::fs::write(paths.core_pid(), ELEVATED_MARK);
+        let n = name.clone();
+        let started = tokio::task::spawn_blocking(move || crate::elevated::start(route, &n))
+            .await
+            .map_err(std::io::Error::other)?;
+        if let Err(e) = started {
+            let _ = std::fs::remove_file(paths.core_pid());
+            return Err(std::io::Error::other(e));
+        }
+        for _ in 0..50 {
+            if crate::elevated::running(&name) {
+                return Ok(CoreProcess {
+                    child: None,
+                    elevated: Some((route, name)),
+                    pid: 0,
+                    log,
+                });
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let _ = std::fs::remove_file(paths.core_pid());
+        let tail = tail_of(&log, 3).join(" ");
+        Err(std::io::Error::other(format!(
+            "The core did not start through its task{}",
+            if tail.is_empty() { String::new() } else { format!(": {tail}") }
+        )))
     }
 
     /// The last lines it printed.
@@ -91,12 +147,34 @@ impl CoreProcess {
 
     /// Whether it is still running.
     pub fn running(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        #[cfg(windows)]
+        if let Some((_, name)) = &self.elevated {
+            return crate::elevated::running(name);
+        }
+        matches!(self.child.as_mut().map(|c| c.try_wait()), Some(Ok(None)))
     }
 
     /// Waits for it to exit (cancel-safe).
     pub async fn wait(&mut self) -> Exit {
-        let status = self.child.wait().await;
+        #[cfg(windows)]
+        if let Some((_, name)) = &self.elevated {
+            // Gone twice in a row (a moment between two instances is not an end).
+            let mut gone = 0;
+            while gone < 2 {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                gone = if crate::elevated::running(name) { 0 } else { gone + 1 };
+            }
+            return Exit {
+                code: None,
+                signal: None,
+                tail: self.tail(),
+            };
+        }
+        let Some(child) = self.child.as_mut() else {
+            std::future::pending::<()>().await;
+            unreachable!()
+        };
+        let status = child.wait().await;
         let (code, signal) = match status {
             Ok(s) => (s.code(), signal_of(&s)),
             Err(_) => (None, None),
@@ -110,12 +188,22 @@ impl CoreProcess {
 
     /// Asks it to stop, then kills it after a grace period.
     pub async fn stop(&mut self, paths: &Paths) {
+        #[cfg(windows)]
+        if let Some((route, name)) = self.elevated.clone() {
+            stop_elevated(route, &name).await;
+            let _ = std::fs::remove_file(paths.core_pid());
+            return;
+        }
+        let Some(child) = self.child.as_mut() else {
+            let _ = std::fs::remove_file(paths.core_pid());
+            return;
+        };
         #[cfg(unix)]
-        if let Some(pid) = self.child.id() {
+        if let Some(pid) = child.id() {
             unsafe {
                 libc::kill(pid as i32, libc::SIGTERM);
             }
-            if tokio::time::timeout(Duration::from_secs(3), self.child.wait())
+            if tokio::time::timeout(Duration::from_secs(3), child.wait())
                 .await
                 .is_ok()
             {
@@ -123,8 +211,21 @@ impl CoreProcess {
                 return;
             }
         }
-        let _ = self.child.kill().await;
+        let _ = child.kill().await;
         let _ = std::fs::remove_file(paths.core_pid());
+    }
+}
+
+/// Ends the task or service and waits (a few seconds) until the core is gone.
+#[cfg(windows)]
+async fn stop_elevated(route: crate::elevated::Route, name: &str) {
+    let n = name.to_owned();
+    let _ = tokio::task::spawn_blocking(move || crate::elevated::stop(route, &n)).await;
+    for _ in 0..50 {
+        if !crate::elevated::running(name) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -159,6 +260,17 @@ pub async fn stop_stale(paths: &Paths) {
         return;
     };
     let _ = std::fs::remove_file(paths.core_pid());
+    #[cfg(windows)]
+    if text.trim() == ELEVATED_MARK {
+        // Started by the task or service: end it the same way.
+        if let Some((route, name)) = crate::elevated::current()
+            && crate::elevated::running(&name)
+        {
+            log::warn!("stopping a core left running by a previous session (its task)");
+            stop_elevated(route, &name).await;
+        }
+        return;
+    }
     let Ok(pid) = text.trim().parse::<i32>() else {
         return;
     };
@@ -201,6 +313,10 @@ pub async fn stop_pid(pid: i32) {
 
 /// Whether this Kairo's core is running (starting, or left by a Kairo that is gone).
 pub fn core_alive(paths: &Paths) -> bool {
+    #[cfg(windows)]
+    if std::fs::read_to_string(paths.core_pid()).is_ok_and(|t| t.trim() == ELEVATED_MARK) {
+        return crate::elevated::current().is_some_and(|(_, name)| crate::elevated::running(&name));
+    }
     let Some(pid) = std::fs::read_to_string(paths.core_pid())
         .ok()
         .and_then(|t| t.trim().parse::<i32>().ok())

@@ -9,6 +9,8 @@
 //!   needs nothing.
 //! - macOS: the core is made setuid root once, through the system's administrator
 //!   prompt (`osascript ... with administrator privileges`).
+//! - Windows: see [`crate::elevated`]: a scheduled task (or a service) that runs the
+//!   core as SYSTEM and that the user may start and stop, set up once with a UAC prompt.
 
 use std::path::Path;
 use std::process::Command;
@@ -28,6 +30,17 @@ pub fn status(core: &Path) -> Privilege {
     if cfg!(target_os = "android") {
         return Privilege::Granted;
     }
+    #[cfg(windows)]
+    {
+        let _ = core;
+        crate::elevated::status(&crate::paths::Paths::new(crate::paths::Paths::default_home()))
+    }
+    #[cfg(not(windows))]
+    status_unix(core)
+}
+
+#[cfg(not(windows))]
+fn status_unix(core: &Path) -> Privilege {
     if !core.exists() {
         return Privilege::Needed;
     }
@@ -81,8 +94,14 @@ pub fn has_net_admin(core: &Path) -> bool {
     permitted & (1 << 12) != 0
 }
 
-/// Asks the user (polkit / the macOS admin prompt) to let the core run TUN.
+/// Asks the user (polkit / the macOS admin prompt / UAC) to let the core run TUN.
+#[cfg_attr(windows, allow(unreachable_code))]
 pub fn grant(core: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let _ = core;
+        return crate::elevated::grant(&crate::paths::Paths::new(crate::paths::Paths::default_home()));
+    }
     let path = core.to_string_lossy().into_owned();
     #[cfg(target_os = "linux")]
     {
