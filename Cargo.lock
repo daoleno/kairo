@@ -2487,6 +2487,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "image",
  "jni",
  "libc",
  "log",
