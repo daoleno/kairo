@@ -391,7 +391,23 @@ mod win {
             .map(|s| s.to_string())
             .collect();
         let _ = paths;
-        let script = elevation_script(&exe.to_string_lossy(), &args)?;
+        let out = elevate(&exe, &args)?;
+        let said = std::fs::read_to_string(l.grant_result(&name)).unwrap_or_default();
+        if let Some(rest) = said.trim().strip_prefix(&nonce) {
+            let rest = rest.trim();
+            if rest.starts_with("ok") && status_for_grant() == Privilege::Granted {
+                return Ok(());
+            }
+            if let Some(e) = rest.strip_prefix("error:") {
+                return Err(e.trim().to_owned());
+            }
+        }
+        Err(explain_elevation_failure(&String::from_utf8_lossy(&out.stderr)))
+    }
+
+    /// Runs `exe` with `args` through the UAC prompt and waits for it.
+    fn elevate(exe: &Path, args: &[String]) -> Result<std::process::Output, String> {
+        let script = elevation_script(&exe.to_string_lossy(), args)?;
         let ps = system32("WindowsPowerShell\\v1.0\\powershell.exe");
         let mut child = quiet(&ps.to_string_lossy())
             .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"])
@@ -404,18 +420,23 @@ mod win {
             .ok_or("powershell: no input")?
             .write_all(script.as_bytes())
             .map_err(|e| e.to_string())?;
-        let out = child.wait_with_output().map_err(|e| e.to_string())?;
-        let said = std::fs::read_to_string(l.grant_result(&name)).unwrap_or_default();
-        if let Some(rest) = said.trim().strip_prefix(&nonce) {
-            let rest = rest.trim();
-            if rest.starts_with("ok") && status_for_grant() == Privilege::Granted {
-                return Ok(());
-            }
-            if let Some(e) = rest.strip_prefix("error:") {
-                return Err(e.trim().to_owned());
-            }
+        child.wait_with_output().map_err(|e| e.to_string())
+    }
+
+    /// Takes the permission away again (UAC): removes this user's task, folders
+    /// and, with the last grant, the files. There is no uninstaller to do it
+    /// (Kairo for Windows is a folder that updates itself), so this is how the
+    /// SYSTEM side is removed.
+    pub fn revoke() -> Result<(), String> {
+        let (user, _) = current_user()?;
+        let exe = crate::paths::current_exe().ok_or("Cannot find Kairo's own program")?;
+        let args: Vec<String> = ["--revoke-tun", "--user", &user].iter().map(|s| s.to_string()).collect();
+        let out = elevate(&exe, &args)?;
+        if recorded().is_none() {
+            Ok(())
+        } else {
+            Err(explain_elevation_failure(&String::from_utf8_lossy(&out.stderr)))
         }
-        Err(explain_elevation_failure(&String::from_utf8_lossy(&out.stderr)))
     }
 
     /// `status` as the grant itself needs it (the gate is for the product).

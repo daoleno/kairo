@@ -396,6 +396,15 @@ fn main() {
             Some("--grant-tun") => std::process::exit(kairo_core::elevated::run_grant(&a[2..])),
             Some("--revoke-tun") => std::process::exit(kairo_core::elevated::run_revoke(&a[2..])),
             Some("--tun-selftest") => std::process::exit(tun_selftest::run(&a[2..])),
+            // The app's own calls for the permission and for taking it away (the
+            // UAC path), for the acceptance run; the product's switch stays shut.
+            Some("--tun-grant-selftest") | Some("--tun-revoke-selftest") => {
+                let grant = a[1] == "--tun-grant-selftest";
+                let r = if grant { kairo_core::elevated::grant(&Paths::new(Paths::default_home())) } else { kairo_core::elevated::revoke() };
+                println!("{} {:?}", if grant { "GRANT" } else { "REVOKE" }, r);
+                println!("status {:?}", kairo_core::tun::status(&Paths::new(Paths::default_home()).core_bin()));
+                std::process::exit(if r.is_ok() { 0 } else { 1 });
+            }
             _ => {}
         }
     }
