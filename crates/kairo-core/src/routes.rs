@@ -347,18 +347,20 @@ mod tests {
             route(RouteKind::site("example.net"), RouteExit::Everything),
         ];
         let g = rules(&routes, &targets(), &known);
-        assert_eq!(
-            g.rules,
+        // On Windows an app's rule also covers its .exe process name.
+        let mut expected = process_rules("claude", "Kairo AI", cfg!(windows));
+        expected.extend(process_rules("Cursor", "Tokyo 03", cfg!(windows)));
+        expected.extend(
             [
-                "PROCESS-NAME,claude,Kairo AI",
-                "PROCESS-NAME,Cursor,Tokyo 03",
                 // Longer names first, so a.example.com is read before example.com.
                 "DOMAIN-SUFFIX,a.example.com,DIRECT",
                 "DOMAIN-SUFFIX,dl.example.org,Kairo Downloads",
                 "DOMAIN-SUFFIX,example.com,REJECT",
                 "DOMAIN-SUFFIX,example.net,Proxies",
             ]
+            .map(String::from),
         );
+        assert_eq!(g.rules, expected);
         assert!(g.skipped.is_empty());
     }
 
