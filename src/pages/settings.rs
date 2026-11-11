@@ -452,7 +452,7 @@ fn ai_group(settings: Memo<Settings>) -> impl IntoElement {
 /// What the updater is doing, in a line.
 fn update_text(u: &UpdateStatus) -> String {
     match u {
-        UpdateStatus::Idle => "Kairo looks for updates by itself".into(),
+        UpdateStatus::Idle => "Updates".into(),
         UpdateStatus::Checking => "Checking for updates…".into(),
         UpdateStatus::UpToDate { checked } => format!("Kairo is up to date · checked at {checked}"),
         UpdateStatus::Downloading {
@@ -460,20 +460,8 @@ fn update_text(u: &UpdateStatus) -> String {
             progress: Some(p),
         } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
         UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
-        UpdateStatus::Available { version } => {
-            if ui::phone() {
-                format!("Kairo {version} is available · Download is on Home")
-            } else {
-                format!("Kairo {version} is available · Download is at the foot of the sidebar")
-            }
-        }
-        UpdateStatus::Ready { version } => {
-            if ui::phone() {
-                format!("Kairo {version} is ready · Update is on Home")
-            } else {
-                format!("Kairo {version} is ready · Restart to Update is at the foot of the sidebar")
-            }
-        }
+        UpdateStatus::Available { version } => format!("Kairo {version} is available"),
+        UpdateStatus::Ready { version } => format!("Kairo {version} is ready"),
         UpdateStatus::Manual { version, .. } => {
             format!("Kairo {version} is out (this copy cannot update itself)")
         }

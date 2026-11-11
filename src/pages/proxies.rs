@@ -305,17 +305,8 @@ fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl
                         .child(ui::muted(move || -> SharedString {
                             group.with(|g| match g {
                                 Some(g) => {
-                                    let how = if g.selectable() {
-                                        "pick a node"
-                                    } else {
-                                        "picks automatically"
-                                    };
-                                    format!(
-                                        "{} · {} members · {how}",
-                                        g.kind_title(),
-                                        g.members.len()
-                                    )
-                                    .into()
+                                    format!("{} · {} members", g.kind_title(), g.members.len())
+                                        .into()
                                 }
                                 None => "".into(),
                             })
