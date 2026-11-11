@@ -66,7 +66,7 @@ fn welcome() -> impl IntoElement {
                 link.set(text.clone());
                 connect(text);
             } else {
-                problem.set(Some("The clipboard holds no link. Copy the subscription link from your provider, or paste it here.".into()));
+                problem.set(Some("The clipboard holds no link".into()));
             }
         });
     };

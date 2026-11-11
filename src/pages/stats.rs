@@ -102,12 +102,13 @@ fn card() -> View {
 }
 
 fn heading(title: &str, sub: impl Into<SharedString>) -> impl IntoElement {
+    let sub: SharedString = sub.into();
     // On a phone the line under the title, so neither is squeezed beside the other.
     let phone = ui::phone();
     view()
         .when(!phone, |v| v.flex_row().items_baseline().gap_2())
         .child(ui::body(title.to_owned()).font_weight(FontWeight::SEMIBOLD))
-        .child(ui::muted(sub.into()).when(!phone, |t| t.flex_1()))
+        .child((!sub.is_empty()).then(|| ui::muted(sub).when(!phone, |t| t.flex_1())))
 }
 
 // --- Activity: the overview ---------------------------------------------------------
@@ -254,7 +255,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
                 bytes_f,
                 labels,
                 170.0,
-                charts::hint("a column for exact values"),
+                String::new(),
                 unit_of(series.buckets.iter().map(|b| b.total()).max().unwrap_or(0)),
                 0.0,
             )
@@ -487,14 +488,11 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
     card()
         .child(heading(
             "AI services",
-            format!(
-                "reachability and API response time · {}",
-                match range {
-                    Range::Today => "today",
-                    Range::Week => "last 7 days",
-                    Range::Month => "last 30 days",
-                }
-            ),
+            match range {
+                Range::Today => "today",
+                Range::Week => "last 7 days",
+                Range::Month => "last 30 days",
+            },
         ))
         .child(charts::legend(vec![
             ("Reachable".into(), ui::success()),
@@ -686,7 +684,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
         vec![],
         None,
         170.0,
-        charts::hint("the line for the hour's median"),
+        String::new(),
     );
     let goes = {
         let g = crate::pages::ai::goes_through(state, s);
@@ -766,7 +764,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
         ]))
         .child(
             card()
-                .child(heading("Was it reachable?", "each square is one hour"))
+                .child(heading("Was it reachable?", ""))
                 .child(charts::legend(vec![
                     ("All checks passed".into(), ui::success()),
                     ("Some failed".into(), ui::warning()),
@@ -774,7 +772,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                 ]))
                 .child(charts::grid(
                     grid_rows,
-                    charts::hint("a square for its hour"),
+                    String::new(),
                 )),
         )
         .child(
@@ -931,7 +929,7 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         marks,
         None,
         150.0,
-        charts::hint("the line for the hour's median"),
+        String::new(),
     );
     let fail_cols: Vec<Col> = data
         .iter()
@@ -1181,7 +1179,7 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
         marks,
         Some(gb(last.total as f64)),
         170.0,
-        charts::hint("the line for the day's use"),
+        String::new(),
     );
     view()
         .gap_2()
@@ -1190,7 +1188,7 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
             if pace.is_some() {
                 "solid: recorded · dashed: if the recent pace continues"
             } else {
-                "recorded each time the subscription updates"
+                ""
             },
         ))
         .child(pace_text.map(|t| {
@@ -1199,10 +1197,5 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
                 .text_size(px(size::small()))
         }))
         .child(line)
-        .child(ui::muted(if pace.is_some() {
-            "The provider reports total use; Kairo records it every time the subscription updates."
-        } else {
-            "A projection appears once Kairo has a day of readings."
-        }))
         .into_element()
 }

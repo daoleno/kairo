@@ -110,7 +110,7 @@ fn commands(store: Store) -> Vec<Command> {
         Icon::Link,
         |s| {
             set_clipboard(s.svc().terminal_env());
-            s.info("Copied. Paste it in the terminal before you start the tool.");
+            s.info("Copied");
         },
     ));
     out.push(cmd(

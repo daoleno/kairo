@@ -17,11 +17,6 @@ pub struct Ser {
     pub color: fn() -> AdaptiveColor,
 }
 
-/// What a chart says it will show: "Move over ..." with a mouse, "Tap ..." on a phone.
-pub fn hint(what: &str) -> String {
-    format!("{} {what}", if ui::phone() { "Tap" } else { "Move over" })
-}
-
 /// A finger lifting is not a mouse leaving: on a phone the reading stays until another is tapped.
 fn leave(hover: Signal<Option<usize>>) {
     if !ui::phone() {

@@ -271,10 +271,7 @@ pub fn plain_error(err: &str, url: Option<&str>) -> (String, Option<String>) {
     if let Some(code) = code.filter(|c| *c >= 500 || *c == 429) {
         return (
             format!("Your provider says: “{code} {}”", reason(code)),
-            Some(
-                "Its server is having trouble. This usually passes: try again in a little while."
-                    .into(),
-            ),
+            None,
         );
     }
     crate::pages::home::explain(&e)
@@ -481,10 +478,6 @@ fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
                                 .flex_1(),
                         ),
                 )
-                .child(when(
-                    move || said().1.is_some(),
-                    move || ui::muted(move || said().1.unwrap_or_default()),
-                )),
         )
         .child(
             ui::btn(
@@ -1452,7 +1445,7 @@ mod tests {
     fn a_server_error_is_the_providers() {
         let (headline, hint) = plain_error("The server answered HTTP 503", None);
         assert_eq!(headline, "Your provider says: “503 Service Unavailable”");
-        assert!(hint.is_some());
+        assert!(hint.is_none(), "the headline is the whole message");
         assert_eq!(
             banner_text(&headline),
             "couldn't update · Your provider says: “503 Service Unavailable”. Using the saved copy."

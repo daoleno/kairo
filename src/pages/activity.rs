@@ -245,7 +245,7 @@ fn bypass_banner() -> impl IntoElement {
                         .px_4()
                         .on_press(move || {
                             set_clipboard(store.svc().terminal_env());
-                            store.info("Copied. Paste it in the terminal before you start the tool.");
+                            store.info("Copied");
                         }),
                 )
         },
