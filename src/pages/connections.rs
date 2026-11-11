@@ -142,14 +142,13 @@ pub fn list(
                     .otherwise(move || {
                         ui::empty_state(
                             Icon::Connections,
-                            "No connections",
                             move || -> SharedString {
                                 if !store.state.with(|s| s.core.is_running()) {
-                                    "Connections appear while Kairo is connected.".into()
+                                    "Not connected".into()
                                 } else if query.with(|q| !q.is_empty()) {
-                                    "Nothing matches the filter.".into()
+                                    "Nothing matches".into()
                                 } else {
-                                    "Apps that use Kairo show up here.".into()
+                                    "No connections".into()
                                 }
                             },
                             None,
@@ -624,7 +623,6 @@ fn inspector(
                 None => ui::empty_state(
                     Icon::Connections,
                     "Closed",
-                    "This connection has ended.",
                     None,
                 )
                 .into_element(),

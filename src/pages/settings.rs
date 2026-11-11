@@ -289,7 +289,7 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
                     } else {
                         "Launch at login"
                     },
-                    Some("Start Kairo when you log in."),
+                    None,
                     flag(
                         settings,
                         |s| s.launch_at_login,
@@ -319,7 +319,7 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
                     } else {
                         "Keep running in the tray"
                     },
-                    Some("Closing the window leaves Kairo and the proxy running."),
+                    None,
                     flag(
                         settings,
                         |s| s.close_to_tray,
@@ -383,12 +383,10 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
             ui::setting_row_dyn(
                 "Apps follow",
                 move || -> SharedString {
-                    if settings.with(|s| s.tun) {
-                        "Every app's traffic goes through Kairo, including apps that ignore the system settings.".into()
-                    } else if store.state.with(|s| s.sysproxy_supported) {
-                        "Apps that follow the system's proxy settings go through Kairo.".into()
-                    } else {
+                    if !settings.with(|s| s.tun) && !store.state.with(|s| s.sysproxy_supported) {
                         "This desktop has no system proxy setting Kairo can use; choose Every app (TUN).".into()
+                    } else {
+                        "".into()
                     }
                 },
                 ui::segmented(
@@ -403,15 +401,8 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
                 move || -> SharedString {
                     match privilege.get() {
                         None => "Install the core to use Every app (TUN).".into(),
-                        Some(Privilege::Granted) => "The core may route every app's traffic.".into(),
-                        Some(Privilege::Needed) if cfg!(target_os = "linux") => {
-                            "A one-time permission: the core gets the cap_net_admin capability (you'll be asked for your password).".into()
-                        }
-                        Some(Privilege::Needed) => "A one-time permission: the core is made to run as root (you'll be asked for your password).".into(),
-                        Some(Privilege::Unsupported) if cfg!(windows) => {
-                            "Coming to Kairo for Windows. For now, apps that follow the system proxy use Kairo.".into()
-                        }
-                        Some(Privilege::Unsupported) => "Not available on this platform.".into(),
+                        Some(Privilege::Granted | Privilege::Needed) => "".into(),
+                        Some(Privilege::Unsupported) => "Not available on this platform".into(),
                     }
                 },
                 dynamic(move || {
@@ -448,13 +439,13 @@ fn ai_group(settings: Memo<Settings>) -> impl IntoElement {
         vec![
             ui::setting_row(
                 "AI tools use one exit",
-                Some("Claude, ChatGPT, Gemini, Cursor, Copilot and the rest go through the exit you pick under Exits, and stay there when the Location changes."),
+                None,
                 ui::toggle(ai(|a| a.enabled), "AI tools use one exit", set(|a, v| a.enabled = v)),
             )
             .into_element(),
             ui::setting_row(
                 "Domestic AI goes direct",
-                Some("Kimi, DeepSeek, Doubao and Tongyi skip the proxy."),
+                None,
                 ui::toggle(ai(|a| a.domestic_direct), "Domestic AI goes direct", set(|a, v| a.domestic_direct = v)),
             )
             .into_element(),
@@ -530,7 +521,7 @@ fn about_group() -> impl IntoElement {
         vec![
             ui::setting_row(
                 concat!("Kairo ", env!("CARGO_PKG_VERSION")),
-                Some("A native mihomo client. Free software under the GPL-3.0, like the mihomo core it ships with. Flags: Twemoji, CC-BY 4.0."),
+                Some("Free software under the GPL-3.0. Flags: Twemoji, CC-BY 4.0."),
                 view(),
             )
             .into_element(),
@@ -591,7 +582,7 @@ fn advanced(
             vec![
                 ui::setting_row(
                     "Port (HTTP + SOCKS)",
-                    Some("One port for both; the system proxy points here."),
+                    None,
                     field(
                         |d| d.mixed_port.clone(),
                         |d, v| d.mixed_port = v,
@@ -604,7 +595,7 @@ fn advanced(
                 .into_element(),
                 ui::setting_row(
                     "Allow other devices on the network",
-                    Some("Let other devices on your network use this proxy."),
+                    None,
                     flag(
                         settings,
                         |s| s.allow_lan,
@@ -615,13 +606,13 @@ fn advanced(
                 .into_element(),
                 ui::setting_row(
                     "IPv6",
-                    Some("Resolve and connect over IPv6."),
+                    None,
                     flag(settings, |s| s.ipv6, "IPv6", |s, on| s.ipv6 = on),
                 )
                 .into_element(),
                 ui::setting_row(
                     "Skip the proxy for",
-                    Some("Hosts that skip the system proxy, separated by commas."),
+                    None,
                     field(
                         |d| d.bypass.clone(),
                         |d, v| d.bypass = v,
@@ -632,7 +623,7 @@ fn advanced(
                 .into_element(),
                 ui::setting_row(
                     "Controller",
-                    Some("mihomo's API, on 127.0.0.1 only; every request needs the secret."),
+                    None,
                     view()
                         .flex_row()
                         .flex_wrap()
@@ -672,7 +663,7 @@ fn advanced(
                 geo_row(),
                 ui::setting_row(
                     "Delay test",
-                    Some("The address requested through each node, and how long to wait for it."),
+                    None,
                     view()
                         .flex_row()
                         .flex_wrap()
@@ -699,7 +690,7 @@ fn advanced(
                 .into_element(),
                 ui::setting_row(
                     "Config folder",
-                    Some("Kairo's settings, profiles and the core's working files."),
+                    None,
                     ui::btn(
                         if cfg!(target_os = "macos") {
                             "Open in Finder"
@@ -961,7 +952,7 @@ fn inspect_group() -> impl IntoElement {
         vec![
             ui::setting_row(
                 "The subscription's groups",
-                Some("Browse the groups the subscription defines, with their nodes."),
+                None,
                 open(store, "Show", Page::Proxies, move || -> SharedString {
                     match groups.get() {
                         0 => "".into(),
@@ -973,24 +964,24 @@ fn inspect_group() -> impl IntoElement {
             .into_element(),
             ui::setting_row(
                 "Rules",
-                Some("The routing rules that are running. Change routes under Apps & Sites."),
+                None,
                 open(store, "Show", Page::Rules, move || -> SharedString {
                     match rules.get() {
-                        Some(n) => format!("{} · read-only", thousands(n)).into(),
-                        None => "read-only".into(),
+                        Some(n) => thousands(n).into(),
+                        None => "".into(),
                     }
                 }),
             )
             .into_element(),
             ui::setting_row(
                 "Diagnostics",
-                Some("The core's log, and a summary to copy for a bug report."),
-                open(store, "Show", Page::Logs, || "logs".into()),
+                None,
+                open(store, "Show", Page::Logs, || "".into()),
             )
             .into_element(),
             ui::setting_row(
                 "DNS",
-                Some("Ask the core's resolver, or forget the fake addresses it handed out."),
+                None,
                 ui::btn("Look Up", Variant::Secondary).on_press(move || store.page.set(Page::Dns)),
             )
             .into_element(),

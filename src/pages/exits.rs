@@ -32,15 +32,6 @@ impl Exit {
         }
     }
 
-    /// What goes through it, for the picker's header.
-    fn about(self) -> &'static str {
-        match self {
-            Exit::Ai => "open sessions keep their exit",
-            Exit::Rest => "",
-            Exit::Downloads => "GitHub, npm, PyPI, Docker",
-        }
-    }
-
     /// Whether Kairo can keep it on the fastest place by itself. The AI exit
     /// is never switched automatically: a switch would cut a running session.
     pub fn has_fastest(self) -> bool {
@@ -357,16 +348,14 @@ pub fn mirror_text(test: &kairo_core::downloads::MirrorTest) -> String {
     use kairo_core::downloads::MirrorTest as T;
     let secs = |ms: u64| format!("{:.1} s", ms as f64 / 1000.0);
     match test {
-        T::Untested => {
-            "Off. Test the mirror first: Kairo turns it on only if it is not slower.".into()
-        }
+        T::Untested => "Off".into(),
         T::Running => "Testing…".into(),
         T::Passed {
             mirror_ms,
             direct_ms: Some(d),
         } => {
             format!(
-                "Mirror {} · original {}. Not slower, so it can be on.",
+                "Mirror {} · original {}",
                 secs(*mirror_ms),
                 secs(*d)
             )
@@ -376,7 +365,7 @@ pub fn mirror_text(test: &kairo_core::downloads::MirrorTest) -> String {
             direct_ms: None,
         } => {
             format!(
-                "Mirror {} · the original did not answer. It can be on.",
+                "Mirror {} · the original did not answer",
                 secs(*mirror_ms)
             )
         }
@@ -408,10 +397,7 @@ fn mirror_card() -> impl IntoElement {
                         .child(ui::body("Use mirrors for model hubs and package indexes"))
                         .child(ui::muted(move || -> SharedString {
                             info.with(|d| mirror_text(&d.mirror_test)).into()
-                        }))
-                        .child(ui::muted(
-                            "A mirror is a third party serving the same files; trust it as you would any download source. Kairo changes no files: it gives you the lines to paste.",
-                        )),
+                        })),
                 )
                 .child(
                     ui::btn("Test", Variant::Secondary)
@@ -579,7 +565,7 @@ fn picker(exit: Exit) -> impl IntoElement {
         .rounded(px(22.0))
         .child(
             head.child(ui::body(exit.title()).font_weight(FontWeight::SEMIBOLD))
-                .child((!phone).then(|| ui::muted(exit.about()).flex_1().number_of_lines(1)))
+                .child(view().flex_1())
                 .child(
                     ui::btn_icon(Icon::Bolt, "Test Again", Variant::Secondary)
                         .disabled(testing)
@@ -622,7 +608,7 @@ fn picker(exit: Exit) -> impl IntoElement {
                         .text_color(move || theme().muted_foreground)
                         .into_element(),
                     ui::body("Follow Everything else"),
-                    ui::muted("unpin"),
+                    ui::muted(""),
                     None,
                     None::<fn() -> Health>,
                 )

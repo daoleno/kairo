@@ -421,7 +421,6 @@ pub fn page() -> impl IntoElement {
                             ui::empty_state(
                                 Icon::Profiles,
                                 "No subscriptions yet",
-                                "The link from your provider, or a Clash / mihomo config file.",
                                 Some(
                                     ui::btn_icon(Icon::Plus, "Add", Variant::Primary)
                                         .on_press(move || dialog.set(Some(Dialog::Add)))
@@ -954,7 +953,6 @@ fn usage_section(p: ReadSignal<Profile>) -> impl IntoElement {
                 .child(one(2))
                 .child(one(3))
         })
-        .child(ui::muted("As your provider reported at the last update."))
         .child(dynamic(move || {
             let id = p.with(|p| p.id.clone());
             untracked(move || crate::pages::stats::usage(&id).into_element())
@@ -992,7 +990,7 @@ fn sheet(d: Dialog, dialog: Signal<Option<Dialog>>) -> impl IntoElement {
         )
 }
 
-fn card_frame(title: &'static str, detail: impl IntoReactive<SharedString>) -> View {
+fn card_frame(title: &'static str, detail: Option<String>) -> View {
     view()
         .w_full()
         .max_w(px(480.0))
@@ -1008,7 +1006,7 @@ fn card_frame(title: &'static str, detail: impl IntoReactive<SharedString>) -> V
                 .font_weight(FontWeight::SEMIBOLD)
                 .role(AccessibilityRole::Header),
         )
-        .child(ui::muted(detail))
+        .child(detail.map(ui::muted))
 }
 
 fn form_row(label: &'static str, control: impl IntoElement) -> View {
@@ -1119,10 +1117,7 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
     };
     let on_submit = submit.clone();
     let on_press = submit.clone();
-    card_frame(
-        "Add a Subscription",
-        "Paste the link from your provider, or import a config file.",
-    )
+    card_frame("Add a Subscription", None)
     .child(form_row(
         "Link",
         ui::field(url, "https://example.com/subscribe?token=…")
@@ -1198,10 +1193,7 @@ fn rename_card(id: String, current: String, dialog: Signal<Option<Dialog>>) -> i
         dialog.set(None);
     });
     let on_submit = submit.clone();
-    card_frame(
-        "Rename",
-        "The name shown in Kairo; your provider is not told.",
-    )
+    card_frame("Rename", None)
     .child(form_row(
         "Name",
         ui::field(name, "Name")
@@ -1252,10 +1244,7 @@ fn link_card(id: String, host: String, dialog: Signal<Option<Dialog>>) -> impl I
         });
     });
     let on_submit = submit.clone();
-    card_frame(
-        "Change Link",
-        format!("Now: {host}. Paste the new link from your provider."),
-    )
+    card_frame("Change Link", Some(format!("Now: {host}")))
     .child(form_row(
         "Link",
         ui::field(url, "https://example.com/subscribe?token=…")

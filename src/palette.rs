@@ -55,7 +55,7 @@ fn commands(store: Store) -> Vec<Command> {
     if has_profile && running {
         out.push(cmd(
             "Check AI services",
-            "Which country each sees, and whether its API answers",
+            "AI",
             Icon::Activity,
             |s| {
                 s.page.set(Page::Overview);
@@ -65,13 +65,13 @@ fn commands(store: Store) -> Vec<Command> {
     }
     out.push(cmd(
         "Everything else: Fastest",
-        "Kairo keeps the fastest place",
+        "Exits",
         Icon::Bolt,
         |s| s.run(s.svc().set_location(None)),
     ));
     out.push(cmd(
         "Test Exits Again",
-        "Measure every place's delay",
+        "Exits",
         Icon::Bolt,
         |s| s.run(s.svc().test_places()),
     ));
@@ -84,7 +84,7 @@ fn commands(store: Store) -> Vec<Command> {
         ));
     }
     out.push(cmd(
-        "Add Subscription…",
+        "Add Subscription",
         "Subscriptions",
         Icon::Plus,
         |s| s.page.set(Page::Profiles),

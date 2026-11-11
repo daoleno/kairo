@@ -106,7 +106,6 @@ pub fn page() -> impl IntoElement {
                             .p_4()
                             .gap_3()
                             .child(ui::section_label("Look Up"))
-                            .child(ui::muted("Queries go to the core's resolver, so the answers are the ones proxied apps get (fake-IP included)."))
                             .child(
                                 view()
                                     .flex_row()
@@ -123,7 +122,7 @@ pub fn page() -> impl IntoElement {
                                             .on_press(query),
                                     ),
                             )
-                            .child(when(move || !running.get(), || ui::muted("Start the core to query its resolver."))),
+                            .child(when(move || !running.get(), || ui::muted("The core is not running"))),
                     )
                     .child(each(
                         move || history.get(),
@@ -136,7 +135,7 @@ pub fn page() -> impl IntoElement {
                             vec![
                                 ui::setting_row(
                                     "Flush the fake-IP cache",
-                                    Some("Forget the fake addresses handed out so far; apps get new ones on their next lookup."),
+                                    None,
                                     ui::btn("Flush", Variant::Secondary).disabled(move || !running.get()).on_press(move || {
                                         store.run_then(store.svc().flush_fakeip(), move |r| {
                                             if r.is_ok() {

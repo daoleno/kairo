@@ -222,14 +222,7 @@ fn bypass_banner() -> impl IntoElement {
                         .flex_1()
                         .min_w(px(0.0))
                         .gap_0p5()
-                        .child(ui::body(headline).font_weight(FontWeight::SEMIBOLD))
-                        .child(ui::muted(
-                            if cfg!(windows) {
-                                "It does not follow the system's proxy settings, so its traffic leaves directly. A proxy line in the terminal it starts from takes it in."
-                            } else {
-                                "It does not follow the system's proxy settings, so its traffic leaves directly. Every app takes it in; so does a proxy line in a terminal."
-                            },
-                        )),
+                        .child(ui::body(headline).font_weight(FontWeight::SEMIBOLD)),
                 )
                 .child(when(
                     move || {
@@ -305,14 +298,13 @@ fn by_app(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElement {
                             if list.is_empty() {
                                 return ui::empty_state(
                                     Icon::Connections,
-                                    "Nothing yet",
-                                    move || -> SharedString {
+                                                                        move || -> SharedString {
                                         if !store.state.with(|s| s.core.is_running()) {
-                                            "Activity appears while Kairo is connected.".into()
+                                            "Not connected".into()
                                         } else if query.with(|q| !q.is_empty()) {
-                                            "Nothing matches the filter.".into()
+                                            "Nothing matches".into()
                                         } else {
-                                            "Apps that use Kairo show up here.".into()
+                                            "Nothing yet".into()
                                         }
                                     },
                                     None,
@@ -325,16 +317,7 @@ fn by_app(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElement {
                         })
                     }))
             }))
-            .child(
-                ui::muted(if phone {
-                    "Total counts since Kairo started. ⋯ on an app: Always Direct · Always AI Exit · Block · Show Connections"
-                } else {
-                    "Total counts since Kairo started. ⋯ on a row: Always Direct · Always AI Exit · Block · Show Connections"
-                })
-                    .px_1()
-                    .mt_2()
-                    .text_size(px(size::small())),
-            ),
+            ,
     )
 }
 
@@ -350,14 +333,13 @@ fn phone_list(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElemen
                 return ui::card_soft()
                     .child(ui::empty_state(
                         Icon::Connections,
-                        "Nothing yet",
-                        move || -> SharedString {
+                                                move || -> SharedString {
                             if !store.state.with(|s| s.core.is_running()) {
-                                "Activity appears while Kairo is connected.".into()
+                                "Not connected".into()
                             } else if query.with(|q| !q.is_empty()) {
-                                "Nothing matches the filter.".into()
+                                "Nothing matches".into()
                             } else {
-                                "Apps that use Kairo show up here.".into()
+                                "Nothing yet".into()
                             }
                         },
                         None,
