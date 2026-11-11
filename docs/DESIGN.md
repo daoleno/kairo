@@ -65,6 +65,20 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
 - **Round**: capsules for buttons, segmented controls and pop-up buttons; grouped rows at 20 px radius, popovers
   at 22, concentric inside them.
 - **Quiet motion**: no animation besides what the toolkit does. Live data updates in place.
+- **No second line that explains**: a row, card or button has its name and its state, and nothing under it
+  that describes what the name already says, how the page works, or what a switch does. A second line stays
+  only when it is a fact or a state the person needs to act (a failure and its way out, "Using the saved
+  copy", a permission that is missing, a licence the law asks for). A deleted line is not replaced by
+  another sentence; the page is shown to someone who has not seen it before asking whether it still reads.
+  This holds for every platform's UI and for new work too.
+- **Real logos**: an app or site shows its own icon (an installed app's from the system; a site's fetched
+  from the site itself, over the site's own route, kept on disk and refreshed rarely, never waited for). A
+  bundled brand mark (`assets/logos`, sources and licences in `SOURCES.md`) stands in for a well-known name
+  with neither. A letter is the last resort. A logo is never tinted.
+- **No ellipsis on a button or capsule** ("Add App", not "Add App…"). "…" stays on text that says something is in
+  progress ("Testing…") and on the platform's own menu bars.
+- **Update is an icon**: one download button at the foot-left of the window, no text; a ring or fill is the
+  progress; the words are its tooltip and accessibility label. Nothing shows when there is no update.
 
 ## AI
 
