@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kairo — the proxy app that runs itself</title>
-<meta name="description" content="A proxy app for Mac, Windows, Linux and Android that runs itself: it picks the fastest server, keeps AI tools on a fixed one, and shows what every app is doing.">
-<meta property="og:title" content="Kairo — the proxy app that runs itself">
-<meta property="og:description" content="A proxy app for Mac, Windows, Linux and Android that runs itself: it picks the fastest server, keeps AI tools on a fixed one, and shows what every app is doing.">
+<title>Kairo — proxy, without the tending</title>
+<meta name="description" content="A proxy app for Mac, Windows, Linux and Android. Kairo picks the fastest server, moves when it slows down, keeps your AI tools on a fixed one, and puts your system settings back when it stops.">
+<meta property="og:title" content="Kairo — proxy, without the tending">
+<meta property="og:description" content="A proxy app for Mac, Windows, Linux and Android. Kairo picks the fastest server, moves when it slows down, keeps your AI tools on a fixed one, and puts your system settings back when it stops.">
 <meta property="og:image" content="https://daoleno.github.io/kairo/shots/home-light.webp">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -72,6 +72,7 @@ h1 {
   letter-spacing: -0.035em;
   font-weight: 700;
 }
+h1, .lede { text-wrap: balance; }
 .lede { margin: 22px auto 0; max-width: 34em; font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); }
 .actions { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
 .btn {
@@ -163,8 +164,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 
 <main>
   <div class="wrap hero">
-    <h1>The proxy app that runs itself.</h1>
-    <p class="lede">Add your subscription once. Kairo picks the fastest server, keeps AI tools on a fixed one, and shows what every app is doing.</p>
+    <h1>Proxy, without the tending.</h1>
+    <p class="lede">Kairo picks the fastest server, moves when it slows down, keeps your AI tools on a fixed one, and puts your system settings back when it stops.</p>
     <div class="actions">
       <a class="btn primary" id="primary" href="https://github.com/daoleno/kairo/releases/latest">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7.5 8 11.5l4-4M3 14h10"/></svg>
@@ -228,7 +229,6 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
       <div><b>See what each app uses</b><span>Kept 30 days on this computer. Nothing is sent anywhere.</span></div>
       <div><b>Updates itself</b><span>A download icon appears when there is a new version.</span></div>
     </div>
-    <p class="note">Where you are, and each service's own terms, still apply.</p>
   </section>
 
   <section class="wrap" id="download">
