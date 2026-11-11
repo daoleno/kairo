@@ -116,11 +116,6 @@ pub fn phone() -> bool {
     use nsh_core::platform::{Idiom, Os};
     try_os() == Some(Os::Android) && idiom() == Idiom::Phone
 }
-/// What the machine Kairo runs on is called in its own words.
-pub fn this_device() -> &'static str {
-    if cfg!(target_os = "android") { "this phone" } else { "this computer" }
-}
-
 /// The height of a control a thumb presses (Android's guideline is 48 dp for
 /// the target, 40 for the drawn control); `desktop` where a pointer is exact.
 pub fn touch_h(desktop: f32) -> f32 {
@@ -677,7 +672,17 @@ pub fn setting_row_dyn(
                 .min_w(px(if phone { 150.0 } else { 0.0 }))
                 .gap_0p5()
                 .child(body(label))
-                .child(muted(detail)),
+                .child({
+                    let detail = std::rc::Rc::new(detail);
+                    let shown = detail.clone();
+                    when(
+                        move || !shown().is_empty(),
+                        move || {
+                            let detail = detail.clone();
+                            muted(move || detail())
+                        },
+                    )
+                }),
         )
         .child(control)
 }
@@ -841,11 +846,10 @@ pub fn meter(fraction: impl Fn() -> f32 + 'static) -> View {
         )
 }
 
-/// What a page shows when it has nothing: a glyph, a title, a line and an action.
+/// What a page shows when it has nothing: a glyph, what is so (no explaining line) and an action.
 pub fn empty_state(
     glyph: Icon,
-    heading: &'static str,
-    detail: impl IntoReactive<SharedString>,
+    heading: impl IntoReactive<SharedString>,
     action: Option<AnyElement>,
 ) -> View {
     view()
@@ -861,10 +865,10 @@ pub fn empty_state(
         )
         .child(
             text(heading)
+                .text_center()
                 .text_size(px(size::large()))
                 .font_weight(FontWeight::SEMIBOLD),
         )
-        .child(muted(detail).text_center().max_w(px(360.0)))
         .child(action.map(|a| view().mt_2().child(a)))
 }
 

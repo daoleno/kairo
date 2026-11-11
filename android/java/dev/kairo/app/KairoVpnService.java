@@ -84,7 +84,6 @@ public class KairoVpnService extends VpnService {
         Notification n = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentTitle("Kairo is on")
-                .setContentText("Your apps go through Kairo")
                 .setContentIntent(tap)
                 .addAction(new Notification.Action.Builder(null, "Disconnect", off).build())
                 .setOngoing(true)

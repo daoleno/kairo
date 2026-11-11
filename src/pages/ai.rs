@@ -800,9 +800,8 @@ fn alerts() -> impl IntoElement {
             let mut out = view().gap_2();
             if direct {
                 out = out.child(banner(
-                    "Mode is Direct".to_owned(),
-                    "Everything goes out directly, so AI tools are not using the exit and nothing is checked."
-                        .to_owned(),
+                    "Mode is Direct: AI is not using the exit".to_owned(),
+                    String::new(),
                     vec![Some(
                         ui::capsule("Use Smart", true)
                             .on_press(move || {
@@ -824,9 +823,7 @@ fn alerts() -> impl IntoElement {
                 let pin = place.map(|p| p.name);
                 out = out.child(banner(
                     format!("{was} is no longer in your subscription"),
-                    format!(
-                        "AI now follows Everything else ({now}). Sessions already open keep running."
-                    ),
+                    format!("AI now follows Everything else ({now})"),
                     vec![
                         pin.map(|name| {
                             ui::capsule("Pin it", true)
@@ -861,7 +858,7 @@ fn banner(title: String, detail: String, actions: Vec<Option<AnyElement>>) -> im
                 .min_w(px(0.0))
                 .gap_0p5()
                 .child(ui::body(title).font_weight(FontWeight::SEMIBOLD))
-                .child(ui::muted(detail)),
+                .child((!detail.is_empty()).then(|| ui::muted(detail))),
         )
         .children(actions.into_iter().flatten())
 }
@@ -883,12 +880,16 @@ pub fn mono(s: &'static str) -> impl IntoElement {
         )
 }
 
-/// What stays here, and what goes direct: two facts, not controls.
+/// What goes direct: a fact, not a control.
 fn lanes() -> impl IntoElement {
     let store = store();
     dynamic(move || {
         let domestic = store.state.with(|s| s.settings.ai.domestic_direct);
         untracked(move || {
+            // Only what is so: the domestic services go direct while that is on.
+            if !domestic {
+                return view().into_element();
+            }
             view()
                 .flex_row()
                 .items_center()
@@ -898,17 +899,10 @@ fn lanes() -> impl IntoElement {
                 .border_t_1()
                 .border_color(move || theme().border.opacity(0.7))
                 .child(
-                    ui::muted(if domestic {
-                        "Direct: Kimi, DeepSeek, Doubao, Tongyi"
-                    } else {
-                        "Kimi, DeepSeek, Doubao, Tongyi follow your subscription"
-                    })
-                    .flex_1()
-                    .number_of_lines(1),
+                    ui::muted("Direct: Kimi, DeepSeek, Doubao, Tongyi")
+                        .flex_1()
+                        .number_of_lines(1),
                 )
-                .child(when(|| !cfg!(target_os = "android"), || {
-                    ui::muted("On this computer: Ollama, LM Studio").number_of_lines(1)
-                }))
                 .into_element()
         })
     })
@@ -943,7 +937,7 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
                     ui::muted(if checking {
                         "Checking…"
                     } else {
-                        "Not checked yet. Check again to see."
+                        "Not checked yet"
                     })
                     .px_1()
                     .into_element(),

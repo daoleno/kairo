@@ -2,7 +2,7 @@
 //! listed uses its usual exit. A choice is an exit (AI, Everything else,
 //! Downloads), a country, Direct or Block, and Kairo makes it a rule that
 //! comes before everything else it does. The subscription's own groups are
-//! one row away, under Inspect.
+//! one press away: its row's Groups button.
 
 use kairo_core::places;
 use kairo_core::routes::{Route, RouteExit, RouteKind};
@@ -133,9 +133,9 @@ fn letter(name: &str) -> impl IntoElement {
 
 fn route_row(r: Route) -> impl IntoElement {
     let store = store();
-    let (name, detail) = match &r.kind {
-        RouteKind::App { name } => (name.clone(), None),
-        RouteKind::Site { domain } => (domain.clone(), Some("and subdomains")),
+    let name = match &r.kind {
+        RouteKind::App { name } => name.clone(),
+        RouteKind::Site { domain } => domain.clone(),
     };
     let label = name.clone();
     let kind = stored(r.kind.clone());
@@ -155,8 +155,7 @@ fn route_row(r: Route) -> impl IntoElement {
                 } else {
                     0.0
                 }))
-                .child(ui::body(name).number_of_lines(1))
-                .child(detail.map(ui::muted)),
+                .child(ui::body(name).number_of_lines(1)),
         )
         .child(ui::popup_button(
             move || choices(&current),
@@ -230,8 +229,7 @@ pub fn page() -> impl IntoElement {
                         // On a phone the sentence has the width to itself and the buttons sit below it.
                         let row = view().flex_row().items_center().gap_3().px_1();
                         let row = if phone { row.flex_wrap() } else { row };
-                        let note = ui::muted("Everything not listed uses its usual exit.");
-                        row.child(if phone { note.w_full() } else { note.flex_1() })
+                        row.child(view().flex_1())
                             .child(
                                 ui::capsule("Add App", false)
                                     .h(px(ui::touch_h(30.0)))
@@ -269,7 +267,6 @@ pub fn page() -> impl IntoElement {
                                 out = out.child(ui::empty_state(
                                     Icon::Layers,
                                     "Nothing set apart",
-                                    "Choose where one app or site goes: the AI exit, another country, direct, or blocked.",
                                     None,
                                 ));
                             }
@@ -312,10 +309,6 @@ fn subscription_row() -> impl IntoElement {
     let store = store();
     let summary = move || -> (String, String) {
         let preferred = store.state.with(|s| s.settings.tray_group.clone());
-        let profile = store
-            .state
-            .with(|s| s.profiles.active_profile().map(|p| p.name.clone()))
-            .unwrap_or_else(|| "Your subscription".into());
         store.proxies.with(|p| {
             let Some(main) = places::main_group(&p.0.groups, &preferred) else {
                 return (String::new(), String::new());
@@ -331,10 +324,7 @@ fn subscription_row() -> impl IntoElement {
             } else {
                 format!("{} and {more} more groups", names.join(", "))
             };
-            (
-                title,
-                format!("{profile}'s own choices · used for anything above set to “usual”"),
-            )
+            (title, String::new())
         })
     };
     when(
@@ -353,13 +343,10 @@ fn subscription_row() -> impl IntoElement {
                                     ui::body(move || -> SharedString { summary().0.into() })
                                         .number_of_lines(1),
                                 )
-                                .child(
-                                    ui::muted(move || -> SharedString { summary().1.into() })
-                                        .number_of_lines(1),
-                                ),
+                                ,
                         )
                         .child(
-                            ui::capsule("Show", false)
+                            ui::capsule("Groups", false)
                                 .h(px(30.0))
                                 .px_4()
                                 .on_press(move || store.page.set(Page::Proxies)),
@@ -407,10 +394,6 @@ fn add_card(kind: Adding, adding: Signal<Option<Adding>>) -> impl IntoElement {
         Adding::App => "Add an app",
         Adding::Site => "Add a site",
     };
-    let detail = match kind {
-        Adding::App => "The app's name as it shows in Activity.",
-        Adding::Site => "A site and its subdomains, like example.com.",
-    };
     let go = move || {
         let v = value.get_untracked().trim().to_owned();
         if v.is_empty() {
@@ -456,7 +439,6 @@ fn add_card(kind: Adding, adding: Signal<Option<Adding>>) -> impl IntoElement {
                 .font_weight(FontWeight::SEMIBOLD)
                 .role(AccessibilityRole::Header),
         )
-        .child(ui::muted(detail))
         .child(
             ui::field(
                 value,

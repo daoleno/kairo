@@ -101,7 +101,6 @@ pub fn page() -> impl IntoElement {
                             None => ui::empty_state(
                                 Icon::Proxies,
                                 "No groups",
-                                "This profile has no proxy groups.",
                                 None,
                             )
                             .into_element(),
@@ -112,7 +111,6 @@ pub fn page() -> impl IntoElement {
                 ui::empty_state(
                     Icon::Proxies,
                     "The core is not running",
-                    "Groups and nodes appear here once the core starts.",
                     Some(
                         ui::btn_icon(Icon::Play, "Start Core", Variant::Primary)
                             .on_press(move || store.run(store.svc().start_core()))
@@ -570,9 +568,6 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                                 )
                             )))
                     }))
-                    .child(ui::muted(
-                        "Nodes from this provider appear in the groups that use it.",
-                    ))
             })
         }))
 }

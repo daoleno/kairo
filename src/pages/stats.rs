@@ -154,10 +154,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
         return card()
             .child(charts::collecting(
                 "Collecting data",
-                &format!(
-                    "Kairo started recording {ago}. The first chart appears after an hour of use. It is recorded on {} and never sent anywhere.",
-                    ui::this_device()
-                ),
+                &format!("Recording since {ago}"),
             ))
             .into_element();
     }
@@ -238,11 +235,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
                 kairo_core::bytes(ai_total)
             ),
         ))
-        .child(ui::muted(if hourly {
-            "Per hour, by the exit it left through"
-        } else {
-            "Per day, by the exit it left through"
-        }))
+        .child(ui::muted(if hourly { "Per hour" } else { "Per day" }))
         .child(charts::legend(
             Slot::ALL
                 .iter()
@@ -334,12 +327,7 @@ fn clear_footer() -> impl IntoElement {
         .items_center()
         // On a phone the button goes under the note when they do not fit side by side.
         .when(ui::phone(), |v| v.flex_wrap().gap_y_1())
-        .child(
-            ui::muted(format!("Recorded on {} · kept 30 days", ui::this_device()))
-                .flex_1()
-                .min_w(px(if ui::phone() { 180.0 } else { 0.0 }))
-                .text_size(px(size::small())),
-        )
+        .child(view().flex_1())
         .child(
             ui::link_btn(move || -> SharedString {
                 if sure.get() {
@@ -526,9 +514,6 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
                 .child(ui::muted("Data").w(px(70.0)))
         }))
         .child(view().children(rows))
-        .child(ui::muted(
-            "From Kairo's own checks every 10 minutes. API time is how long the API took to answer an unauthenticated request. Open a row for its week.",
-        ))
 }
 
 // --- One AI service -------------------------------------------------------------------
@@ -843,7 +828,7 @@ pub fn quality(exit: usize) -> impl IntoElement {
             view()
                 .when(!ui::phone(), |v| v.flex_row().items_center())
                 .when(ui::phone(), |v| v.gap_2())
-                .child(ui::muted("From Kairo's own tests every 10 minutes").when(!ui::phone(), |t| t.flex_1()))
+                .child(view().when(!ui::phone(), |t| t.flex_1()))
                 .child(ui::segmented(
                     vec![(false, "24 hours"), (true, "7 days")],
                     move || week.get(),
@@ -865,7 +850,7 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
     if data.iter().all(|(_, h)| h.is_none()) {
         return charts::collecting(
             "Collecting data",
-            "Kairo tests the server each exit is on every ten minutes. The first chart appears after an hour of use.",
+            "No readings yet",
         )
         .into_element();
     }
@@ -1098,10 +1083,7 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
     let t = now();
     let samples = st.usage_of(id);
     let Some(last) = samples.last() else {
-        return ui::muted(
-            "Kairo records the usage your provider reports each time the subscription updates.",
-        )
-        .into_element();
+        return ui::muted("No usage recorded yet").into_element();
     };
     let proj = stats::project(&samples, t);
     let left = last.total.saturating_sub(last.used);

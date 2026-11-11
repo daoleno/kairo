@@ -91,8 +91,7 @@ fn welcome() -> impl IntoElement {
             .child(
                 view()
                     .gap_2()
-                    .child(text("Welcome to Kairo").text_size(px(size::display())).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header))
-                    .child(ui::muted("Paste the subscription link from your provider. Kairo finds the fastest location and connects.").text_size(px(size::body() + 1.0))),
+                    .child(text("Welcome to Kairo").text_size(px(size::display())).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header)),
             )
             .child(
                 ui::field(link, "https://… (your provider's subscription link)")
@@ -121,7 +120,6 @@ fn welcome() -> impl IntoElement {
                     .gap_1()
                     .self_center()
                     .mt_4()
-                    .child(ui::muted("Have a config file instead?"))
                     .child(ui::link_btn("Import File").on_press(move || store.page.set(Page::Profiles))),
             ),
     )
@@ -271,8 +269,7 @@ fn hero() -> impl IntoElement {
     };
     let detail = move || -> SharedString {
         match state.get() {
-            Conn::On | Conn::Connecting(_) => plan_line().into(),
-            Conn::Off => "Turn on to go through your subscription.".into(),
+            Conn::On | Conn::Connecting(_) | Conn::Off => plan_line().into(),
             Conn::Failed(m) => explain(&m).0.into(),
         }
     };

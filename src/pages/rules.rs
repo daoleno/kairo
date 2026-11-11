@@ -143,10 +143,8 @@ pub fn page() -> impl IntoElement {
                     move |t| tab.set(t),
                 ))
                 .child(
-                    ui::muted("Read-only · change routes under Apps & Sites")
+                    view()
                         .flex_1()
-                        .text_right()
-                        .number_of_lines(1)
                         .style_when(ui::phone, |s| s.hidden()),
                 ),
         )
@@ -169,7 +167,6 @@ pub fn page() -> impl IntoElement {
                 ui::empty_state(
                     Icon::Rules,
                     "The core is not running",
-                    "The running configuration's rules show here.",
                     None,
                 )
             }),
@@ -324,12 +321,11 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
             .otherwise(move || {
                 ui::empty_state(
                     Icon::Rules,
-                    "No rules",
                     move || -> SharedString {
                         if query.with(|q| q.is_empty()) {
-                            "This configuration has no rules.".into()
+                            "No rules".into()
                         } else {
-                            "Nothing matches the filter.".into()
+                            "Nothing matches".into()
                         }
                     },
                     None,
@@ -377,9 +373,6 @@ fn provider_list(
             .p_5()
             .gap_3()
             .max_w(px(900.0))
-            .child(ui::muted(
-                "Rule sets the rules refer to, kept up to date by the core.",
-            ))
             .child(when(
                 move || providers.with(|p| p.is_empty()),
                 || ui::muted("This configuration has no rule sets."),

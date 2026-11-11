@@ -230,15 +230,13 @@ pub fn page() -> impl IntoElement {
             .otherwise(move || {
                 ui::empty_state(
                     Icon::Logs,
-                    "No log lines",
                     move || -> SharedString {
                         if !store.state.with(|s| s.core.is_running()) {
-                            "The core's log shows here while it runs.".into()
+                            "The core is not running".into()
                         } else if query.with(|q| !q.is_empty()) {
-                            "Nothing matches the search.".into()
+                            "Nothing matches".into()
                         } else {
-                            "Lines at the chosen level and above appear as the core writes them."
-                                .into()
+                            "No log lines".into()
                         }
                     },
                     None,
