@@ -154,7 +154,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
         return card()
             .child(charts::collecting(
                 "Collecting data",
-                &format!("Recording since {ago}"),
+                &format!("Started {ago}"),
             ))
             .into_element();
     }
@@ -303,7 +303,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
                                 value: *v as f64,
                                 label: format!("{} · {pct}%", kairo_core::bytes(*v)),
                                 color: ui::chart_ai,
-                                lead: Some(crate::pages::ai::mono(s.mono).into_element()),
+                                lead: Some(crate::pages::ai::mono(s.id, s.mono).into_element()),
                             })
                         })
                         .collect(),
@@ -448,7 +448,7 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
                             .flex_row()
                             .items_center()
                             .gap_2()
-                            .child(crate::pages::ai::mono(s.mono))
+                            .child(crate::pages::ai::mono(s.id, s.mono))
                             .child(ui::body(s.name).flex_1().min_w(px(0.0)).number_of_lines(1)),
                     )
                     .child(
@@ -474,7 +474,7 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
                         .flex_row()
                         .items_center()
                         .gap_2()
-                        .child(crate::pages::ai::mono(s.mono))
+                        .child(crate::pages::ai::mono(s.id, s.mono))
                         .child(ui::body(s.name).number_of_lines(1)),
                 )
                 .child(view().flex_1().child(charts::ribbon_bare(tones, 14.0)))
@@ -699,7 +699,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                 .flex_row()
                 .items_center()
                 .gap_3()
-                .child(crate::pages::ai::mono(s.mono))
+                .child(crate::pages::ai::mono(s.id, s.mono))
                 .child(
                     view()
                         .flex_1()

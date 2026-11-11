@@ -110,27 +110,6 @@ fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
     out
 }
 
-/// A letter in a soft square, for an app or a site.
-fn letter(name: &str) -> impl IntoElement {
-    let l: String = name
-        .chars()
-        .find(|c| c.is_alphanumeric())
-        .map(|c| c.to_uppercase().to_string())
-        .unwrap_or_else(|| "·".into());
-    view()
-        .size(px(28.0))
-        .flex_shrink_0()
-        .rounded(px(8.0))
-        .items_center()
-        .justify_center()
-        .bg(ui::subtle)
-        .child(
-            text(l)
-                .text_size(px(size::small()))
-                .font_weight(FontWeight::SEMIBOLD),
-        )
-}
-
 fn route_row(r: Route) -> impl IntoElement {
     let store = store();
     let name = match &r.kind {
@@ -145,7 +124,13 @@ fn route_row(r: Route) -> impl IntoElement {
     ui::row_view()
         // At a large system font the exit's button goes under the name, which then has the room.
         .when(ui::phone(), |v| v.flex_wrap().gap_y_2())
-        .child(letter(&name))
+        .child(ui::logo::logo(
+            match &r.kind {
+                RouteKind::App { name } => ui::logo::Subject::App(name.clone()),
+                RouteKind::Site { domain } => ui::logo::Subject::Site(domain.clone()),
+            },
+            28.0,
+        ))
         .child(
             view()
                 .flex_1()
