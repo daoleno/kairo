@@ -106,17 +106,30 @@ test("connect: off and on again, and two quick presses end where the last one po
   expect(app.shows("text:Not Connected")).toBe(false);
 });
 
-test("apps & sites: a site of one's own, and its removal", async () => {
+test("apps & sites: an app and a site of one's own, each removed by its own button", async () => {
   const app = await open("..", desktop);
   await app.press("Apps & Sites");
   await app.waitFor("text:Nothing set apart", slow);
-  await app.press("Add Site…");
+  await app.press("Add Site");
   await app.waitFor("text:Add a site", slow);
   await app.type("text:example.com", "kairo-sites.test");
   await app.press("Add");
   await app.waitFor("text:kairo-sites.test", slow);
   expect(has(app.texts(), (t) => /^1 choices?$/.test(t))).toBe(true);
   expect(app.shows("text:Nothing set apart")).toBe(false);
+  await app.press("Add App");
+  await app.waitFor("text:Add an app", slow);
+  await app.type("text:Telegram", "kairo-app");
+  await app.press("Add");
+  await app.waitFor("text:kairo-app", slow);
+  expect(has(app.texts(), (t) => /^2 choices$/.test(t))).toBe(true);
+  // Each row has its own way out.
+  await app.press("Remove kairo-sites.test");
+  await app.waitUntil(() => !app.shows("text:kairo-sites.test"), slow);
+  expect(app.shows("text:kairo-app")).toBe(true);
+  await app.press("Remove kairo-app");
+  await app.waitFor("text:Nothing set apart", slow);
+  expect(app.shows("text:kairo-app")).toBe(false);
 });
 
 test("groups: the subscription's own, under Settings, with a way back", async () => {
