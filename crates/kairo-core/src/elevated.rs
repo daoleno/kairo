@@ -132,12 +132,33 @@ pub fn host_args(
 pub fn quote_args(args: &[String]) -> Result<String, String> {
     let mut parts = Vec::new();
     for a in args {
-        if a.contains('"') || a.contains('\0') || a.contains('\n') {
+        // A quote, a line break, or a backslash right before the closing quote
+        // (which would escape it) cannot be carried in a Windows command line.
+        if a.contains('"') || a.contains('\0') || a.contains('\n') || a.ends_with('\\') {
             return Err(format!("cannot pass {a:?} to the core host"));
         }
         parts.push(format!("\"{a}\""));
     }
     Ok(parts.join(" "))
+}
+
+/// `'text'` for PowerShell: single quotes inside it doubled.
+pub fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// The PowerShell that starts `exe` elevated (the UAC prompt) with `args` and
+/// waits. Windows PowerShell 5.1 joins an `-ArgumentList` array with spaces and
+/// quotes nothing, so the arguments go as one string, quoted here.
+pub fn elevation_script(exe: &str, args: &[String]) -> Result<String, String> {
+    let line = quote_args(args)?;
+    Ok(format!(
+        "$ErrorActionPreference='Stop'\n\
+         try {{ $p = Start-Process -FilePath {exe} -ArgumentList {line} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }}\n\
+         catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}\n",
+        exe = ps_quote(exe),
+        line = ps_quote(&line),
+    ))
 }
 
 /// A command line: the program and its arguments, each in double quotes.
@@ -376,7 +397,15 @@ mod win {
     }
 
     /// Whether the core can be started with TUN without asking.
+    ///
+    /// Off unless `KAIRO_WINDOWS_TUN=1`: the SYSTEM host still opens files under
+    /// folders a standard user controls (the runtime and logs folders), which a
+    /// directory junction can redirect. Until the host works only in an
+    /// administrator-owned folder this stays a test switch.
     pub fn status(paths: &Paths) -> Privilege {
+        if std::env::var_os("KAIRO_WINDOWS_TUN").is_none_or(|v| v != "1") {
+            return Privilege::Unsupported;
+        }
         let Some(b) = bundle() else {
             return Privilege::Unsupported;
         };
@@ -396,10 +425,6 @@ mod win {
         } else {
             Privilege::Needed
         }
-    }
-
-    fn encode_ps(s: &str) -> String {
-        format!("'{}'", s.replace('\'', "''"))
     }
 
     /// Asks for administrator approval (UAC) and has an elevated copy of Kairo
@@ -435,13 +460,7 @@ mod win {
             "--result".into(),
             s(&result),
         ];
-        let list = args.iter().map(|a| encode_ps(a)).collect::<Vec<_>>().join(",");
-        let script = format!(
-            "$ErrorActionPreference='Stop'\n\
-             try {{ $p = Start-Process -FilePath {exe} -ArgumentList @({list}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }}\n\
-             catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}\n",
-            exe = encode_ps(&s(&exe)),
-        );
+        let script = elevation_script(&s(&exe), &args)?;
         let ps = system32("WindowsPowerShell\\v1.0\\powershell.exe");
         let mut child = quiet(&ps.to_string_lossy())
             .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"])
@@ -792,6 +811,32 @@ mod tests {
         assert_eq!(explain_elevation_failure("The operation was canceled by the user.\r\n"), "Cancelled");
         assert_eq!(explain_elevation_failure(""), "Windows did not give Kairo the permission");
         assert_eq!(explain_elevation_failure("boom\nmore"), "boom");
+    }
+
+    #[test]
+    fn the_elevation_script_carries_spaces_and_apostrophes_as_one_quoted_line() {
+        let args: Vec<String> = [
+            "--grant-tun",
+            "--user",
+            "PC\\Jo Ann",
+            "--dir",
+            "C:\\Users\\Jo Ann\\AppData\\Roaming\\Kairo\\runtime",
+            "--log",
+            "C:\\Users\\O'Neil\\Kairo\\logs\\core.log",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let script = elevation_script("C:\\Users\\O'Neil\\kairo.exe", &args).unwrap();
+        // One -ArgumentList, a single PowerShell string; apostrophes doubled.
+        assert!(script.contains("-FilePath 'C:\\Users\\O''Neil\\kairo.exe'"));
+        assert!(script.contains("-ArgumentList '\"--grant-tun\" \"--user\" \"PC\\Jo Ann\""));
+        assert!(script.contains("\"C:\\Users\\O''Neil\\Kairo\\logs\\core.log\"'"));
+        assert!(!script.contains("@("));
+        assert!(script.contains("-Verb RunAs -Wait"));
+        // What cannot be carried is refused, not mangled.
+        assert!(elevation_script("e", &["a\\".to_string()]).is_err());
+        assert!(elevation_script("e", &["a\"b".to_string()]).is_err());
     }
 
     #[test]
