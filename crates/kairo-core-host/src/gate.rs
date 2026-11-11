@@ -160,9 +160,14 @@ pub fn authorized(head: &Head, secret: &str) -> bool {
 /// The request the core receives: the headers Kairo's calls need, the host's
 /// secret in place of the user's.
 pub fn forward_head(head: &Head, internal_port: u16, internal_secret: &str, body_len: usize) -> String {
+    let websocket = head
+        .header("upgrade")
+        .is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
     let mut out = format!(
-        "{} {} HTTP/1.1\r\nHost: 127.0.0.1:{internal_port}\r\nAuthorization: Bearer {internal_secret}\r\nConnection: close\r\n",
-        head.method, head.target
+        "{} {} HTTP/1.1\r\nHost: 127.0.0.1:{internal_port}\r\nAuthorization: Bearer {internal_secret}\r\nConnection: {}\r\n",
+        head.method,
+        head.target,
+        if websocket { "Upgrade" } else { "close" }
     );
     if let Some(ct) = head.header("content-type").filter(|v| !v.contains(['\r', '\n'])) {
         out.push_str(&format!("Content-Type: {ct}\r\n"));
@@ -170,11 +175,8 @@ pub fn forward_head(head: &Head, internal_port: u16, internal_secret: &str, body
     if body_len > 0 || matches!(head.method.as_str(), "PUT" | "POST" | "PATCH") {
         out.push_str(&format!("Content-Length: {body_len}\r\n"));
     }
-    if head
-        .header("upgrade")
-        .is_some_and(|u| u.eq_ignore_ascii_case("websocket"))
-    {
-        out.push_str("Connection: Upgrade\r\nUpgrade: websocket\r\n");
+    if websocket {
+        out.push_str("Upgrade: websocket\r\n");
         for h in ["sec-websocket-key", "sec-websocket-version", "sec-websocket-protocol", "sec-websocket-extensions"] {
             if let Some(v) = head.header(h).filter(|v| !v.contains(['\r', '\n'])) {
                 out.push_str(&format!("{h}: {v}\r\n"));
@@ -328,5 +330,12 @@ mod tests {
         assert!(!out.contains("users-secret") && !out.contains("X-Evil"));
         assert!(out.contains("Content-Length: 17\r\n") && out.contains("Connection: close\r\n"));
         assert!(out.ends_with("\r\n\r\n"));
+        // A WebSocket keeps its upgrade, with one Connection header.
+        let ws = b"GET /traffic HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer users-secret-0000000\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: abc==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+        let h = parse_head(ws).unwrap().unwrap();
+        let out = forward_head(&h, 40000, "host-only", 0);
+        assert_eq!(out.matches("Connection:").count(), 1);
+        assert!(out.contains("Connection: Upgrade\r\n") && out.contains("Upgrade: websocket\r\n"));
+        assert!(out.contains("sec-websocket-key: abc==\r\n"));
     }
 }
