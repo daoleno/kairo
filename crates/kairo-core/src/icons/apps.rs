@@ -324,7 +324,7 @@ pub mod linux {
     /// The file an `Icon=` value names: itself when it is a path, else the best in the themes
     /// (the desktop's own first, then `hicolor`, then the others), else `pixmaps`.
     pub fn find_icon(icon: &str, roots: &[PathBuf], current: Option<&str>) -> Option<PathBuf> {
-        if icon.starts_with('/') {
+        if icon.starts_with('/') || Path::new(icon).is_absolute() {
             return Path::new(icon).is_file().then(|| PathBuf::from(icon));
         }
         let mut themes: Vec<PathBuf> = Vec::new();
