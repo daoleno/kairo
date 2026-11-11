@@ -88,6 +88,8 @@ pub mod linux {
         pub exec: String,
         pub icon: String,
         pub wm_class: String,
+        /// `NoDisplay=true`: a handler (of a link scheme, of a file type), not the app in its menu.
+        pub hidden: bool,
     }
 
     /// The `[Desktop Entry]` group of a `.desktop` file.
@@ -116,6 +118,7 @@ pub mod linux {
                 "Exec" => e.exec = v.trim().to_owned(),
                 "Icon" => e.icon = v.trim().to_owned(),
                 "StartupWMClass" => e.wm_class = v.trim().to_owned(),
+                "NoDisplay" => e.hidden = v.trim().eq_ignore_ascii_case("true"),
                 _ => {}
             }
         }
@@ -229,7 +232,10 @@ pub mod linux {
 
     /// The best desktop file for `n` in `dirs` (each searched one level down too).
     pub fn find(dirs: &[PathBuf], n: &str) -> Option<Entry> {
-        let mut best: Option<(u32, Entry)> = None;
+        // The best match first; of equals, the one in the menu, then the one named as the program
+        // is, then the shorter name ("Visual Studio Code", not "… - URL Handler").
+        type Rank = (u32, bool, bool, std::cmp::Reverse<usize>);
+        let mut best: Option<(Rank, Entry)> = None;
         let mut consider = |path: &Path| {
             if path.extension().is_none_or(|e| e != "desktop") {
                 return;
@@ -243,8 +249,15 @@ pub mod linux {
                 .unwrap_or_default();
             if let Some(e) = parse(&id, &text) {
                 let s = score(&e, n);
-                if s > 0 && best.as_ref().is_none_or(|(b, _)| s > *b) {
-                    best = Some((s, e));
+                let last = e.id.rsplit('.').next().unwrap_or(&e.id).to_lowercase();
+                let rank: Rank = (
+                    s,
+                    !e.hidden,
+                    e.id.to_lowercase() == n || last == n,
+                    std::cmp::Reverse(e.name.len()),
+                );
+                if s > 0 && best.as_ref().is_none_or(|(b, _)| rank > *b) {
+                    best = Some((rank, e));
                 }
             }
         };
@@ -479,6 +492,18 @@ pub mod linux {
             assert_eq!(super::super::clean_label("  A\nB\t C  ").as_deref(), Some("A B C"));
             assert_eq!(super::super::clean_label("   "), None);
             assert_eq!(super::super::clean_label(&"x".repeat(100)).unwrap().len(), 60);
+        }
+
+        /// VS Code installs `code.desktop` and a hidden URL handler that run the same binary.
+        #[test]
+        fn the_app_in_the_menu_wins_over_its_hidden_handler() {
+            let dir = tempfile::tempdir().unwrap();
+            let apps = dir.path().join("applications");
+            write(&apps.join("a-code-url-handler.desktop"), "[Desktop Entry]\nType=Application\nName=Visual Studio Code - URL Handler\nExec=/usr/bin/code --open-url %U\nIcon=vscode\nNoDisplay=true\n");
+            write(&apps.join("code.desktop"), "[Desktop Entry]\nType=Application\nName=Visual Studio Code\nExec=/usr/bin/code --unity-launch %F\nIcon=vscode\n");
+            write(&apps.join("zz-code-url-handler.desktop"), "[Desktop Entry]\nType=Application\nName=Visual Studio Code - URL Handler\nExec=/usr/bin/code --open-url %U\nIcon=vscode\nNoDisplay=true\n");
+            let dirs = vec![apps];
+            assert_eq!(find(&dirs, "code").map(|e| e.name).as_deref(), Some("Visual Studio Code"));
         }
 
         /// A Chrome web app ("Linear") has its own entry whose `Exec` is Chrome's own `chrome`
