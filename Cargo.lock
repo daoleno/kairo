@@ -2480,7 +2480,7 @@ dependencies = [
 
 [[package]]
 name = "kairo-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "ed25519-dalek 2.2.0",
@@ -2509,7 +2509,7 @@ dependencies = [
 
 [[package]]
 name = "kairo-tray"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dispatch2",
  "kairo-core",
@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-app-kairo"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "block2",
  "dispatch2",
