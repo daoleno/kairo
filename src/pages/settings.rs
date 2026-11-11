@@ -300,11 +300,7 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
                 .into_element(),
                 ui::setting_row(
                     "Start minimized",
-                    Some(if mac {
-                        "Open in the menu bar, without the window."
-                    } else {
-                        "Open in the tray, without the window."
-                    }),
+                    None,
                     flag(
                         settings,
                         |s| s.start_minimized,
