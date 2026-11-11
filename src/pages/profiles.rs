@@ -335,7 +335,7 @@ pub fn page() -> impl IntoElement {
             s.profiles
                 .profiles
                 .iter()
-                .filter(|p| p.last_error.is_some())
+                .filter(|p| p.failure_shown())
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -452,6 +452,7 @@ fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
     };
     let said =
         move || p.with(|p| plain_error(p.last_error.as_deref().unwrap_or_default(), p.url()));
+    let close_id = id.clone();
     view()
         .flex_row()
         .items_center()
@@ -505,6 +506,11 @@ fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
                     let _ = f.await;
                 });
             }),
+        )
+        // Closing hides it until the next failed update says it again.
+        .child(
+            ui::icon_btn(Icon::Close, "Close")
+                .on_press(move || store.svc().dismiss_failure(&close_id)),
         )
 }
 

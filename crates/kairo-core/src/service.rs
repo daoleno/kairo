@@ -1716,6 +1716,7 @@ impl Service {
                 web_page: download.web_page,
                 last_error: None,
                 failed_at: None,
+                failure_dismissed: false,
                 stats,
             };
             svc.insert_profile(profile).await;
@@ -1750,6 +1751,7 @@ impl Service {
                 web_page: None,
                 last_error: None,
                 failed_at: None,
+                failure_dismissed: false,
                 stats,
             })
             .await;
@@ -1819,8 +1821,7 @@ impl Service {
                     match &result {
                         Ok((d, stats)) => {
                             p.updated_at = Some(profile::now());
-                            p.last_error = None;
-                            p.failed_at = None;
+                            p.record_success();
                             p.stats = *stats;
                             if d.usage.is_some() {
                                 p.usage = d.usage;
@@ -1831,8 +1832,7 @@ impl Service {
                         }
                         // The saved config stays: the connection keeps working.
                         Err(e) => {
-                            p.last_error = Some(e.clone());
-                            p.failed_at = Some(profile::now());
+                            p.record_failure(e.clone(), profile::now());
                         }
                     }
                 }
@@ -1846,6 +1846,18 @@ impl Service {
             }
             Ok(())
         })
+    }
+
+    /// Closes the card that says this subscription's last update failed. It stays closed until
+    /// the next failed update.
+    pub fn dismiss_failure(&self, id: &str) {
+        let id = id.to_owned();
+        self.modify(|s| {
+            if let Some(p) = s.profiles.get_mut(&id) {
+                p.failure_dismissed = true;
+            }
+        });
+        self.save_profiles();
     }
 
     pub fn update_all_profiles(&self) -> impl Future<Output = Result<(), String>> + 'static {

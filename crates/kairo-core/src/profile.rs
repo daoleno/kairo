@@ -89,6 +89,10 @@ pub struct Profile {
     /// Unix seconds of the last failed update (scheduled ones retry hourly).
     #[serde(default)]
     pub failed_at: Option<i64>,
+    /// The person closed the card that says the last update failed. Kept until the next failed
+    /// update, which says it again.
+    #[serde(default)]
+    pub failure_dismissed: bool,
     /// Counts of the config's parts, for the list.
     #[serde(default)]
     pub stats: ConfigStats,
@@ -104,6 +108,27 @@ impl Profile {
             Source::Remote { url, .. } => Some(url),
             Source::Local { .. } => None,
         }
+    }
+
+    /// An update failed at `now`: the config stays, the reason is kept, and the card is shown
+    /// again even if the person closed it for an earlier failure.
+    pub fn record_failure(&mut self, error: String, now: i64) {
+        self.last_error = Some(error);
+        self.failed_at = Some(now);
+        self.failure_dismissed = false;
+    }
+
+    /// An update worked: nothing to say any more.
+    pub fn record_success(&mut self) {
+        self.last_error = None;
+        self.failed_at = None;
+        self.failure_dismissed = false;
+    }
+
+    /// Whether the page says the last update failed: it did, and the person has not closed the
+    /// card since.
+    pub fn failure_shown(&self) -> bool {
+        self.last_error.is_some() && !self.failure_dismissed
     }
 
     /// Whether a scheduled update is due at `now` (unix seconds): on its
@@ -573,6 +598,7 @@ mod tests {
             web_page: None,
             last_error: None,
             failed_at: None,
+            failure_dismissed: false,
             stats: ConfigStats::default(),
         };
         assert!(!p.update_due(1000 + 11 * 3600));
@@ -599,6 +625,39 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_failure_card_stays_closed_until_the_next_failure() {
+        let mut p = Profile {
+            id: "x".into(),
+            name: "x".into(),
+            source: Source::Remote {
+                url: "https://e.com/s".into(),
+                interval_hours: 12,
+            },
+            updated_at: Some(1000),
+            usage: None,
+            web_page: None,
+            last_error: None,
+            failed_at: None,
+            failure_dismissed: false,
+            stats: ConfigStats::default(),
+        };
+        assert!(!p.failure_shown());
+        p.record_failure("Your provider says: 503".into(), 5000);
+        assert!(p.failure_shown());
+        p.failure_dismissed = true;
+        assert!(!p.failure_shown());
+        // The same words an hour later are a new failure: the card is back.
+        p.record_failure("Your provider says: 503".into(), 5000 + RETRY_SECS);
+        assert!(p.failure_shown());
+        // A success clears both, so a later failure shows too.
+        p.failure_dismissed = true;
+        p.record_success();
+        assert!(!p.failure_shown() && !p.failure_dismissed);
+        p.record_failure("x".into(), 9000);
+        assert!(p.failure_shown());
+    }
+
+    #[test]
     fn index_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
@@ -615,6 +674,7 @@ mod tests {
             web_page: None,
             last_error: None,
             failed_at: None,
+            failure_dismissed: false,
             stats: ConfigStats::default(),
         });
         index.active = Some(index.profiles[0].id.clone());
