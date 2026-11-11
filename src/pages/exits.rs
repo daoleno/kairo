@@ -695,7 +695,7 @@ fn picker(exit: Exit) -> impl IntoElement {
                     if all.get() {
                         "Fewer servers".into()
                     } else {
-                        "All servers…".into()
+                        "All servers".into()
                     }
                 })),
         )

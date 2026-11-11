@@ -366,7 +366,7 @@ pub fn page() -> impl IntoElement {
                 .enabled(move || any_remote() && !updating_all()),
                 toolbar::button(
                     "profiles.add",
-                    "Add…",
+                    "Add",
                     Glyph::Add,
                     Icon::Plus,
                     move || dialog.set(Some(Dialog::Add)),
@@ -423,7 +423,7 @@ pub fn page() -> impl IntoElement {
                                 "No subscriptions yet",
                                 "The link from your provider, or a Clash / mihomo config file.",
                                 Some(
-                                    ui::btn_icon(Icon::Plus, "Add…", Variant::Primary)
+                                    ui::btn_icon(Icon::Plus, "Add", Variant::Primary)
                                         .on_press(move || dialog.set(Some(Dialog::Add)))
                                         .into_element(),
                                 ),
@@ -1154,7 +1154,7 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
             .items_center()
             .gap_2()
             .mt_1()
-            .child(ui::btn("Import a File…", Variant::Secondary).on_press(import))
+            .child(ui::btn("Import a File", Variant::Secondary).on_press(import))
             .child(view().flex_1())
             .child(ui::muted(move || -> SharedString {
                 if busy.get() {

@@ -96,7 +96,7 @@ NSH view (`src/mac_chrome.rs`, `src/gtk_chrome.rs`), and the two sides talk thro
 - **Settings use explicit Apply** for typed fields (ports, secret, URLs): one Apply validates and restarts the
   core once. Switches and segmented controls apply at once.
 - **Plain words first**: the state is Not Connected, Connecting, Connected or Couldn't Connect. An error says
-  what happened and has one button that fixes it (Use a Free Port, Allow TUN…, Try Again). A provider's
+  what happened and has one button that fixes it (Use a Free Port, Allow TUN, Try Again). A provider's
   notice is shown as "Your provider says: …".
 - **Automatic, until you choose**: a new subscription starts on the fastest place, and Kairo checks again
   every ten minutes. It moves only when the current place fails or is much slower (> 1.5× + 40 ms). Picking a

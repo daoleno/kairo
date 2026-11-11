@@ -418,7 +418,7 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
                     let p = privilege.get();
                     untracked(move || match p {
                         Some(Privilege::Granted) => ui::muted("Granted").into_element(),
-                        Some(Privilege::Needed) => ui::btn_icon(Icon::Shield, "Allow…", Variant::Secondary)
+                        Some(Privilege::Needed) => ui::btn_icon(Icon::Shield, "Allow", Variant::Secondary)
                             .disabled(move || granting.get())
                             .on_press(move || allow(false))
                             .into_element(),
@@ -786,7 +786,7 @@ fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static) -> AnyEleme
                 ui::btn("Use Kairo's", Variant::Secondary)
                     .on_press(move || draft.update(|d| d.core_path.clear()))
             }))
-            .child(ui::btn("Custom…", Variant::Secondary).on_press(move || {
+            .child(ui::btn("Custom", Variant::Secondary).on_press(move || {
                 spawn(async move {
                     let picked = pick_paths(
                         OpenDialog::files()
@@ -991,7 +991,7 @@ fn inspect_group() -> impl IntoElement {
             ui::setting_row(
                 "DNS",
                 Some("Ask the core's resolver, or forget the fake addresses it handed out."),
-                ui::btn("Look Up…", Variant::Secondary).on_press(move || store.page.set(Page::Dns)),
+                ui::btn("Look Up", Variant::Secondary).on_press(move || store.page.set(Page::Dns)),
             )
             .into_element(),
         ],
