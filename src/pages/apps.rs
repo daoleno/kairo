@@ -6,7 +6,7 @@
 
 use kairo_core::places;
 use kairo_core::routes::{Route, RouteExit, RouteKind};
-use nsh_base::theme;
+use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
 use crate::store::{Page, store};
@@ -17,8 +17,6 @@ use crate::ui::{self, Icon, Variant, size};
 #[derive(Debug, Clone, PartialEq)]
 enum Choice {
     Exit(RouteExit),
-    /// Back to the usual exit: the row goes.
-    Remove,
 }
 
 /// The words for an exit.
@@ -53,8 +51,8 @@ pub fn exit_title(exit: &RouteExit) -> String {
     }
 }
 
-/// The pop-up's choices: the exits, a country (its fastest server), Direct,
-/// Block, and the way back to usual.
+/// The pop-up's choices: the exits, a country (its fastest server), Direct
+/// and Block.
 fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
     let store = store();
     let mut out = vec![
@@ -109,7 +107,6 @@ fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
     {
         out.push((Choice::Exit(current.clone()), exit_title(current)));
     }
-    out.push((Choice::Remove, "Back to usual".into()));
     out
 }
 
@@ -140,6 +137,7 @@ fn route_row(r: Route) -> impl IntoElement {
         RouteKind::App { name } => (name.clone(), None),
         RouteKind::Site { domain } => (domain.clone(), Some("and subdomains")),
     };
+    let label = name.clone();
     let kind = stored(r.kind.clone());
     let id = stored(r.id.clone());
     let exit = stored(r.exit.clone());
@@ -165,9 +163,32 @@ fn route_row(r: Route) -> impl IntoElement {
             move || Choice::Exit(exit.with(|e| e.clone())),
             move |c: Choice| match c {
                 Choice::Exit(e) => store.run(store.svc().set_route(kind.with(|k| k.clone()), e)),
-                Choice::Remove => store.run(store.svc().remove_route(id.with(|i| i.clone()))),
             },
         ))
+        .child(remove_button(label, id))
+}
+
+/// The row's own way out: a close button that takes the app or site off the list (it goes back
+/// to the exit it had before it was added).
+fn remove_button(name: String, id: Stored<String>) -> impl IntoElement {
+    let store = store();
+    button()
+        .accessibility_label(format!("Remove {name}"))
+        .items_center()
+        .justify_center()
+        .size(px(ui::touch_h(28.0)))
+        .flex_shrink_0()
+        .rounded_full()
+        .cursor_pointer()
+        .text_color(move || theme().muted_foreground)
+        .hover(|s| {
+            s.bg(move || theme().accent)
+                .text_color(move || theme().foreground)
+        })
+        .active(|s| s.opacity(0.7))
+        .focus(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .on_press(move || store.run(store.svc().remove_route(id.with(|i| i.clone()))))
+        .child(ui::icon(Icon::Close, 14.0))
 }
 
 /// What the add dialog is for.
@@ -396,9 +417,7 @@ fn add_card(kind: Adding, adding: Signal<Option<Adding>>) -> impl IntoElement {
             problem.set(Some("Type a name first.".into()));
             return;
         }
-        let Choice::Exit(chosen) = exit.get_untracked() else {
-            return;
-        };
+        let Choice::Exit(chosen) = exit.get_untracked();
         let rk = match kind {
             Adding::App => RouteKind::App { name: v },
             Adding::Site => RouteKind::Site { domain: v },
@@ -472,12 +491,7 @@ fn add_card(kind: Adding, adding: Signal<Option<Adding>>) -> impl IntoElement {
                 .child(ui::muted("Goes through"))
                 .child(view().flex_1())
                 .child(ui::popup_button(
-                    move || {
-                        choices(&RouteExit::Usual)
-                            .into_iter()
-                            .filter(|(c, _)| *c != Choice::Remove)
-                            .collect()
-                    },
+                    move || choices(&RouteExit::Usual),
                     move || exit.get(),
                     move |c| exit.set(c),
                 )),
