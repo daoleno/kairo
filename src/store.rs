@@ -317,6 +317,38 @@ impl Store {
         });
     }
 
+    /// Runs an update of a subscription (or of all). When it fails and the card on the
+    /// Subscriptions page is showing that failure, the card is the message: no toast says it again.
+    pub fn run_update<T: 'static>(
+        &self,
+        f: impl std::future::Future<Output = Result<T, String>> + 'static,
+    ) {
+        self.run_update_then(f, |_| {});
+    }
+
+    /// `run_update`, and then `done` with the result.
+    pub fn run_update_then<T: 'static>(
+        &self,
+        f: impl std::future::Future<Output = Result<T, String>> + 'static,
+        done: impl FnOnce(Result<T, String>) + 'static,
+    ) {
+        let store = *self;
+        spawn(async move {
+            let r = f.await;
+            if let Err(e) = &r {
+                let carded = {
+                    let state = store.svc().state();
+                    let state = state.borrow();
+                    failure_on_card(store.page.get_untracked(), &state.profiles)
+                };
+                if !carded {
+                    store.error(e.clone());
+                }
+            }
+            done(r);
+        });
+    }
+
     pub fn error(&self, text: impl Into<SharedString>) {
         let id = NOTICE.with(|n| {
             n.set(n.get() + 1);
@@ -332,6 +364,11 @@ impl Store {
         });
         self.show_notice(id, text, false);
     }
+}
+
+/// Whether the Subscriptions page is open and its card shows a failed update.
+pub fn failure_on_card(page: Page, profiles: &kairo_core::profile::ProfileIndex) -> bool {
+    page == Page::Profiles && profiles.profiles.iter().any(|p| p.failure_shown())
 }
 
 thread_local! {
@@ -360,7 +397,40 @@ pub fn store() -> Store {
 
 #[cfg(test)]
 mod page_tests {
-    use super::Page;
+    use super::{Page, failure_on_card};
+    use kairo_core::profile::{ConfigStats, Profile, ProfileIndex, Source};
+
+    fn index(failed: bool, dismissed: bool) -> ProfileIndex {
+        let mut p = Profile {
+            id: "a".into(),
+            name: "Demo".into(),
+            source: Source::Remote { url: "https://e.com/s".into(), interval_hours: 12 },
+            updated_at: Some(1000),
+            usage: None,
+            web_page: None,
+            last_error: None,
+            failed_at: None,
+            failure_dismissed: false,
+            stats: ConfigStats::default(),
+        };
+        if failed {
+            p.record_failure("The server answered HTTP 502".into(), 1);
+        }
+        p.failure_dismissed = dismissed;
+        ProfileIndex { active: None, profiles: vec![p] }
+    }
+
+    #[test]
+    fn a_failure_the_card_shows_is_not_also_a_toast() {
+        // The card is open on Subscriptions and shows it: no toast.
+        assert!(failure_on_card(Page::Profiles, &index(true, false)));
+        // On another page the card is not in view: the toast stays.
+        assert!(!failure_on_card(Page::Overview, &index(true, false)));
+        assert!(!failure_on_card(Page::Apps, &index(true, false)));
+        // A closed card, or no failure: nothing is showing, the toast says it.
+        assert!(!failure_on_card(Page::Profiles, &index(true, true)));
+        assert!(!failure_on_card(Page::Profiles, &index(false, false)));
+    }
 
     #[test]
     fn an_inspect_view_stays_on_the_row_of_the_page_it_came_from() {

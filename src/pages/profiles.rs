@@ -358,7 +358,7 @@ pub fn page() -> impl IntoElement {
                     "Update All",
                     Glyph::Refresh,
                     Icon::Refresh,
-                    move || store.run(store.svc().update_all_profiles()),
+                    move || store.run_update(store.svc().update_all_profiles()),
                 )
                 .enabled(move || any_remote() && !updating_all()),
                 toolbar::button(
@@ -622,7 +622,7 @@ fn row(
                     ui::btn("Update", Variant::Secondary)
                         .h(px(26.0))
                         .disabled(updating)
-                        .on_press(move || store.run(store.svc().update_profile(id.clone())))
+                        .on_press(move || store.run_update(store.svc().update_profile(id.clone())))
                 }))
                 .child(when(has_usage, move || {
                     let toggle = toggle.clone();
@@ -758,7 +758,7 @@ fn phone_row(
                             ui::btn_icon(Icon::Refresh, "Update", Variant::Secondary)
                                 .disabled(updating)
                                 .on_press(move || {
-                                    store.run(store.svc().update_profile(id.clone()))
+                                    store.run_update(store.svc().update_profile(id.clone()))
                                 })
                         }))
                         .child(when(has_usage, move || {

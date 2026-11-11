@@ -11,12 +11,14 @@ also keeps sending requests through Kairo's mixed port so the live views move.
 
 Subscription URL: http://127.0.0.1:<port>/sub
 A provider's notice instead of a config: http://127.0.0.1:<port>/notice
+/down-on and /down-off: while on, /sub answers 502 (for tests)
 """
 
 import argparse
 import asyncio
 import random
 
+STATE = {"down": False}
 REGIONS = [
     ("Tokyo", 6), ("Osaka", 3), ("Hong Kong", 8), ("Taipei", 4), ("Singapore", 8),
     ("Seoul", 4), ("Los Angeles", 6), ("San Jose", 4), ("Seattle", 3), ("New York", 4),
@@ -128,6 +130,8 @@ async def origin_handler(reader, writer, sub):
     path = head.split(b" ")[1].decode() if b" " in head else "/"
     if path.endswith("/generate_204"):
         writer.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    elif path.endswith("/sub") and STATE["down"]:
+        writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
     elif path.endswith("/sub"):
         body = sub().encode()
         writer.write(
@@ -138,6 +142,10 @@ async def origin_handler(reader, writer, sub):
             + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
             + body
         )
+    elif path.endswith("/down-on") or path.endswith("/down-off"):
+        # A switch for tests: while it is on, /sub answers like a provider whose server is having trouble.
+        STATE["down"] = path.endswith("/down-on")
+        writer.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
     elif path.endswith("/notice"):
         # A provider that answers with a message instead of a config (fetching
         # not enabled on its website, an expired plan).
