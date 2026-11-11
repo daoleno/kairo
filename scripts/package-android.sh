@@ -23,7 +23,7 @@ bt=$(ls -d "$sdk"/build-tools/*/ | sort -V | tail -1); bt=${bt%/}
 jar=$(ls -d "$sdk"/platforms/android-3[5-9]*/android.jar 2>/dev/null | sort -V | tail -1)
 [ -f "$jar" ] || { echo "no Android platform 35+ in $sdk" >&2; exit 1; }
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$here/Cargo.toml" | head -1)
-code=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1]))['build'])" "$here/nsh.json")
+code=$(sh "$here/scripts/android-version-code.sh" "$version")
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

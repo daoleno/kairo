@@ -159,7 +159,10 @@ jobs:
             scripts/package-android.sh arm64-v8a dist
           rm -f "$RUNNER_TEMP/kairo-android.p12" "$RUNNER_TEMP/kairo-android.pass"
       - name: The APK holds the app, the core and the VPN service, and carries the release key
-        run: scripts/check-android-apk.sh dist/Kairo-*-android-arm64-v8a.apk release
+        run: |
+          export KAIRO_PREVIOUS_ANDROID="$(scripts/previous-android-release.sh)"
+          echo "previous release's APK: $KAIRO_PREVIOUS_ANDROID"
+          scripts/check-android-apk.sh dist/Kairo-*-android-arm64-v8a.apk release
       - uses: actions/upload-artifact@v4
         with:
           name: dist-android
