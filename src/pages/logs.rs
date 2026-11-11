@@ -745,6 +745,7 @@ mod tests {
             web_page: Some("https://portal.provider.test/home".into()),
             last_error: None,
             failed_at: None,
+            failure_dismissed: false,
             stats: Default::default(),
         };
         state.profiles.profiles.push(p);
