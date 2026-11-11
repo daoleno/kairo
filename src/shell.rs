@@ -100,15 +100,18 @@ fn core_footer() -> impl IntoElement {
                 .child(speed(Icon::ArrowUp, move || store.live.with(|l| l.up)))
                 .child(speed(Icon::ArrowDown, move || store.live.with(|l| l.down))),
         )
-        // A newer Kairo: Download, its progress, then Restart to Update.
+        // A newer Kairo: the download icon at the bottom left, its progress as a ring, then the same
+        // icon on a disc (restart to update).
         .child(dynamic(move || {
             let b = store
                 .state
                 .with(|s| crate::chrome::update_button(&s.update));
             untracked(move || match b {
-                Some(b) => ui::btn_icon(Icon::Download, b.label, ui::Variant::Primary)
-                    .disabled(!b.enabled)
-                    .on_press(move || crate::chrome::update_pressed(&store.svc()))
+                Some(b) => view()
+                    .flex_row()
+                    .child(ui::update_button(b, move || {
+                        crate::chrome::update_pressed(&store.svc())
+                    }))
                     .into_element(),
                 None => view().into_element(),
             })
@@ -264,12 +267,7 @@ fn phone_shell() -> impl IntoElement {
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
         .pt(move || safe_area().top)
-        .child(
-            view()
-                .flex_1()
-                .min_h(px(0.0))
-                .child(current_page(store)),
-        )
+        .child(view().flex_1().min_h(px(0.0)).child(current_page(store)))
         .child(update_failure(store))
         // A newer Kairo: the download beside the tabs, where the sidebar had it.
         .child(dynamic(move || {
@@ -278,13 +276,12 @@ fn phone_shell() -> impl IntoElement {
                 .with(|s| crate::chrome::update_button(&s.update));
             untracked(move || match b {
                 Some(b) => view()
+                    .flex_row()
                     .px_3()
                     .py_2()
-                    .child(
-                        ui::btn_icon(Icon::Download, b.label, ui::Variant::Primary)
-                            .disabled(!b.enabled)
-                            .on_press(move || crate::chrome::update_pressed(&store.svc())),
-                    )
+                    .child(ui::update_button(b, move || {
+                        crate::chrome::update_pressed(&store.svc())
+                    }))
                     .into_element(),
                 None => view().into_element(),
             })
@@ -344,11 +341,13 @@ fn update_failure(store: crate::store::Store) -> impl IntoElement {
                         .flex_row()
                         .flex_wrap()
                         .gap_2()
-                        .child(ui::btn("Try Again", ui::Variant::Primary).on_press(move || {
-                            let svc = store.svc();
-                            svc.dismiss_update_failure();
-                            store.run(svc.check_for_update());
-                        }))
+                        .child(
+                            ui::btn("Try Again", ui::Variant::Primary).on_press(move || {
+                                let svc = store.svc();
+                                svc.dismiss_update_failure();
+                                store.run(svc.check_for_update());
+                            }),
+                        )
                         .child(
                             ui::btn("Dismiss", ui::Variant::Secondary)
                                 .on_press(move || store.svc().dismiss_update_failure()),
