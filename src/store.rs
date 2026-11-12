@@ -6,7 +6,9 @@ use std::sync::Arc;
 use kairo_core::activity::Tally;
 use kairo_core::model::Connections;
 use kairo_core::stats::Store as Stats;
-use kairo_core::{Live, Proxies, Service, State};
+use kairo_core::{Live, Proxies, State};
+
+use crate::backend::Backend;
 use nsh_core::prelude::*;
 
 /// The window's destinations: the five of the sidebar and Settings, and the
@@ -154,7 +156,7 @@ impl<T> PartialEq for Snap<T> {
 
 #[derive(Clone, Copy)]
 pub struct Store {
-    pub svc: Stored<Service>,
+    pub svc: Stored<Backend>,
     pub state: Signal<State>,
     pub live: Signal<Live>,
     pub connections: Signal<Snap<Connections>>,
@@ -185,7 +187,7 @@ impl Store {
         self.page.get().row_from(self.origin.get())
     }
 
-    pub fn new(svc: Service) -> Store {
+    pub fn new(svc: Backend) -> Store {
         let state_rx = svc.state();
         let live_rx = svc.live();
         let conn_rx = svc.connections();
@@ -263,7 +265,7 @@ impl Store {
         store
     }
 
-    pub fn svc(&self) -> Service {
+    pub fn svc(&self) -> Backend {
         self.svc.with(|s| s.clone())
     }
 

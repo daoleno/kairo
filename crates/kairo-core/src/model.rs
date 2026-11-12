@@ -441,7 +441,7 @@ pub struct Connections {
 }
 
 /// The answer of `/dns/query`.
-#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Default, serde::Serialize)]
 pub struct DnsResponse {
     #[serde(rename = "Status", default)]
     pub status: i32,

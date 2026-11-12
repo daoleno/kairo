@@ -2,6 +2,7 @@
 //! Shell (NSH) in Rust; `kairo-core` is the engine and `kairo-tray` the tray.
 
 pub mod accent;
+pub mod backend;
 pub mod chrome;
 mod flags;
 pub mod logos;
@@ -9,10 +10,12 @@ mod logos_table;
 mod pages;
 pub mod palette;
 mod shell;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 pub mod store;
 pub mod ui;
 
-use kairo_core::{Service, Theme};
+use kairo_core::Theme;
 use nsh_base::theme;
 use nsh_core::element::desktop::{MenuItem, set_application_menu};
 use nsh_core::platform::{Appearance, Os};
@@ -37,7 +40,15 @@ fn native(registry: &mut Registry) {
 /// The application's root.
 #[component]
 pub fn App() -> impl IntoElement {
-    let store = Store::new(Service::global());
+    #[cfg(target_arch = "wasm32")]
+    return web::app().into_element();
+    #[cfg(not(target_arch = "wasm32"))]
+    main_view(backend::Backend::local()).into_element()
+}
+
+/// The window's content over `backend`: its theme, keys, menus and pages.
+pub fn main_view(backend: backend::Backend) -> impl IntoElement {
+    let store = Store::new(backend);
     provide_context(store);
 
     // The app's appearance follows the setting (System follows the desktop).

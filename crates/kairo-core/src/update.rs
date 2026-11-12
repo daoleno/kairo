@@ -139,6 +139,11 @@ impl Install {
     }
 
     pub fn detect_for(exe: &Path, dpkg_list: &Path) -> Install {
+        // The server is its own package (bin/kairo-server and its page): never
+        // replaced by the desktop app's.
+        if exe.file_stem().is_some_and(|n| n == "kairo-server") {
+            return server_install(exe);
+        }
         if cfg!(target_os = "macos") {
             let bundle = exe.parent().and_then(Path::parent).and_then(Path::parent);
             if let Some(bundle) = bundle
@@ -208,6 +213,12 @@ impl Install {
             Install::Other => None,
         }
     }
+}
+
+/// What a `kairo-server` binary is: until the server has a package of its
+/// own in the manifest, one that updates by hand.
+fn server_install(_exe: &Path) -> Install {
+    Install::Other
 }
 
 fn writable(dir: &Path) -> bool {

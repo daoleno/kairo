@@ -15,6 +15,7 @@ pub mod model;
 pub mod paths;
 pub mod places;
 pub mod profile;
+pub mod protocol;
 pub mod routes;
 pub mod settings;
 pub mod stats;

@@ -51,7 +51,7 @@ pub fn page() -> impl IntoElement {
         let k = kind.get_untracked();
         let id = next_id.get_untracked() + 1;
         next_id.set(id);
-        let started = std::time::Instant::now();
+        let started = nsh_core::time::Instant::now();
         let svc = store.svc();
         spawn(async move {
             let r = svc.dns_query(n.clone(), k.to_owned()).await;

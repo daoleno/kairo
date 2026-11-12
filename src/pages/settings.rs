@@ -642,8 +642,12 @@ fn advanced(
                             .otherwise(move || secret_mask(revealed)),
                         )
                         .child(ui::btn("New Secret", Variant::Secondary).on_press(move || {
-                            draft.update(|d| d.secret = kairo_core::settings::new_secret());
-                            revealed.set(true);
+                            store.run_then(store.svc().new_secret(), move |r| {
+                                if let Ok(secret) = r {
+                                    draft.update(|d| d.secret = secret);
+                                    revealed.set(true);
+                                }
+                            });
                         })),
                 )
                 .into_element(),
@@ -790,15 +794,24 @@ fn geo_row() -> AnyElement {
     let tick = signal(0u32);
     let updating = signal(false);
     let running = computed(move || store.state.with(|s| s.core.is_running()));
-    let detail = move || -> SharedString {
+    // When they were written: asked again after each update.
+    let updated = signal(None::<i64>);
+    effect(move || {
         let _ = tick.get();
-        let paths = store.svc().paths().clone();
-        match geo_mtime(&paths) {
+        let asked = store.svc().geo_updated();
+        spawn(async move {
+            if let Ok(at) = asked.await {
+                updated.set(at);
+            }
+        });
+    });
+    let detail = move || -> SharedString {
+        match updated.get() {
             Some(secs) => format!(
                 "Updated {}",
                 date_text(
-                    secs + kairo_core::service::local_offset_seconds(),
-                    kairo_core::service::unix() + kairo_core::service::local_offset_seconds()
+                    secs + kairo_core::time::local_offset_seconds(),
+                    kairo_core::unix() + kairo_core::time::local_offset_seconds()
                 )
             )
             .into(),
@@ -831,21 +844,6 @@ fn geo_row() -> AnyElement {
         }),
     )
     .into_element()
-}
-
-/// When the newest geo file was written (unix seconds).
-fn geo_mtime(paths: &kairo_core::paths::Paths) -> Option<i64> {
-    [kairo_core::geo::MMDB, kairo_core::geo::GEOSITE]
-        .into_iter()
-        .filter_map(|f| {
-            std::fs::metadata(paths.runtime_dir().join(f.name))
-                .ok()?
-                .modified()
-                .ok()
-        })
-        .filter_map(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64)
-        .max()
 }
 
 /// A day as "Nov 8" (with the year when it is not this one). Both times are

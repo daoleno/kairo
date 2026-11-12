@@ -17,7 +17,7 @@ pub fn expiry_text(expire: Option<i64>) -> String {
 
 /// `YYYY-MM-DD` of a unix time (local).
 pub fn date_of(t: i64) -> String {
-    let days = (t + kairo_core::service::local_offset_seconds()).div_euclid(86400);
+    let days = (t + kairo_core::time::local_offset_seconds()).div_euclid(86400);
     // Civil from days (Howard Hinnant).
     let z = days + 719468;
     let era = z.div_euclid(146097);

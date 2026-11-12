@@ -356,7 +356,29 @@ pub fn update_icon_svg(b: &UpdateButton) -> String {
 }
 
 /// The button pressed: does what it says for the state the updater is in now.
-pub fn update_pressed(svc: &kairo_core::Service) {
+pub fn update_pressed(backend: &crate::backend::Backend) {
+    use kairo_core::UpdateStatus as U;
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(svc) = backend.local_service() {
+        return update_pressed_local(svc);
+    }
+    match backend.snapshot().update {
+        U::Available { .. } => {
+            nsh_core::prelude::spawn(backend.download_update());
+        }
+        U::Ready { .. } => {
+            nsh_core::prelude::spawn(backend.restart_to_update());
+        }
+        U::Manual { url, .. } => {
+            let _ = nsh_core::prelude::open_url(url);
+        }
+        _ => {}
+    }
+}
+
+/// The same from the platform's own chrome (its header bar or menu), off the UI's thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn update_pressed_local(svc: &kairo_core::Service) {
     use kairo_core::UpdateStatus as U;
     let rt = svc.runtime();
     match svc.snapshot().update {
@@ -371,7 +393,14 @@ pub fn update_pressed(svc: &kairo_core::Service) {
     }
 }
 
+/// Opens a web page in the desktop's browser (in a browser: a new tab).
+#[cfg(target_arch = "wasm32")]
+pub fn open_in_browser(url: &str) {
+    let _ = nsh_core::prelude::open_url(url.to_owned());
+}
+
 /// Opens a web page in the desktop's browser.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn open_in_browser(url: &str) {
     let opener = if cfg!(target_os = "macos") {
         "open"

@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use kairo_core::profile::{Profile, Source, Usage};
 use nsh_base::{ButtonElement as Button, alert_dialog, button, theme};
+#[cfg(not(target_arch = "wasm32"))]
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
 
@@ -301,7 +302,7 @@ fn now() -> i64 {
 }
 
 fn offset() -> i64 {
-    kairo_core::service::local_offset_seconds()
+    kairo_core::time::local_offset_seconds()
 }
 
 // --- The page ------------------------------------------------------------------------
@@ -1082,6 +1083,19 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
     });
     let import = move || {
         let svc = store.svc();
+        // A browser has no paths: the file's text goes to the server.
+        #[cfg(target_arch = "wasm32")]
+        spawn(async move {
+            if let Some((name, text)) = crate::web::pick_text_file(".yaml,.yml,.txt").await {
+                store.run_then(svc.add_yaml(name, text), move |r| {
+                    if r.is_ok() {
+                        store.info("Config imported");
+                        dialog.set(None);
+                    }
+                });
+            }
+        });
+        #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
             let picked = pick_paths(
                 OpenDialog::files()

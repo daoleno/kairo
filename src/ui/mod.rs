@@ -112,10 +112,31 @@ pub mod size {
 /// The height of a toolbar / page header.
 pub const HEADER_HEIGHT: f32 = 52.0;
 
-/// Whether this is a phone (Android): one column, tabs, no hover.
+/// Whether this is a phone: one column, tabs, no hover. Android on a phone,
+/// or a browser window narrower than a phone's ([`PHONE_WIDTH`]), whatever
+/// the device (it is read when the shell is made; the shell is made again
+/// when the window crosses the width, see [`narrow`]).
 pub fn phone() -> bool {
     use nsh_core::platform::{Idiom, Os};
-    try_os() == Some(Os::Android) && idiom() == Idiom::Phone
+    match try_os() {
+        Some(Os::Android) => idiom() == Idiom::Phone,
+        Some(Os::Web) => untracked(|| window().width.0 < PHONE_WIDTH),
+        _ => false,
+    }
+}
+
+/// Below this width a browser shows the phone's layout.
+pub const PHONE_WIDTH: f32 = 600.0;
+
+/// Whether the window is a phone's now (tracked: a browser window resized
+/// across [`PHONE_WIDTH`] changes it).
+pub fn narrow() -> bool {
+    use nsh_core::platform::{Idiom, Os};
+    match try_os() {
+        Some(Os::Android) => idiom() == Idiom::Phone,
+        Some(Os::Web) => window().width.0 < PHONE_WIDTH,
+        _ => false,
+    }
 }
 /// The height of a control a thumb presses (Android's guideline is 48 dp for
 /// the target, 40 for the drawn control); `desktop` where a pointer is exact.

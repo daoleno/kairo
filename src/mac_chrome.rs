@@ -723,7 +723,7 @@ define_class!(
     impl UpdateTarget {
         #[unsafe(method(restartToUpdate:))]
         fn restart(&self, _sender: &AnyObject) {
-            chrome::update_pressed(&Service::global());
+            chrome::update_pressed_local(&Service::global());
         }
     }
 );
