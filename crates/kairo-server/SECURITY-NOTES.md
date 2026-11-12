@@ -168,9 +168,15 @@ These notes say what it protects, how, and where each control is tested. Most co
 14. **Someone who has not signed in exhausts the server.**
     - At most 512 connections per address it listens on. A connection must send its request's headers within
       20 s, and a TLS handshake must end within 10 s (at most 64 at once).
+    - A client that takes no byte of what it is sent for 60 s is let go (a write waiting on it fails), so a
+      reader that stops reading gives back its connection and its file.
     - Page files are streamed from disk, never read whole: at most 64 at once (more get 503 and `Retry-After`),
       and each within 10 minutes. Sign-in does not wait on them.
-    - *Test:* `before_sign_in_the_page_files_stream_and_hold_no_one_up_for_ever`.
+    - This bounds what one client holds, not how many come: many addresses opening connections again and again
+      can still keep the page from loading (see Availability).
+    - *Tests:* `before_sign_in_the_page_files_stream_and_hold_no_one_up_for_ever`,
+      `with_a_certificate_every_page_is_https_and_its_cookie_secure` (64 silent handshakes). The 512 cap itself
+      has no test.
 15. **A signed-in page fills the memory or the disk.**
     - A config is counted before it is parsed, with its aliases unfolded: more than 5,000,000 values is refused
       (a few aliases of a big anchor would otherwise unfold to gigabytes). Real subscriptions have a few hundred
@@ -224,7 +230,9 @@ These notes say what it protects, how, and where each control is tested. Most co
   - An update of the core drops that capability. Kairo then turns Every app off and says so, and the line has to
     be run again.
   - The systemd unit must not set `NoNewPrivileges=`, or the capability is ignored.
-- **Availability.** A signed-in person can stop the proxy. That is the point.
+- **Availability.** A signed-in person can stop the proxy. That is the point. Before sign-in, the limits of
+  item 14 keep the server's memory and files bounded, but someone who keeps opening connections from many
+  addresses can keep the page from loading for others while they do. The proxy itself is not affected.
 - **The core's own fetches (open).** Item 11 covers the server's own fetches only. The core fetches what a config
   names by itself: `proxy-providers`, `rule-providers`, and the health checks of `url-test`/`fallback` groups.
   A signed-in page can put such a config in place (an override, an imported file, a subscription from a server it

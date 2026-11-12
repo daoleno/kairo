@@ -356,7 +356,8 @@ fn content_type(path: &Path) -> &'static str {
 /// Static files sent at once, at most (each holds its place while it streams).
 pub const MAX_TRANSFERS: usize = 64;
 /// The longest one file may take to send: the page's 3 MB (brotli) at 5 KB/s.
-/// A reader that stops reading gives its place back then.
+/// This bounds a reader that reads slowly; one that stops reading is let go
+/// sooner, by its connection (`serve::STALL_TIME`).
 pub const TRANSFER_TIME: std::time::Duration = std::time::Duration::from_secs(600);
 static TRANSFERS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
     std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(MAX_TRANSFERS)));

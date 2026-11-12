@@ -798,6 +798,15 @@ async fn with_a_certificate_every_page_is_https_and_its_cookie_secure() {
     let _silent = tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap();
     let r = client.get(format!("{base}/api/session")).send().await.expect("another client still gets in");
     assert_eq!(r.status(), StatusCode::OK);
+    // Clients that sit on every handshake place are let go (10 s), and the next one gets in.
+    let mut silent = Vec::new();
+    for _ in 0..64 {
+        silent.push(tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap());
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let fresh = tls_client();
+    let r = tokio::time::timeout(Duration::from_secs(25), fresh.get(format!("{base}/api/session")).send()).await;
+    assert!(matches!(&r, Ok(Ok(r)) if r.status() == StatusCode::OK), "in after the silent ones were let go: {r:?}");
 }
 
 #[tokio::test]
@@ -863,10 +872,16 @@ async fn before_sign_in_the_page_files_stream_and_hold_no_one_up_for_ever() {
     assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
     // Signing in is not held up by them.
     assert_eq!(server.session_state(None).await, "setup");
+    // Still connected, never reading: let go after a minute of taking nothing.
+    let started = std::time::Instant::now();
+    let mut status = StatusCode::SERVICE_UNAVAILABLE;
+    while status != StatusCode::OK && started.elapsed() < Duration::from_secs(90) {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        status = reqwest::get(server.url("/big.0123456789.wasm")).await.unwrap().status();
+    }
+    assert_eq!(status, StatusCode::OK, "readers that stopped reading gave their places back");
+    assert!(started.elapsed() >= Duration::from_secs(50), "not before the minute");
     drop(stuck);
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let r = reqwest::get(server.url("/big.0123456789.wasm")).await.unwrap();
-    assert_eq!(r.status(), StatusCode::OK, "their places came back");
     // A client that opens a connection and sends no request is let go.
     let mut silent = tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap();
     let mut buf = [0u8; 64];

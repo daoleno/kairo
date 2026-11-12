@@ -69,7 +69,8 @@ Start it at boot, before you log in:  loginctl enable-linger "$USER"
 The code that sets the password:      $prefix/bin/kairo-server status
 Then open http://kairo.localhost:7979 (on this machine).
 For other devices: add --listen ADDR:PORT --tls-cert CERT.pem --tls-key KEY.pem to
-ExecStart in the unit (plain HTTP there opens only with --insecure-http). Read
+ExecStart in the unit (plain HTTP there opens only with --insecure-http), then
+open https://<the certificate's name>:PORT, on this machine too. Read
 $prefix/share/doc/kairo/SECURITY-NOTES.md first.
 DONE
 EOF
