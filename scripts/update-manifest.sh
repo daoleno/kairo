@@ -15,6 +15,9 @@ names = {
     "linux-aarch64-tar": f"Kairo-{v}-linux-aarch64.tar.gz",
     "linux-x86_64-deb": f"kairo_{v}_amd64.deb",
     "linux-aarch64-deb": f"kairo_{v}_arm64.deb",
+    # kairo-server: the engine and its page, no GTK.
+    "linux-x86_64-server-tar": f"Kairo-server-{v}-linux-x86_64.tar.gz",
+    "linux-aarch64-server-tar": f"Kairo-server-{v}-linux-aarch64.tar.gz",
     "macos-universal-zip": f"Kairo-{v}-macos-universal.zip",
     "windows-x86_64-zip": f"Kairo-{v}-windows-x86_64.zip",
     # Android: the arm64 phone APK (the update is a whole APK the system installs).

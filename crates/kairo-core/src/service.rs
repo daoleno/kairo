@@ -2273,6 +2273,13 @@ impl Service {
                 svc.set_update(previous);
                 return Ok(());
             }
+            // A server ends here: its service (Restart=always) starts the
+            // new one; a copy started by hand is started again by hand.
+            if matches!(crate::update::Install::detect(), crate::update::Install::Server { .. }) {
+                log::warn!("updated to {}; exiting so that the service starts it", exe.display());
+                svc.shutdown();
+                std::process::exit(0);
+            }
             crate::update::relaunch(&exe)?;
             let quit = svc.0.quit.lock().expect("quit hook").clone();
             match quit {
