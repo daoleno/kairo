@@ -92,7 +92,8 @@ fn start_with(dir: &Path, extra: &[&str], envs: &[(&str, &str)]) -> Server {
     loop {
         let line = rx.recv_timeout(Duration::from_secs(30)).expect("the server says where it is");
         // The harness's own address (others may come first, or never).
-        if let Some(rest) = line.strip_prefix("Kairo is at http://").filter(|r| r.starts_with("localhost:")) {
+        let rest = line.strip_prefix("Kairo is at http://").or_else(|| line.strip_prefix("Kairo is at https://"));
+        if let Some(rest) = rest.filter(|r| r.starts_with("localhost:")) {
             let port = rest.rsplit(':').next().unwrap().trim().parse().unwrap();
             // As its owner reads it (`kairo-server status`): never printed
             // where a journal keeps it.
@@ -699,7 +700,10 @@ async fn an_address_that_can_not_be_had_yet_stops_nothing() {
     let held_port = held.local_addr().unwrap().port();
     let not_here = format!("192.0.2.77:{}", free_port());
     let dir = folder();
-    let server = start(dir.path(), &["--listen", &format!("127.0.0.1:{held_port}"), "--listen", &not_here]);
+    let server = start(
+        dir.path(),
+        &["--listen", &format!("127.0.0.1:{held_port}"), "--listen", &not_here, "--insecure-http"],
+    );
     assert_eq!(server.session_state(None).await, "setup");
     drop(held);
     let mut reached = false;
@@ -717,6 +721,174 @@ async fn an_address_that_can_not_be_had_yet_stops_nothing() {
     // On Linux the address it does not have is bound already (IP_FREEBIND).
     let said = server.output.lock().unwrap().join("\n");
     assert!(said.contains(&format!("Kairo is at http://{not_here}")), "{said}");
+}
+
+#[tokio::test]
+async fn plain_http_beyond_loopback_opens_only_when_asked() {
+    // 192.0.2.80/.81: addresses beyond loopback (bound by IP_FREEBIND).
+    let refused = format!("192.0.2.80:{}", free_port());
+    let dir = folder();
+    let server = start(dir.path(), &["--listen", &refused]);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let said = server.output.lock().unwrap().join("\n");
+    assert!(said.contains(&format!("Not listening on {refused}")), "{said}");
+    assert!(!said.contains(&format!("Kairo is at http://{refused}")), "{said}");
+    assert_eq!(server.session_state(None).await, "setup", "loopback and the core carry on");
+    drop(server);
+    // Asked for: opened, and said to be plain.
+    let asked = format!("192.0.2.81:{}", free_port());
+    let server = start(dir.path(), &["--listen", &asked, "--insecure-http"]);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let said = server.output.lock().unwrap().join("\n");
+    assert!(said.contains(&format!("Kairo is at http://{asked}")), "{said}");
+    assert!(said.contains("Plain HTTP on the network"), "{said}");
+}
+
+/// A client that trusts the test certificate (and no other).
+fn tls_client() -> reqwest::Client {
+    let pem = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test-cert.pem")).unwrap();
+    reqwest::Client::builder()
+        .tls_built_in_root_certs(false)
+        .add_root_certificate(reqwest::Certificate::from_pem(&pem).unwrap())
+        .https_only(true)
+        .build()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn with_a_certificate_every_page_is_https_and_its_cookie_secure() {
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+    let (cert, key) = (format!("{fixtures}/test-cert.pem"), format!("{fixtures}/test-key.pem"));
+    let dir = folder();
+    let server = start(dir.path(), &["--tls-cert", &cert, "--tls-key", &key]);
+    let said = server.output.lock().unwrap().join("\n");
+    assert!(said.contains(&format!("Kairo is at https://localhost:{}", server.port)), "{said}");
+    let base = format!("https://localhost:{}", server.port);
+    let client = tls_client();
+    let r = client.get(format!("{base}/api/session")).send().await.expect("HTTPS answers");
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(r.headers().get("strict-transport-security").is_some());
+    // Set up over HTTPS: the cookies are Secure and __Host- prefixed.
+    let code = server.setup_code.clone().unwrap();
+    let r = client
+        .post(format!("{base}/api/setup"))
+        .header(ORIGIN, &base)
+        .json(&json!({ "code": code, "password": PASSWORD }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    for set in r.headers().get_all(SET_COOKIE) {
+        let set = set.to_str().unwrap();
+        assert!(set.starts_with("__Host-") && set.contains("; Secure"), "{set}");
+    }
+    // The page's origin is https: the same host over http is another site.
+    let r = client
+        .post(format!("{base}/api/login"))
+        .header(ORIGIN, format!("http://localhost:{}", server.port))
+        .json(&json!({ "password": PASSWORD }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    // Plain HTTP to it gets no page.
+    let plain = reqwest::Client::new().get(format!("http://127.0.0.1:{}/api/session", server.port)).send().await;
+    assert!(plain.is_err() || plain.unwrap().status() != StatusCode::OK);
+    // A client that sits on a handshake holds up no one.
+    let _silent = tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap();
+    let r = client.get(format!("{base}/api/session")).send().await.expect("another client still gets in");
+    assert_eq!(r.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_certificate_that_is_not_the_keys_stops_the_start_with_a_reason() {
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+    let dir = folder();
+    let other_key = dir.path().join("other-key.pem");
+    let made = Command::new("openssl")
+        .args(["genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-out"])
+        .arg(&other_key)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    for (cert, key, says) in [
+        (format!("{fixtures}/test-cert.pem"), other_key.display().to_string(), "not the certificate's"),
+        (format!("{fixtures}/missing.pem"), format!("{fixtures}/test-key.pem"), "missing.pem"),
+        (format!("{fixtures}/test-cert.pem"), String::new(), "go together"),
+    ] {
+        let mut args = vec!["serve", "--listen", "127.0.0.1:0", "--tls-cert", cert.as_str()];
+        if !key.is_empty() {
+            args.extend(["--tls-key", key.as_str()]);
+        }
+        let child = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
+            .args(&args)
+            .arg("--web")
+            .arg(dir.path().join("page"))
+            .env("KAIRO_HOME", dir.path().join("home"))
+            .env("KAIRO_NO_SYSPROXY", "1")
+            .env("KAIRO_NO_UPDATE", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let (status, stderr) = exit_within(child, Duration::from_secs(15)).expect("it stopped");
+        assert!(!status.success());
+        assert!(stderr.contains(says), "{says}: {stderr}");
+    }
+}
+
+#[tokio::test]
+async fn before_sign_in_the_page_files_stream_and_hold_no_one_up_for_ever() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = folder();
+    // A big page file (the wasm is megabytes): 32 MB, more than loopback buffers hold.
+    let big = vec![b'w'; 32 * 1024 * 1024];
+    std::fs::write(dir.path().join("page/big.0123456789.wasm"), &big).unwrap();
+    let server = start(dir.path(), &[]);
+    // Sent whole, with its length said, while it streams.
+    let r = reqwest::get(server.url("/big.0123456789.wasm")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.content_length(), Some(big.len() as u64));
+    assert_eq!(r.bytes().await.unwrap().len(), big.len());
+    // Readers that never read take the transfers there are; one more is told to come back.
+    let mut stuck = Vec::new();
+    for _ in 0..64 {
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap();
+        let req = format!("GET /big.0123456789.wasm HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", server.port);
+        s.write_all(req.as_bytes()).await.unwrap();
+        stuck.push(s);
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let r = reqwest::get(server.url("/big.0123456789.wasm")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+    // Signing in is not held up by them.
+    assert_eq!(server.session_state(None).await, "setup");
+    drop(stuck);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let r = reqwest::get(server.url("/big.0123456789.wasm")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK, "their places came back");
+    // A client that opens a connection and sends no request is let go.
+    let mut silent = tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap();
+    let mut buf = [0u8; 64];
+    let ended = tokio::time::timeout(Duration::from_secs(30), silent.read(&mut buf)).await;
+    assert!(matches!(ended, Ok(Ok(_)) | Ok(Err(_))), "the silent connection was closed within 30 s");
+}
+
+#[tokio::test]
+async fn a_page_can_not_add_subscriptions_without_end() {
+    let dir = folder();
+    let server = start(dir.path(), &[]);
+    let cookie = server.set_up().await;
+    let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
+    let config = "proxies:\n  - {name: a, type: direct}\n";
+    for i in 0..100u64 {
+        let r = call(&mut ws, 1000 + i, "add_yaml", json!({ "name": format!("c{i}"), "text": config })).await;
+        assert!(r.get("ok").is_some(), "{i}: {r}");
+    }
+    let r = call(&mut ws, 2000, "add_yaml", json!({ "name": "one too many", "text": config })).await;
+    assert!(r["err"].as_str().is_some_and(|e| e.contains("at most 100")), "{r}");
+    let r = call(&mut ws, 2001, "add_remote", json!({ "url": "http://127.0.0.1:9/x", "name": null })).await;
+    assert!(r["err"].as_str().is_some_and(|e| e.contains("at most 100")), "{r}");
 }
 
 fn server_alive(server: &Server) -> bool {

@@ -175,9 +175,43 @@ fn panel(title: impl Into<SharedString>, machine: Signal<String>) -> View {
                 .child(ui::title(title)),
         )
         .child(
-            text(move || machine.get())
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(
+                    text(move || machine.get())
+                        .text_size(px(size::small()))
+                        .text_color(move || theme().muted_foreground),
+                )
+                .child(when(not_encrypted(), not_encrypted_marker)),
+        )
+}
+
+/// Whether this page came over plain HTTP from another machine: not a
+/// secure context, and not this computer's own address.
+fn not_encrypted() -> bool {
+    let Some(w) = web_sys::window() else { return false };
+    let host = w.location().hostname().unwrap_or_default().to_ascii_lowercase();
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let loopback = host == "localhost"
+        || host.ends_with(".localhost")
+        || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    !w.is_secure_context() && !loopback
+}
+
+/// One compact mark: the password typed here crosses the network readable.
+fn not_encrypted_marker() -> impl IntoElement {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_1p5()
+        .child(ui::dot(ui::warning))
+        .child(
+            text("Not encrypted")
                 .text_size(px(size::small()))
-                .text_color(move || theme().muted_foreground),
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || ui::warning()),
         )
 }
 

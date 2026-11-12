@@ -140,14 +140,11 @@ pub fn set_machine(name: Option<String>) {
     MACHINE.with(|m| *m.borrow_mut() = name);
 }
 
-/// Copies `text` and says so with `done`. A browser copies only on a secure
-/// page (HTTPS, or this computer's own address): elsewhere, say why not.
+/// Copies `text` and says so with `done`. On a page that is not a secure
+/// context (a server on plain HTTP) the browser has no clipboard API; NSH's
+/// web runtime then copies the older way (`execCommand("copy")`), so this
+/// works there too.
 pub fn copy(store: crate::store::Store, text: String, done: impl Into<SharedString>) {
-    #[cfg(target_arch = "wasm32")]
-    if !web_sys::window().is_some_and(|w| w.is_secure_context()) {
-        store.error("This browser copies only on an HTTPS page");
-        return;
-    }
     set_clipboard(text);
     store.info(done);
 }

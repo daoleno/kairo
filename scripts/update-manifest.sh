@@ -33,7 +33,11 @@ for key, name in names.items():
     if name not in sums:
         sys.exit(f"{name} is not in SHA256SUMS")
     packages[key] = {"name": name, "sha256": sums[name]}
-manifest = {"version": v, "packages": packages}
+# Until when it offers this version: an old manifest replayed past this date
+# offers nothing (Kairo refuses a newer version's manifest without one).
+import time
+expires = int(time.time()) + 365 * 86400
+manifest = {"version": v, "packages": packages, "expires": expires}
 with open(f"{d}/kairo-update.json", "w") as f:
     json.dump(manifest, f, indent=2, sort_keys=True)
     f.write("\n")

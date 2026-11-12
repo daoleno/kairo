@@ -26,10 +26,19 @@ serde_json = "1"
 sha2 = "0.10"
 # IP_FREEBIND: a --listen address that is not up yet (DHCP at boot) is bound anyway.
 socket2 = { version = "0.6", features = ["all"] }
+# HTTPS of its own (--tls-cert/--tls-key), on the crypto reqwest already uses.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+# Connections served with a header-read timeout and a cap (axum's own serve sets neither).
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower-service = "0.3"
+# Static files streamed, not read whole.
+tokio-util = { version = "0.7", features = ["io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "fs", "signal"] }
 url = "2"
 
 [dev-dependencies]
 tempfile = "3"
 tokio-tungstenite = "0.28"
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

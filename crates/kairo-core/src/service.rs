@@ -1581,6 +1581,18 @@ impl Service {
 
     // --- Profiles -----------------------------------------------------------------
 
+    /// Whether one more subscription may be added (at most
+    /// [`profile::MAX_PROFILES`]: each is a file, updated on its own schedule).
+    fn room_for_a_profile(&self) -> Result<(), String> {
+        if self.0.state.borrow().profiles.profiles.len() >= profile::MAX_PROFILES {
+            return Err(format!(
+                "Kairo keeps at most {} subscriptions: delete one first",
+                profile::MAX_PROFILES
+            ));
+        }
+        Ok(())
+    }
+
     /// Adds a subscription; it becomes active when it is the first profile.
     pub fn add_remote(
         &self,
@@ -1594,6 +1606,7 @@ impl Service {
             if !matches!(parsed.scheme(), "http" | "https") {
                 return Err("Subscriptions use http or https".into());
             }
+            svc.room_for_a_profile()?;
             let download = svc.download(&url).await?;
             let stats = download.inspect().map_err(|e| e.to_string())?;
             let id = profile::new_id();
@@ -1629,6 +1642,7 @@ impl Service {
     ) -> impl Future<Output = Result<String, String>> + 'static {
         let svc = self.clone();
         self.run(async move {
+            svc.room_for_a_profile()?;
             let text = profile::read_import(&path).map_err(|e| e.to_string())?;
             let stats = profile::inspect(&text).map_err(|e| e.to_string())?;
             let id = profile::new_id();

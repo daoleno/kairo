@@ -66,6 +66,9 @@ pub async fn status(ctx: &Ctx) -> serde_json::Value {
         "home": ctx.opts.home,
         "listen": ctx.opts.listen.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
         "public_url": ctx.opts.public_url.as_ref().map(|u| u.to_string()),
+        "https": ctx.opts.tls.is_some(),
+        // Listeners not opened (plain HTTP beyond loopback without --insecure-http).
+        "refused": ctx.opts.listen.iter().filter(|a| ctx.opts.refused(a).is_some()).map(|a| a.to_string()).collect::<Vec<_>>(),
         "password_set": !ctx.auth.needs_setup(),
         "setup_code": ctx.auth.setup_code(),
         "core": s.core.title(),

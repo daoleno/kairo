@@ -171,8 +171,17 @@ pub fn bundled_core() -> Option<PathBuf> {
 /// compare with a process's image path, so the plain drive path is used
 /// whenever there is one.
 pub fn current_exe() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
+    let exe = without_deleted(std::env::current_exe().ok()?);
     Some(plain(exe.canonicalize().unwrap_or(exe)))
+}
+
+/// The path a running program had. On Linux, once its file is replaced
+/// (an install over it), `/proc/self/exe` reads `<path> (deleted)`.
+pub fn without_deleted(p: PathBuf) -> PathBuf {
+    match p.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+        Some(was) => PathBuf::from(was),
+        None => p,
+    }
 }
 
 /// `\\?\C:\dir` as `C:\dir`; every other path as it is.

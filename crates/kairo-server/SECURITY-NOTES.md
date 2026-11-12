@@ -41,8 +41,8 @@ These notes say what it protects, how, and where each control is tested. Most co
      `tries_at_once_count_and_the_owners_browser_is_never_kept_out`; unit tests in `auth.rs`.
 2. **Another website the person visits drives the server** (CSRF, cross-site WebSocket hijacking).
    - Every request that changes something, and the WebSocket upgrade, must carry an `Origin` equal to the
-     server's own: scheme, host and port. The scheme is `--public-url`'s for its name, else `http`. Requests with
-     no Origin are refused too.
+     server's own: scheme, host and port. The scheme is `--public-url`'s for its name, else `https` when the
+     server has its own certificate, else `http`. Requests with no Origin are refused too.
    - The cookie is `SameSite=Strict`.
    - *Test:* `another_sites_page_can_not_sign_in_or_open_the_socket`.
 3. **DNS rebinding** (a site's own name, re-pointed at the server's address).
@@ -50,12 +50,14 @@ These notes say what it protects, how, and where each control is tested. Most co
      `name.local`), or a name given with `--host` / `--public-url`. Anything else gets 421.
    - *Test:* `another_name_for_this_address_is_refused`.
 4. **The session token is stolen from a page or a log.**
-   - The cookie is `HttpOnly`, `Path=/` and has no `Domain`. Behind HTTPS it is `__Host-` and `Secure`.
+   - The cookie is `HttpOnly`, `Path=/` and has no `Domain`. Over HTTPS (its own certificate, or behind
+     `--public-url https://…`) it is `__Host-` and `Secure`.
    - The token is never in a URL or a response body, and never in a server log.
    - The page sends a strict CSP: scripts only by file or by hash, `frame-ancestors 'none'`,
      `connect-src 'self'`. Clickjacking is blocked by `X-Frame-Options: DENY`.
    - *Tests:* `the_session_cookie_is_http_only_strict_and_this_hosts_alone`,
      `behind_https_the_cookie_is_secure_and_host_prefixed`,
+     `with_a_certificate_every_page_is_https_and_its_cookie_secure`,
      `nothing_opens_without_a_session_and_no_secret_travels_in_a_url`,
      `the_page_is_sent_with_its_protections`.
 5. **A signed-in page learns more than it shows.**
@@ -150,6 +152,42 @@ These notes say what it protects, how, and where each control is tested. Most co
 12. **Two Kairos on one folder.** A `flock` on `<home>/kairo.lock` stops a second server.
     - *Test:* `a_second_server_on_the_same_folder_will_not_start`.
     - The desktop app takes no lock (0.3.2 and earlier). Do not run it on a folder a server uses.
+13. **The password and the session are read on the network** (plain HTTP).
+    - A `--listen` address beyond loopback opens only with HTTPS (`--tls-cert` and `--tls-key`), or with
+      `--insecure-http`, which says the operator accepts plain HTTP there. Otherwise that address is not opened, and
+      the server says why at start, in the log and in `kairo-server status`. Its other addresses still open.
+    - With a certificate every address is HTTPS (loopback too), with `Strict-Transport-Security` and the `__Host-`,
+      `Secure` cookie. The certificate and key are PEM files, read again when they change (a renewal needs no
+      restart). A key that is not the certificate's stops the start with that reason. There is no self-signed
+      certificate made by Kairo.
+    - A page on plain HTTP from another device shows one mark on its sign-in page: "Not encrypted".
+    - *Tests:* `plain_http_beyond_loopback_opens_only_when_asked`,
+      `with_a_certificate_every_page_is_https_and_its_cookie_secure`,
+      `a_certificate_that_is_not_the_keys_stops_the_start_with_a_reason`; `scripts/web-e2e.sh` (the mark, from
+      another address and not on loopback).
+14. **Someone who has not signed in exhausts the server.**
+    - At most 512 connections per address it listens on. A connection must send its request's headers within
+      20 s, and a TLS handshake must end within 10 s (at most 64 at once).
+    - Page files are streamed from disk, never read whole: at most 64 at once (more get 503 and `Retry-After`),
+      and each within 10 minutes. Sign-in does not wait on them.
+    - *Test:* `before_sign_in_the_page_files_stream_and_hold_no_one_up_for_ever`.
+15. **A signed-in page fills the memory or the disk.**
+    - A config is counted before it is parsed, with its aliases unfolded: more than 5,000,000 values is refused
+      (a few aliases of a big anchor would otherwise unfold to gigabytes). Real subscriptions have a few hundred
+      thousand.
+    - Kairo keeps at most 100 subscriptions.
+    - A subscription is read to 16 MB at most (item 11); an uploaded or pasted config to 8 MB.
+    - *Tests:* `a_page_can_not_add_subscriptions_without_end`;
+      `a_yaml_whose_aliases_unfold_too_far_is_refused_without_unfolding_it` (`config.rs`).
+16. **Updates.** The update manifest is signed (ed25519) and checked before anything is downloaded.
+    - It carries an expiry (a year from signing). An expired manifest offers no update, so an old signed one cannot
+      be replayed to push a version since withdrawn.
+    - The server's own tarball replaces the core, the docs, the page and the program. A failure part way puts every
+      replaced file back, so the old server never runs with a new core.
+    - A program file replaced while it ran (`/proc/self/exe` ends in ` (deleted)`) is still recognized as the
+      server, so the update is the server's package, not the desktop app's.
+    - *Tests:* `an_old_signed_manifest_offers_nothing`, `the_servers_tarball_replaces_the_server_and_its_page`
+      (`update.rs`).
 
 ## Where to listen, and TLS
 
@@ -157,7 +195,9 @@ These notes say what it protects, how, and where each control is tested. Most co
 - Use `http://kairo.localhost:7979` rather than `localhost`. Browsers send cookies by host, not by port, so
   another app on `localhost` would see Kairo's cookie, and Kairo would see that app's. `*.localhost` is still a
   secure context: Copy works.
-- From other devices, the server does not do TLS itself. Use one of these:
+- From other devices, use HTTPS. Any one of these:
+  - **Its own certificate:** `kairo-server serve --listen 0.0.0.0:7979 --tls-cert cert.pem --tls-key key.pem`,
+    for a name the browsers trust (your CA, or a public name's certificate). Open `https://that.name:7979`.
   - **Tailscale:**
     1. Run `tailscale serve --bg 7979`, which gives a certificate for `machine.tailnet.ts.net`.
     2. Start `kairo-server serve --public-url https://machine.tailnet.ts.net`.
@@ -168,8 +208,9 @@ These notes say what it protects, how, and where each control is tested. Most co
   address the machine does not have yet (DHCP at boot) is bound anyway (`IP_FREEBIND`) and answers once it comes
   up. Anything else (a port in use) is tried again every 10 s. The user unit therefore does not wait for the
   network (a user unit cannot order itself after `network-online.target`).
-- `--listen 0.0.0.0:7979` over plain HTTP works on a trusted LAN. The server warns at start: the password and
-  the cookie cross the network readable, and the browser's Copy buttons do not work over plain HTTP.
+- Plain HTTP beyond loopback needs `--insecure-http` (item 13): `--listen 0.0.0.0:7979 --insecure-http` on a
+  LAN you trust. The password and the cookie then cross the network readable. The server says so at start, and
+  the sign-in page shows "Not encrypted". Copy works there too.
 
 ## Not covered
 
@@ -197,8 +238,15 @@ These notes say what it protects, how, and where each control is tested. Most co
   - A stolen session can therefore read a local text or HTML service line by line through a config. Closing this
     needs the server to refuse configs whose providers point at this machine or its network, which would also
     refuse a provider served from the owner's own network. It is a decision, not yet made.
-- **The plain-HTTP warning is advice, not a refusal.** Running without HTTPS beyond loopback is the operator's
-  choice.
+- **What the sign-in page tells before sign-in.** Anyone who reaches it learns the machine's name, and whether a
+  password is set yet (the page shows the name, and the setup form or the sign-in form). A signed-in page learns
+  Kairo's folder, which names the account. These stay: the page shows all three.
+- **A macOS server package (blocker).** On macOS, Every app is granted by making the core setuid root
+  (`chown root:admin` and `chmod u+s`: `tun.rs`, and the line `link.rs` shows). Any program of that account can
+  then run the core as root with a config and folder of its own choosing (`-f`, `-d`): in effect root for every
+  process of the account. Read from the code, not tried on a Mac. The desktop app has this today. A macOS
+  package of the server must not ship until the grant is a launchd helper that starts only Kairo's own core with
+  Kairo's own config, or no more than the network rights TUN needs.
 
 ## What a reviewer should attack first
 
@@ -212,3 +260,5 @@ These notes say what it protects, how, and where each control is tested. Most co
    address: its 5 tries and waits are what holds, and the owner's browser gets in by its device cookie.
 5. `config.rs`: `guard_loopback` and `keep_listeners_local`, for an inbound or a mode that skips the rules, or
    listens on the network, that they do not know.
+6. `serve.rs` and `tls.rs`: what a client that has not signed in can hold open (an upgraded WebSocket gives its
+   connection place back; it needs a session to upgrade), and `Options::refused` for an address it misjudges.
