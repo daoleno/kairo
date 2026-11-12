@@ -7,7 +7,9 @@ Documentation=https://github.com/daoleno/kairo
 # the proxy runs meanwhile.
 
 [Service]
-# Other addresses: add --listen ADDR (and read SECURITY-NOTES.md first).
+# Other addresses: add --listen ADDR with --tls-cert FILE --tls-key FILE
+# (plain HTTP beyond loopback opens only with --insecure-http). Read
+# SECURITY-NOTES.md first.
 ExecStart=@BIN@ serve
 # Always: an update ends the server so that this starts the new one.
 Restart=always

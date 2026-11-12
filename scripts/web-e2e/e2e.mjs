@@ -20,6 +20,8 @@ const PORT = 18200;
 const TOKEN = 'e2e-secret-4f1c9a';
 const SUB = `http://127.0.0.1:${PORT}/sub?token=${TOKEN}`;
 const BASE = 'http://kairo.localhost:7979/';
+const LAN_HOST = '10.66.0.1';
+const LAN_BASE = `http://${LAN_HOST}:7980/`;
 const PASSWORD = 'correct horse battery staple';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const results = [];
@@ -48,7 +50,9 @@ function curl(args) {
   try { return execFileSync('curl', ['-sS', '--max-time', '8', ...args], { encoding: 'utf8' }); } catch (e) { return null; }
 }
 async function startServer() {
-  const s = start(path.join(account, '.local/bin/kairo-server'), ['serve', '--listen', '127.0.0.1:7979']);
+  // 10.66.0.1 (on the namespace's lo): another machine's view of a server on
+  // plain HTTP, which has to be asked for.
+  const s = start(path.join(account, '.local/bin/kairo-server'), ['serve', '--listen', '127.0.0.1:7979', '--listen', `${LAN_HOST}:7980`, '--insecure-http']);
   const lines = [];
   s.stdout.on('data', d => lines.push(String(d)));
   await waitLine(s, /Kairo is at/);
@@ -192,6 +196,41 @@ try {
   await pb.reload();
   await pb.getByText('Sign in to Kairo').waitFor({ timeout: 60000 });
   check(true, 'the revoked phone stays signed out after the restart');
+
+  // --- C: the page from another machine over plain HTTP (not a secure context).
+  const c = await browser.newContext({ viewport: { width: 1280, height: 820 }, colorScheme: 'dark' });
+  const pc = await c.newPage(); watch(pc);
+  await pc.goto(LAN_BASE);
+  await pc.getByText('Sign in to Kairo').waitFor({ timeout: 60000 });
+  check(await pc.evaluate(() => !window.isSecureContext), 'over plain HTTP from another machine the page is not a secure context');
+  check(await pc.getByText('Not encrypted', { exact: true }).count() === 1, 'its sign-in page says so, in one mark');
+  await shot(pc, '15-plain-http-sign-in');
+  const d = await browser.newContext({ viewport: { width: 1280, height: 820 } });
+  const pd = await d.newPage();
+  await pd.goto(BASE);
+  await pd.getByText('Sign in to Kairo').waitFor({ timeout: 60000 });
+  check(await pd.getByText('Not encrypted', { exact: true }).count() === 0, 'on this machine\'s own address, no such mark');
+  await d.close();
+  await pc.getByPlaceholder('Password').fill(PASSWORD);
+  await pc.getByText('Sign In', { exact: true }).click();
+  await pc.getByText('Home', { exact: true }).first().waitFor({ timeout: 60000 });
+  // Copy works there too (the older way: no clipboard API on such a page).
+  // Settings › Advanced › Diagnostics › Show.
+  await pc.getByText('Settings', { exact: true }).first().click();
+  await pc.getByText('Advanced', { exact: true }).first().click();
+  const showDiagnostics = pc.locator('xpath=//*[normalize-space(text())="Diagnostics"]/following::*[normalize-space(text())="Show"][1]');
+  await showDiagnostics.waitFor({ state: 'attached', timeout: 15000 });
+  for (let i = 0; i < 12 && !(await showDiagnostics.isVisible()); i++) {
+    await pc.mouse.move(700, 450); await pc.mouse.wheel(0, 400); await pc.waitForTimeout(200);
+  }
+  await showDiagnostics.click();
+  const copyButton = pc.getByRole('button', { name: 'Copy Diagnostics' });
+  await ((await copyButton.count()) ? copyButton.first() : pc.getByText('Copy Diagnostics').first()).click();
+  await pc.getByText('Diagnostics copied').first().waitFor({ timeout: 10000 });
+  await a.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE.replace(/\/$/, '') });
+  const pasted = await pa.evaluate(() => navigator.clipboard.readText());
+  check(pasted.includes('Kairo') && pasted.length > 40, 'Copy on a plain-HTTP page put the diagnostics on the clipboard');
+  await shot(pc, '16-plain-http-copied');
 
   // Nothing the pages received carried the subscription's token.
   const leaked = frames.filter(f => f.includes(TOKEN));

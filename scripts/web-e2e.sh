@@ -19,4 +19,5 @@ mkdir -p "$out"
 here=$(cd "$(dirname "$0")/web-e2e" && pwd)
 # Not this machine's desktop session (its system proxy): the namespace's own.
 unset DBUS_SESSION_BUS_ADDRESS
-exec unshare -rn sh -c 'ip link set lo up && exec node "$1/e2e.mjs" "$2" "$3"' sh "$here" "$pkg" "$(cd "$out" && pwd)"
+# 10.66.0.1 on lo: the server as another machine on the network reaches it.
+exec unshare -rn sh -c 'ip link set lo up && ip addr add 10.66.0.1/32 dev lo && exec node "$1/e2e.mjs" "$2" "$3"' sh "$here" "$pkg" "$(cd "$out" && pwd)"

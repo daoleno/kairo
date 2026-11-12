@@ -72,11 +72,12 @@ pub fn host_allowed(ctx: &Ctx, authority: &str) -> bool {
 }
 
 /// The scheme a page of this server has when reached as `host`: the public
-/// URL's when that is the name (a proxy in front speaks HTTPS), else this
-/// listener's own (plain HTTP).
-pub fn page_scheme<'a>(public_url: Option<&'a url::Url>, host: &str) -> &'a str {
+/// URL's when that is the name (a proxy in front speaks HTTPS), else the
+/// listeners' own (`tls`: HTTPS on every one).
+pub fn page_scheme<'a>(public_url: Option<&'a url::Url>, tls: bool, host: &str) -> &'a str {
     match public_url {
         Some(u) if u.host_str().is_some_and(|h| h.eq_ignore_ascii_case(&host_part(host))) => u.scheme(),
+        _ if tls => "https",
         _ => "http",
     }
 }
@@ -110,7 +111,7 @@ async fn guard(State(ctx): State<Arc<Ctx>>, request: Request, next: Next) -> Res
     let upgrade = headers.get(header::UPGRADE).is_some();
     if changes || upgrade {
         let origin = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()).unwrap_or_default();
-        let scheme = page_scheme(ctx.opts.public_url.as_ref(), &host);
+        let scheme = page_scheme(ctx.opts.public_url.as_ref(), ctx.opts.tls.is_some(), &host);
         if !same_origin(origin, scheme, &host) {
             return problem(StatusCode::FORBIDDEN, "Only Kairo's own page may do that");
         }
@@ -352,6 +353,15 @@ fn content_type(path: &Path) -> &'static str {
     }
 }
 
+/// Static files sent at once, at most (each holds its place while it streams).
+pub const MAX_TRANSFERS: usize = 64;
+/// The longest one file may take to send: the page's 3 MB (brotli) at 5 KB/s.
+/// This bounds a reader that reads slowly; one that stops reading is let go
+/// sooner, by its connection (`serve::STALL_TIME`).
+pub const TRANSFER_TIME: std::time::Duration = std::time::Duration::from_secs(600);
+static TRANSFERS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(MAX_TRANSFERS)));
+
 /// Sends `path`, or its brotli or gzip copy next to it when the browser takes one.
 async fn send_file(path: &Path, headers: &HeaderMap, cache: &'static str) -> Response {
     let accepts = headers.get(header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).unwrap_or_default();
@@ -365,11 +375,28 @@ async fn send_file(path: &Path, headers: &HeaderMap, cache: &'static str) -> Res
             }
         }
     }
-    let Ok(bytes) = tokio::fs::read(&chosen.0).await else {
+    // Streamed, never read whole (the page's wasm is megabytes): so many at
+    // once, each for so long; these come before anyone signs in.
+    let Ok(transfer) = TRANSFERS.clone().try_acquire_owned() else {
+        let mut r = problem(StatusCode::SERVICE_UNAVAILABLE, "Busy: try again in a moment");
+        r.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("2"));
+        return r;
+    };
+    let Ok(file) = tokio::fs::File::open(&chosen.0).await else {
         return problem(StatusCode::NOT_FOUND, "Not found");
     };
-    let mut r = Response::new(Body::from(bytes));
+    let len = file.metadata().await.map(|m| m.len()).ok();
+    let deadline = tokio::time::sleep(TRANSFER_TIME);
+    let stream = futures_util::StreamExt::take_until(tokio_util::io::ReaderStream::new(file), deadline);
+    let stream = futures_util::StreamExt::map(stream, move |chunk| {
+        let _held = &transfer;
+        chunk
+    });
+    let mut r = Response::new(Body::from_stream(stream));
     let h = r.headers_mut();
+    if let Some(len) = len {
+        h.insert(header::CONTENT_LENGTH, HeaderValue::from(len));
+    }
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type(path)));
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     h.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
@@ -485,9 +512,12 @@ mod tests {
         assert!(!same_origin("", "http", "127.0.0.1:7979"));
         // Behind its public URL a page is HTTPS; reached directly, plain HTTP.
         let public = url::Url::parse("https://kairo.example.ts.net").unwrap();
-        assert_eq!(page_scheme(Some(&public), "kairo.example.ts.net"), "https");
-        assert_eq!(page_scheme(Some(&public), "127.0.0.1:7979"), "http");
-        assert_eq!(page_scheme(None, "127.0.0.1:7979"), "http");
+        assert_eq!(page_scheme(Some(&public), false, "kairo.example.ts.net"), "https");
+        assert_eq!(page_scheme(Some(&public), false, "127.0.0.1:7979"), "http");
+        assert_eq!(page_scheme(None, false, "127.0.0.1:7979"), "http");
+        // HTTPS of its own: every page is.
+        assert_eq!(page_scheme(None, true, "127.0.0.1:7979"), "https");
+        assert_eq!(page_scheme(Some(&public), true, "192.168.1.2:7979"), "https");
     }
 
     #[test]

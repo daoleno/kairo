@@ -21,6 +21,8 @@ pub mod dispatch;
 pub mod http;
 pub mod link;
 pub mod redact;
+pub mod serve;
+pub mod tls;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -43,11 +45,26 @@ pub struct Options {
     /// The address browsers use when it is behind an HTTPS proxy
     /// (`https://kairo.example.ts.net`): its name is allowed, and cookies are Secure.
     pub public_url: Option<url::Url>,
+    /// HTTPS of its own on every listener (`--tls-cert`/`--tls-key`).
+    pub tls: Option<Arc<rustls::ServerConfig>>,
+    /// Plain HTTP on an address beyond loopback, knowingly (`--insecure-http`).
+    pub insecure_http: bool,
 }
 
 impl Options {
     pub fn secure(&self) -> bool {
-        self.public_url.as_ref().is_some_and(|u| u.scheme() == "https")
+        self.tls.is_some() || self.public_url.as_ref().is_some_and(|u| u.scheme() == "https")
+    }
+
+    /// Why a listener on `addr` is not opened, if it is not: plain HTTP
+    /// beyond loopback without `--insecure-http`.
+    pub fn refused(&self, addr: &SocketAddr) -> Option<String> {
+        (self.tls.is_none() && !addr.ip().is_loopback() && !self.insecure_http).then(|| {
+            format!(
+                "Not listening on {addr}: plain HTTP there would carry the password and the session readable \
+                 across the network. Give --tls-cert and --tls-key (HTTPS), or --insecure-http to accept that."
+            )
+        })
     }
 
     pub fn web_dir(&self) -> &Path {
@@ -243,10 +260,16 @@ pub async fn run(opts: Options, svc: Service) -> anyhow::Result<()> {
         }
     }
     control::spawn(ctx.clone());
-    let app = http::router(ctx.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    let app = http::router(ctx.clone());
     let mut servers = Vec::new();
     for &addr in &opts.listen {
-        let (app, secure) = (app.clone(), opts.secure());
+        if let Some(why) = opts.refused(&addr) {
+            log::error!("{why}");
+            println!("{why}");
+            continue;
+        }
+        let (app, tls) = (app.clone(), opts.tls.clone());
+        let scheme = if tls.is_some() { "https" } else { "http" };
         // One address that cannot be had (not up yet, taken) never stops the
         // server, the other addresses or the core: it is tried again.
         servers.push(tokio::spawn(async move {
@@ -265,16 +288,19 @@ pub async fn run(opts: Options, svc: Service) -> anyhow::Result<()> {
                 }
             };
             let local = listener.local_addr().unwrap_or(addr);
-            log::warn!("listening on http://{local}");
-            println!("Kairo is at http://{}", display_addr(local));
-            if !addr.ip().is_loopback() && !secure {
+            log::warn!("listening on {scheme}://{local}");
+            println!("Kairo is at {scheme}://{}", display_addr(local));
+            if !addr.ip().is_loopback() && tls.is_none() {
                 println!(
-                    "Plain HTTP on the network: the password and the session cross it readable. \
-                     Reach it through HTTPS (tailscale serve, or a proxy with --public-url) or an SSH tunnel."
+                    "Plain HTTP on the network (--insecure-http): the password and the session cross it readable."
                 );
             }
-            if let Err(e) = axum::serve(listener, app).await {
-                log::error!("the listener on {addr} stopped: {e}");
+            match tls {
+                Some(config) => match tls::TlsListener::new(listener, config) {
+                    Ok(l) => serve::serve(l, app).await,
+                    Err(e) => log::error!("the listener on {addr} stopped: {e}"),
+                },
+                None => serve::serve(listener, app).await,
             }
         }));
     }

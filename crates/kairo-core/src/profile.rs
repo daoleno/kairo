@@ -227,6 +227,101 @@ pub const PRIVATE_FAILED: &str = "No subscription could be read from that addres
 /// The largest subscription read.
 pub const MAX_SUBSCRIPTION: usize = 16 * 1024 * 1024;
 
+/// The most subscriptions Kairo keeps.
+pub const MAX_PROFILES: usize = 100;
+
+/// The most nodes (each scalar, list and mapping, aliases counted as what
+/// they stand for) a config may unfold to. A large real subscription has a
+/// few hundred thousand.
+pub const MAX_YAML_NODES: usize = 5_000_000;
+
+/// Whether `text` unfolds within [`MAX_YAML_NODES`]. A few aliases of a big
+/// anchor (`*a` a million times) would otherwise fill memory: serde_yaml
+/// bounds alias jumps by the text's own size, not what they unfold to. This
+/// walks the unfolded document once, counting, and stops at the limit,
+/// building nothing.
+pub fn check_yaml_size(text: &str) -> Result<(), String> {
+    use serde::de::{DeserializeSeed, Deserializer, EnumAccess, Error, MapAccess, SeqAccess, VariantAccess, Visitor};
+    use std::cell::Cell;
+
+    const TOO_BIG: &str = "the YAML unfolds too far (its aliases repeat too much)";
+
+    #[derive(Clone, Copy)]
+    struct Count<'a>(&'a Cell<usize>);
+
+    impl Count<'_> {
+        fn one<E: Error>(self) -> Result<(), E> {
+            let n = self.0.get() + 1;
+            self.0.set(n);
+            if n > MAX_YAML_NODES { Err(E::custom(TOO_BIG)) } else { Ok(()) }
+        }
+    }
+
+    impl<'de> DeserializeSeed<'de> for Count<'_> {
+        type Value = ();
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+            d.deserialize_any(self)
+        }
+    }
+
+    impl<'de> Visitor<'de> for Count<'_> {
+        type Value = ();
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("any YAML")
+        }
+        fn visit_bool<E: Error>(self, _: bool) -> Result<(), E> {
+            self.one()
+        }
+        fn visit_i64<E: Error>(self, _: i64) -> Result<(), E> {
+            self.one()
+        }
+        fn visit_u64<E: Error>(self, _: u64) -> Result<(), E> {
+            self.one()
+        }
+        fn visit_f64<E: Error>(self, _: f64) -> Result<(), E> {
+            self.one()
+        }
+        fn visit_str<E: Error>(self, _: &str) -> Result<(), E> {
+            self.one()
+        }
+        fn visit_unit<E: Error>(self) -> Result<(), E> {
+            self.one()
+        }
+        fn visit_none<E: Error>(self) -> Result<(), E> {
+            self.one()
+        }
+        fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+            self.deserialize(d)
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+            self.one()?;
+            while seq.next_element_seed(self)?.is_some() {}
+            Ok(())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+            self.one()?;
+            while map.next_key_seed(self)?.is_some() {
+                map.next_value_seed(self)?;
+            }
+            Ok(())
+        }
+        fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> Result<(), A::Error> {
+            // A tagged value (`!tag x`): the tag, then what it tags.
+            let ((), variant) = data.variant_seed(self)?;
+            variant.newtype_variant_seed(self)
+        }
+    }
+
+    let counted = Cell::new(0);
+    for doc in serde_yaml::Deserializer::from_str(text) {
+        Count(&counted).deserialize(doc).map_err(|e| {
+            let s = e.to_string();
+            if s.contains(TOO_BIG) { TOO_BIG.to_owned() } else { s }
+        })?;
+    }
+    Ok(())
+}
+
 /// Redirects followed, each checked.
 #[cfg(feature = "engine")]
 const MAX_REDIRECTS: usize = 10;
@@ -268,6 +363,11 @@ pub fn inspect(text: &str) -> Result<ConfigStats, ProfileError> {
     }
     if looks_like_html(trimmed) {
         return Err(ProfileError::Notice(notice_of(&strip_tags(trimmed))));
+    }
+    if let Err(e) = check_yaml_size(trimmed)
+        && e.contains("unfolds too far")
+    {
+        return Err(ProfileError::Yaml(e));
     }
     let value: serde_yaml::Value = match serde_yaml::from_str(trimmed) {
         Ok(v) => v,

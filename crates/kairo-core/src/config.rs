@@ -31,11 +31,14 @@ pub enum ConfigError {
     Io(#[from] std::io::Error),
 }
 
+use crate::profile::check_yaml_size;
+
 /// Parses YAML text into a mapping (an empty text is an empty mapping).
 pub fn parse_mapping(text: &str) -> Result<Mapping, String> {
     if text.trim().is_empty() {
         return Ok(Mapping::new());
     }
+    check_yaml_size(text)?;
     match serde_yaml::from_str::<Value>(text).map_err(|e| e.to_string())? {
         Value::Mapping(m) => Ok(m),
         Value::Null => Ok(Mapping::new()),
@@ -749,6 +752,28 @@ pub fn explain(output: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_yaml_whose_aliases_unfold_too_far_is_refused_without_unfolding_it() {
+        // One anchor of 2,000 items, aliased 5,000 times: under 50 KB of text,
+        // ten million nodes unfolded.
+        let mut text = String::from("big: &big [");
+        text.push_str(&vec!["x"; 2_000].join(","));
+        text.push_str("]\nmany:\n");
+        for _ in 0..5_000 {
+            text.push_str("  - *big\n");
+        }
+        assert!(text.len() < 50_000);
+        let started = std::time::Instant::now();
+        let e = parse_mapping(&text).unwrap_err();
+        assert!(e.contains("unfolds too far"), "{e}");
+        assert!(started.elapsed() < Duration::from_secs(10), "stopped at the limit");
+        assert!(matches!(crate::profile::inspect(&text), Err(crate::profile::ProfileError::Yaml(e)) if e.contains("unfolds too far")));
+        // Aliases as configs use them pass.
+        let normal = "base: &b {type: ss, port: 1}\nproxies:\n  - {<<: *b, name: a}\n  - {<<: *b, name: c}\n";
+        assert!(parse_mapping(normal).is_ok());
+        assert!(check_yaml_size(PROFILE).is_ok());
+    }
 
     #[test]
     fn provider_links_are_found_for_redaction() {

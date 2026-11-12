@@ -81,6 +81,11 @@ Download the latest release from [Releases](https://github.com/daoleno/kairo/rel
 - **Debian / Ubuntu 24.04+**: `sudo apt install ./kairo_<version>_amd64.deb` (or `_arm64`).
 - **Other Linux** (GTK 4.14+, libadwaita 1.5+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
   to `~/.local`; `./install.sh /usr/local` installs system-wide with sudo.
+- **A Linux machine with no screen** (x86_64, arm64): unpack `Kairo-server-<version>-linux-<arch>.tar.gz` and
+  run `./install.sh`. It installs `kairo-server` and a user service; the UI is a page behind a password, at
+  `http://kairo.localhost:7979` on that machine. Other devices need HTTPS (`--tls-cert`/`--tls-key`, or a proxy
+  or Tailscale in front); plain HTTP beyond loopback opens only with `--insecure-http`. Read
+  [SECURITY-NOTES](crates/kairo-server/SECURITY-NOTES.md) before opening it to the network.
 
 Check downloads against `SHA256SUMS` in the release. After that, Kairo updates itself.
 

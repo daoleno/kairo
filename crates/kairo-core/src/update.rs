@@ -98,6 +98,9 @@ pub struct Manifest {
     pub version: String,
     /// Package kind (see [`Install::package_key`]) → file.
     pub packages: std::collections::BTreeMap<String, Package>,
+    /// Until when it offers its version (unix seconds; see [`check_fresh`]).
+    #[serde(default)]
+    pub expires: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -143,6 +146,9 @@ impl Install {
     }
 
     pub fn detect_for(exe: &Path, dpkg_list: &Path) -> Install {
+        // A program whose file was replaced while it ran (`… (deleted)`) is
+        // still the program of that path.
+        let exe = &crate::paths::without_deleted(exe.to_path_buf());
         // The server is its own package (bin/kairo-server and its page): never
         // replaced by the desktop app's.
         if exe.file_stem().is_some_and(|n| n == "kairo-server") {
@@ -264,6 +270,23 @@ pub enum VerifyError {
     Manifest(String),
     #[error("The download's checksum does not match ({0})")]
     Checksum(String),
+    /// A signed manifest past its date (or with none) offers nothing: an old
+    /// one, replayed, would hold this copy at a release that is not the latest.
+    #[error("The update manifest has expired: no update is offered")]
+    Expired,
+}
+
+/// Whether `manifest` may offer an update to `current` at `now` (unix
+/// seconds): one offering a newer version must say until when it stands
+/// (`expires`, which the release sets a year ahead), and that is not past.
+pub fn check_fresh(manifest: &Manifest, current: &str, now: i64) -> Result<(), VerifyError> {
+    if !is_newer(&manifest.version, current) {
+        return Ok(());
+    }
+    match manifest.expires {
+        Some(until) if until > now => Ok(()),
+        _ => Err(VerifyError::Expired),
+    }
 }
 
 /// Checks the manifest's signature (hex in `.sig`) and reads it.
@@ -657,7 +680,9 @@ async fn fetch_manifest(proxy: Option<&str>) -> Result<Manifest, Fetch> {
     let sig = get(&format!("{base}/{MANIFEST}.sig"), proxy, |_, _| {})
         .await
         .map_err(Fetch::Network)?;
-    verify_manifest(&bytes, &String::from_utf8_lossy(&sig)).map_err(|e| Fetch::Fatal(e.to_string()))
+    let manifest = verify_manifest(&bytes, &String::from_utf8_lossy(&sig)).map_err(|e| Fetch::Fatal(e.to_string()))?;
+    check_fresh(&manifest, VERSION, crate::unix()).map_err(|e| Fetch::Fatal(e.to_string()))?;
+    Ok(manifest)
 }
 
 /// Downloads the update on offer ([`UpdateStatus::Available`]): fetches the
@@ -988,8 +1013,15 @@ fn install_server(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
             }
         }
     }
+    // Every file replaced is kept aside until all of it is in: a failure half
+    // way puts the old core, docs and page back, so the old server (which
+    // runs on) never meets a new core.
+    let mut kept = Kept::default();
     for rel in &files {
-        replace_file(&top.join(rel), &prefix.join(rel))?;
+        if let Err(e) = kept.replace(&top.join(rel), &prefix.join(rel)) {
+            kept.undo();
+            return Err(e);
+        }
     }
     // The page: copied beside the old one (the work folder may be on another
     // file system), then swapped by renames.
@@ -998,17 +1030,85 @@ fn install_server(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
     let old = prefix.join("share/kairo-server/.web-old");
     let _ = std::fs::remove_dir_all(&next);
     let _ = std::fs::remove_dir_all(&old);
-    copy_dir(&top.join("share/kairo-server/web"), &next).map_err(|e| format!("The page: {e}"))?;
-    if web.exists() {
-        std::fs::rename(&web, &old).map_err(|e| format!("The page: {e}"))?;
+    let page = (|| {
+        copy_dir(&top.join("share/kairo-server/web"), &next).map_err(|e| format!("The page: {e}"))?;
+        if web.exists() {
+            std::fs::rename(&web, &old).map_err(|e| format!("The page: {e}"))?;
+        }
+        if let Err(e) = std::fs::rename(&next, &web) {
+            let _ = std::fs::rename(&old, &web);
+            return Err(format!("The page: {e}"));
+        }
+        Ok(())
+    })();
+    if let Err(e) = page {
+        let _ = std::fs::remove_dir_all(&next);
+        kept.undo();
+        return Err(e);
     }
-    if let Err(e) = std::fs::rename(&next, &web) {
-        let _ = std::fs::rename(&old, &web);
-        return Err(format!("The page: {e}"));
+    if let Err(e) = kept.replace(&top.join("bin/kairo-server"), &prefix.join("bin/kairo-server")) {
+        // The old page back too.
+        if old.exists() {
+            let _ = std::fs::rename(&web, &next);
+            let _ = std::fs::rename(&old, &web);
+            let _ = std::fs::remove_dir_all(&next);
+        }
+        kept.undo();
+        return Err(e);
     }
     let _ = std::fs::remove_dir_all(&old);
-    replace_file(&top.join("bin/kairo-server"), &prefix.join("bin/kairo-server"))?;
+    kept.done();
     Ok(prefix.join("bin/kairo-server"))
+}
+
+/// Files replaced, each with the old one kept aside (renamed: a running
+/// program's file stays as it is), until [`Kept::done`] or [`Kept::undo`].
+#[derive(Default)]
+struct Kept {
+    replaced: Vec<(PathBuf, Option<PathBuf>)>,
+}
+
+impl Kept {
+    fn replace(&mut self, from: &Path, to: &Path) -> Result<(), String> {
+        let aside = to.with_file_name(format!(
+            ".{}.kairo-old",
+            to.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+        ));
+        let had = to.is_file();
+        if had {
+            std::fs::rename(to, &aside).map_err(|e| format!("{}: {e}", to.display()))?;
+        }
+        if let Err(e) = replace_file(from, to) {
+            if had {
+                let _ = std::fs::rename(&aside, to);
+            }
+            return Err(e);
+        }
+        self.replaced.push((to.to_path_buf(), had.then_some(aside)));
+        Ok(())
+    }
+
+    /// Puts every old file back (the newest replaced first).
+    fn undo(&mut self) {
+        for (to, aside) in self.replaced.drain(..).rev() {
+            match aside {
+                Some(old) => {
+                    let _ = std::fs::rename(old, &to);
+                }
+                None => {
+                    let _ = std::fs::remove_file(&to);
+                }
+            }
+        }
+    }
+
+    fn done(&mut self) {
+        for (_, aside) in self.replaced.drain(..) {
+            if let Some(old) = aside {
+                let _ = std::fs::remove_file(old);
+            }
+        }
+    }
 }
 
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -1446,7 +1546,25 @@ mod tests {
         Manifest {
             version: version.into(),
             packages: Default::default(),
+            expires: None,
         }
+    }
+
+    #[test]
+    fn an_old_signed_manifest_offers_nothing() {
+        let now = 1_800_000_000;
+        let fresh = Manifest { expires: Some(now + 86_400), ..manifest("0.9.0") };
+        assert_eq!(check_fresh(&fresh, "0.3.2", now), Ok(()));
+        // Replayed after its date, or one with no date: no update.
+        let stale = Manifest { expires: Some(now - 1), ..manifest("0.9.0") };
+        assert_eq!(check_fresh(&stale, "0.3.2", now), Err(VerifyError::Expired));
+        assert_eq!(check_fresh(&manifest("0.9.0"), "0.3.2", now), Err(VerifyError::Expired));
+        // Not newer than this copy: nothing is offered anyway, nothing to refuse.
+        assert_eq!(check_fresh(&manifest("0.3.2"), "0.3.2", now), Ok(()));
+        // The release writes the date in the signed bytes.
+        let json = r#"{"version":"0.9.0","packages":{},"expires":1900000000}"#;
+        let m: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.expires, Some(1_900_000_000));
     }
 
     fn pkg() -> Package {
@@ -1735,6 +1853,43 @@ mod tests {
         let gz = tar.into_inner().unwrap().finish().unwrap();
         assert!(install_server(&prefix, &gz, &dir.path().join("work2")).is_err());
         assert_eq!(read("bin/kairo-server"), "new");
+
+        // Replaced while it ran: Linux names the program `… (deleted)`. It is
+        // still the server (not the desktop app's prefix, whose package would
+        // be put in its place).
+        let deleted = PathBuf::from(format!("{} (deleted)", prefix.join("bin/kairo-server").display()));
+        assert_eq!(Install::detect_for(&deleted, &none), Install::Server { prefix: prefix.clone() });
+
+        // A failure half way (the server's own file cannot be replaced: a
+        // folder stands in its way) leaves the core, the docs and the page
+        // as they were, for the old server that runs on.
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for (f, body) in [
+            ("K/bin/kairo-server", "newer"),
+            ("K/lib/kairo/mihomo", "newer core"),
+            ("K/lib/kairo/extra", "a file the old one did not have"),
+            ("K/share/kairo-server/web/index.html", "newer page"),
+        ] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64);
+            h.set_mode(0o755);
+            h.set_cksum();
+            tar.append_data(&mut h, f, body.as_bytes()).unwrap();
+        }
+        let gz = tar.into_inner().unwrap().finish().unwrap();
+        std::fs::remove_file(prefix.join("bin/kairo-server")).unwrap();
+        std::fs::create_dir_all(prefix.join("bin/kairo-server/in-the-way")).unwrap();
+        assert!(install_server(&prefix, &gz, &dir.path().join("work3")).is_err());
+        assert_eq!(read("lib/kairo/mihomo"), "new core", "the old core is back");
+        assert!(!prefix.join("lib/kairo/extra").exists(), "nothing new is left");
+        assert_eq!(read("share/kairo-server/web/index.html"), "new page", "the old page is back");
+        let leftovers: Vec<_> = std::fs::read_dir(prefix.join("lib/kairo"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
     #[cfg(target_os = "linux")]

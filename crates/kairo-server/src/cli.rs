@@ -18,7 +18,11 @@ Usage:
 
 Options of serve:
   --listen ADDR      Where to listen (default 127.0.0.1:7979). Repeat for more.
-                     0.0.0.0:7979 opens it to the network: use HTTPS (see the guide).
+                     An address beyond loopback needs HTTPS (--tls-cert, --tls-key)
+                     or --insecure-http; without either it is not opened.
+  --tls-cert FILE    HTTPS on every listener with this certificate chain (PEM) ...
+  --tls-key FILE     ... and its key (PEM). Read again when they change.
+  --insecure-http    Plain HTTP beyond loopback: the password crosses the network readable.
   --host NAME        A name browsers reach it by (beyond addresses, localhost, *.localhost
                      and this machine's name). Repeat for more.
   --public-url URL   Its address behind an HTTPS proxy (https://kairo.example.ts.net):
@@ -49,7 +53,8 @@ pub fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let home = std::env::var_os("KAIRO_HOME").map(PathBuf::from).unwrap_or_else(default_home);
     match args.first().map(String::as_str) {
-        None | Some("serve") | Some("--listen") | Some("--host") | Some("--public-url") | Some("--web") => {
+        None | Some("serve") | Some("--listen") | Some("--host") | Some("--public-url") | Some("--web")
+        | Some("--tls-cert") | Some("--tls-key") | Some("--insecure-http") => {
             let rest = if args.first().map(String::as_str) == Some("serve") { &args[1..] } else { &args[..] };
             serve(home, rest)
         }
@@ -68,7 +73,10 @@ fn serve(home: PathBuf, args: &[String]) {
         web: web_default(),
         hosts: Vec::new(),
         public_url: None,
+        tls: None,
+        insecure_http: false,
     };
+    let (mut cert, mut key) = (None::<PathBuf>, None::<PathBuf>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().cloned().unwrap_or_else(|| fail(format!("{a} needs a value")));
@@ -88,8 +96,18 @@ fn serve(home: PathBuf, args: &[String]) {
                 opts.public_url = Some(u);
             }
             "--web" => opts.web = PathBuf::from(value()),
+            "--tls-cert" => cert = Some(PathBuf::from(value())),
+            "--tls-key" => key = Some(PathBuf::from(value())),
+            "--insecure-http" => opts.insecure_http = true,
             other => fail(format!("unknown option {other:?}; see kairo-server help")),
         }
+    }
+    match (cert, key) {
+        (Some(c), Some(k)) => {
+            opts.tls = Some(kairo_server::tls::config(&c, &k).unwrap_or_else(|e| fail(format!("HTTPS: {e}"))));
+        }
+        (None, None) => {}
+        _ => fail("--tls-cert and --tls-key go together"),
     }
     if opts.listen.is_empty() {
         opts.listen.push(SocketAddr::from(([127, 0, 0, 1], PORT)));
@@ -168,7 +186,10 @@ fn status(home: PathBuf, as_json: bool) {
             let line = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").to_owned();
             println!("Kairo is running ({})", line("version"));
             for a in s.get("listen").and_then(|v| v.as_array()).into_iter().flatten() {
-                println!("  Page:        http://{}", a.as_str().unwrap_or_default());
+                let scheme = if s["https"].as_bool() == Some(true) { "https" } else { "http" };
+                let refused = s["refused"].as_array().is_some_and(|r| r.contains(a));
+                let note = if refused { "  (not opened: plain HTTP beyond loopback)" } else { "" };
+                println!("  Page:        {scheme}://{}{note}", a.as_str().unwrap_or_default());
             }
             if let Some(u) = s.get("public_url").and_then(|v| v.as_str()) {
                 println!("  Public:      {u}");
