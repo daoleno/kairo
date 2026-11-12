@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "engine")]
 use crate::paths::{Paths, write_atomic};
 
 /// How the app looks.
@@ -171,6 +172,7 @@ impl Default for Settings {
 
 /// Whether something listens on a local port. A connect, not only a bind: on
 /// macOS a bind to 127.0.0.1 can succeed beside a wildcard listener.
+#[cfg(feature = "engine")]
 pub fn port_in_use(port: u16) -> bool {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
@@ -178,6 +180,7 @@ pub fn port_in_use(port: u16) -> bool {
 }
 
 /// `start` if it is free, else the next free port after it (not in `taken`).
+#[cfg(feature = "engine")]
 pub fn free_port(start: u16, taken: &[u16]) -> u16 {
     (start..start.saturating_add(200))
         .find(|p| !taken.contains(p) && !port_in_use(*p))
@@ -203,6 +206,7 @@ impl Settings {
     /// Reads the settings, or the defaults (with a new secret) when there are none.
     /// On the first run the ports are the defaults or, when another program
     /// (another Clash client) holds those, the next free ones.
+    #[cfg(feature = "engine")]
     pub fn load(paths: &Paths) -> Settings {
         let first_run = !paths.settings().exists();
         let bytes = std::fs::read(paths.settings()).ok();
@@ -242,6 +246,7 @@ impl Settings {
         settings
     }
 
+    #[cfg(feature = "engine")]
     pub fn save(&self, paths: &Paths) -> std::io::Result<()> {
         let bytes = serde_json::to_vec_pretty(self).expect("settings serialize");
         write_atomic(&paths.settings(), &bytes)
@@ -268,6 +273,7 @@ impl Settings {
 }
 
 /// A random controller secret.
+#[cfg(feature = "engine")]
 pub fn new_secret() -> String {
     use rand::Rng;
     let bytes: [u8; 16] = rand::rng().random();

@@ -2489,6 +2489,7 @@ dependencies = [
  "hex",
  "image",
  "jni",
+ "js-sys",
  "libc",
  "log",
  "rand 0.9.5",

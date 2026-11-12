@@ -11,8 +11,10 @@
 //! offered: Kairo does not edit dotfiles or the environment. When the mirror
 //! passes its test the person can copy the shell lines ([`mirror_env_lines`]).
 
+#[cfg(feature = "engine")]
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "engine")]
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +33,7 @@ pub const ORIGIN_URL: &str = "https://huggingface.co/gpt2/resolve/main/tokenizer
 pub const MIRROR_REFUSED: &str =
     "Test the mirror first: it can be turned on once it has answered through the Downloads exit";
 /// How much of it a test reads.
+#[cfg(feature = "engine")]
 const SAMPLE_BYTES: u64 = 512 * 1024;
 /// Less than this is no measurement of a download.
 const MIN_BYTES: u64 = 64 * 1024;
@@ -58,7 +61,7 @@ impl Default for DownloadsSettings {
 }
 
 /// How the mirror test stands.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum MirrorTest {
     #[default]
     Untested,
@@ -82,7 +85,7 @@ impl MirrorTest {
 }
 
 /// What the UI reads of the Downloads exit.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct DownloadsInfo {
     /// The group, once the config has it (empty while the AI layer is off).
     pub group: String,
@@ -156,6 +159,7 @@ pub fn judge(mirror: Result<Sample, String>, origin: Result<Sample, String>) -> 
 
 /// Downloads the start of `url` through the proxy on `port` (so the rules,
 /// and with them the Downloads exit, decide the way) and times it.
+#[cfg(feature = "engine")]
 pub async fn measure(port: u16, url: &str) -> Result<Sample, String> {
     let proxy =
         reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).map_err(|e| e.to_string())?;

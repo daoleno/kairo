@@ -21,10 +21,24 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
+#[cfg(feature = "engine")]
 use futures_util::StreamExt;
 use url::Url;
 
+#[cfg(feature = "engine")]
 pub mod apps;
+
+/// `Firefox`, `firefox-bin`, `chrome.exe` → `firefox`, `firefox`, `chrome`: a program's name as
+/// the matching reads it.
+pub fn program_name(name: &str) -> String {
+    let mut n = name.trim().to_lowercase();
+    for suffix in [".exe", ".app", "-bin", ".bin", "-desktop"] {
+        if let Some(s) = n.strip_suffix(suffix) {
+            n = s.to_owned();
+        }
+    }
+    n
+}
 
 /// The longest page read to look for the icon's address.
 pub const MAX_PAGE: usize = 256 * 1024;
@@ -238,6 +252,7 @@ pub fn allowed(url: &Url, policy: Policy) -> bool {
 
 /// The client for fetching: `proxy` is the core's mixed port while it runs (so the site's own
 /// route applies); without it the request goes out directly. Redirects are few and checked.
+#[cfg(feature = "engine")]
 pub fn client(proxy: Option<&str>, policy: Policy) -> Result<reqwest::Client, String> {
     let redirects = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= MAX_REDIRECTS {
@@ -261,6 +276,7 @@ pub fn client(proxy: Option<&str>, policy: Policy) -> Result<reqwest::Client, St
 }
 
 /// One GET, read to at most `limit` bytes: the final address and the body.
+#[cfg(feature = "engine")]
 async fn get_limited(
     client: &reqwest::Client,
     url: &Url,
@@ -407,6 +423,7 @@ fn attributes(tag: &str) -> Vec<(String, String)> {
 /// Looks at `bytes` and gives back a small PNG (any raster format, an `.ico` included, decoded
 /// with limits so a huge picture is refused rather than unpacked) or an SVG that has nothing
 /// active in it. Anything else is an error: the file is not a picture.
+#[cfg(feature = "engine")]
 pub fn normalize(bytes: &[u8]) -> Result<Icon, String> {
     if bytes.is_empty() {
         return Err("empty".into());
@@ -445,6 +462,7 @@ pub fn normalize(bytes: &[u8]) -> Result<Icon, String> {
 
 /// An SVG from the system's own icon theme or app: taken as it is (it is the person's own file,
 /// not something a site sent), within a size.
+#[cfg(feature = "engine")]
 pub fn trusted(bytes: &[u8]) -> Option<Icon> {
     if bytes.len() > MAX_ICON {
         return None;
@@ -458,6 +476,7 @@ pub fn trusted(bytes: &[u8]) -> Option<Icon> {
 
 /// The SVG in `bytes` if it is one and has nothing that runs or reaches out: no script, no event
 /// handler, no foreign object, no `<image>` or external reference, no entity.
+#[cfg(feature = "engine")]
 fn clean_svg(bytes: &[u8]) -> Option<String> {
     if bytes.len() > 100 * 1024 {
         return None;
@@ -489,6 +508,7 @@ fn clean_svg(bytes: &[u8]) -> Option<String> {
 
 /// The icon of a site: from its page's declaration, else `/favicon.ico`, over each of `origins`
 /// (`https://example.com`, then `http://example.com`) until one gives a picture.
+#[cfg(feature = "engine")]
 pub async fn fetch_site(
     client: &reqwest::Client,
     origins: &[String],

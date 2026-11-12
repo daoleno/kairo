@@ -1,42 +1,77 @@
-//! Kairo's engine, with no UI: it runs and supervises the mihomo core, keeps
+//! Kairo's model and engine, with no UI. Without the `engine` feature it is the
+//! model alone (what the UI shows, and the protocol of `kairo serve`). The engine: it runs and supervises the mihomo core, keeps
 //! profiles and settings, talks to the core's controller, and owns the system
 //! proxy and TUN. The NSH app and the tray are views over [`service::Service`].
 
-#[cfg(target_os = "android")]
-pub mod android;
+// The model: plain data and pure logic, on every target (the browser too).
 pub mod activity;
 pub mod ai;
 pub mod ai_check;
-pub mod autostart;
 pub mod bypass;
-pub mod config;
-pub mod controller;
-pub mod core_bin;
 pub mod downloads;
 pub mod geo;
 pub mod icons;
 pub mod model;
 pub mod paths;
 pub mod places;
-pub mod ports;
-pub mod procname;
 pub mod profile;
 pub mod routes;
-pub mod service;
 pub mod settings;
 pub mod stats;
-pub mod supervisor;
-pub mod sysproxy;
-pub mod elevated;
+pub mod time;
 pub mod tun;
+pub mod view;
+pub mod wire;
+
+// The engine: processes, sockets, files, the system proxy and TUN.
+#[cfg(all(feature = "engine", target_os = "android"))]
+pub mod android;
+#[cfg(feature = "engine")]
+pub mod autostart;
+#[cfg(feature = "engine")]
+pub mod config;
+#[cfg(feature = "engine")]
+pub mod controller;
+#[cfg(feature = "engine")]
+pub mod core_bin;
+#[cfg(feature = "engine")]
+pub mod elevated;
+#[cfg(feature = "engine")]
+pub mod ports;
+#[cfg(feature = "engine")]
+pub mod procname;
+#[cfg(feature = "engine")]
+pub mod service;
+#[cfg(feature = "engine")]
+pub mod supervisor;
+#[cfg(feature = "engine")]
+pub mod sysproxy;
+#[cfg(feature = "engine")]
 pub mod update;
-#[cfg(windows)]
+#[cfg(all(feature = "engine", windows))]
 pub mod winapi;
 
-pub use service::{CoreStatus, Live, Notice, Proxies, Service, State, Task};
+#[cfg(feature = "engine")]
+pub use service::Service;
 pub use settings::{LogLevel, Mode, Settings, Theme};
 pub use tokio;
-pub use update::UpdateStatus;
+pub use view::{CoreStatus, Live, Notice, Proxies, State, Task, UpdateStatus};
+
+/// Now, in seconds since the epoch: the system clock, or the page's in a
+/// browser (where `std`'s clock panics).
+pub fn unix() -> i64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0) as i64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+}
 
 /// Formats a byte count: `1.2 MB`.
 pub fn bytes(n: u64) -> String {

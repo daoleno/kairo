@@ -341,6 +341,7 @@ pub fn user_agent() -> String {
 }
 
 /// Downloads a subscription, through `proxy` (an `http://host:port` URL) when given.
+#[cfg(feature = "engine")]
 pub async fn download(url: &str, proxy: Option<&str>) -> Result<Download, ProfileError> {
     let mut builder = reqwest::Client::builder()
         .user_agent(user_agent())
@@ -388,6 +389,7 @@ pub async fn download(url: &str, proxy: Option<&str>) -> Result<Download, Profil
     })
 }
 
+#[cfg(feature = "engine")]
 fn short_error(e: &reqwest::Error) -> String {
     if e.is_timeout() {
         "timed out".into()
@@ -459,15 +461,13 @@ pub fn name_from_url(url: &str) -> String {
 }
 
 /// A new profile id.
+#[cfg(feature = "engine")]
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..12].to_owned()
 }
 
 pub fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    crate::unix()
 }
 
 /// Saves a profile's config text.

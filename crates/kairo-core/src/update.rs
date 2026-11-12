@@ -28,13 +28,17 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(feature = "engine")]
 use ed25519_dalek::{Signature, VerifyingKey};
+#[cfg(feature = "engine")]
 use futures_util::StreamExt;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "engine")]
 use crate::core_bin::is_newer;
 use crate::paths::write_atomic;
+#[cfg(feature = "engine")]
 use crate::service::Service;
 
 /// The release workflow's signing key (public half; the private half is the
@@ -86,41 +90,7 @@ const fn nibble(c: u8) -> u8 {
     }
 }
 
-/// What the updater is doing, for the UI.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum UpdateStatus {
-    #[default]
-    Idle,
-    Checking,
-    /// When the last check found nothing newer (`HH:MM`, local time).
-    UpToDate {
-        checked: String,
-    },
-    /// A newer Kairo exists (its manifest is signed and checked); nothing is
-    /// downloaded until [`Service::download_update`] is asked.
-    Available {
-        version: String,
-    },
-    Downloading {
-        version: String,
-        progress: Option<f32>,
-    },
-    /// Downloaded and verified: one tap installs it.
-    Ready {
-        version: String,
-    },
-    /// This installation cannot update itself: the release page.
-    Manual {
-        version: String,
-        url: String,
-    },
-    Installing {
-        version: String,
-    },
-    Failed {
-        message: String,
-    },
-}
+pub use crate::view::UpdateStatus;
 
 /// The signed manifest.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -333,6 +303,7 @@ fn file_url(version: &str, name: &str) -> String {
     }
 }
 
+#[cfg(feature = "engine")]
 fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
     let mut b = reqwest::Client::builder()
         .user_agent(concat!("Kairo/", env!("CARGO_PKG_VERSION")))
@@ -343,6 +314,7 @@ fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
     b.build().map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "engine")]
 async fn get(
     url: &str,
     proxy: Option<&str>,
@@ -424,6 +396,7 @@ fn shown_for_screenshots(value: &str) -> Option<UpdateStatus> {
 /// Starts the background checks (unless `KAIRO_NO_UPDATE` is set). A
 /// download left from an earlier run is offered again; one already
 /// installed is cleaned up.
+#[cfg(feature = "engine")]
 pub fn spawn_checks(svc: Service) {
     let dir = svc.paths().update_dir();
     match staged_info(&dir) {
@@ -1262,6 +1235,7 @@ mod tests {
     }
 
     use super::*;
+    #[cfg(feature = "engine")]
     use ed25519_dalek::{Signer, SigningKey};
 
     fn signed(key: &SigningKey, json: &str) -> String {
