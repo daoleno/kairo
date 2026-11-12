@@ -61,7 +61,8 @@ These notes say what it protects, how, and where each control is tested. Most co
      `nothing_opens_without_a_session_and_no_secret_travels_in_a_url`,
      `the_page_is_sent_with_its_protections`.
 5. **A signed-in page learns more than it shows.**
-   - Every message to a page passes through one redaction step (`redact.rs`). Subscription links become
+   - Every message to a page passes through one redaction step (`redact.rs`; what the core fetched for a provider:
+     item 17). Subscription links become
      `https://host/`, and the controller's secret becomes a placeholder.
    - Every string of every message is scrubbed of the links and the secret. That covers an error, a log line or
      a notice that quotes them, percent-encoded copies, and links a page sent that never became a subscription.
@@ -125,10 +126,24 @@ These notes say what it protects, how, and where each control is tested. Most co
       another device.
     - A listener's `rule:` runs a list of `sub-rules` in place of the rules, so each such list starts with the
       guard too.
-    - With TUN on as well, a local program's connection that TUN captured comes from TUN's address. If its name
-      resolves to loopback (only through the core's fake-IP DNS), it is refused.
-    - *Test:* `other_devices_never_reach_this_machines_loopback` (`tests/lan.rs`: rule, Direct and All Traffic;
-      a listener with its own proxy, one with its own rules; a port tunnel).
+    - With TUN on as well, a local program's connection that TUN captured comes from TUN's own address (the
+      fake-IP range's first address with a /30, 198.18.0.1/30 by default; `fdfe:dcba:9876::1/126`). It passes
+      the guard only when it is both: in through TUN (`IN-TYPE,TUN`) and from TUN's range. So a developer's
+      name that resolves to 127.0.0.1 works through TUN as it does without Kairo. With TUN off the generated
+      rules have no such exemption.
+    - Why a device on the network cannot use that exemption:
+      - TCP: with TUN up, TUN's range routes into the TUN device. A device that forges a source in it never gets
+        the answer to its SYN, so no connection is made.
+      - UDP: a datagram forged to the proxy's port comes in as SOCKS5, not TUN, and the guard refuses it. A
+        forged datagram could come in through TUN only if this machine forwarded it there, which needs IP
+        forwarding on and the device routing through this machine. Kairo does not turn forwarding on. Even then
+        it would go one way: the answers go back into TUN.
+    - *Tests:* `other_devices_never_reach_this_machines_loopback` (`tests/lan.rs`: rule, Direct and All Traffic;
+      a listener with its own proxy, one with its own rules; a port tunnel);
+      `with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_still_do_not` (`tests/lan.rs`, TUN and
+      other devices on in a namespace: a local program reaches a name resolving to 127.0.0.1, and every path
+      above is still refused to another device); `the_guard_lets_tuns_own_connections_through_only_while_tun_is_on`
+      (`config.rs`).
 11. **A signed-in page reads or maps services on this machine or its network** through the server's own
     fetches.
     - A subscription link is fetched with every redirect checked. Each hop must be http or https, and is
@@ -145,7 +160,7 @@ These notes say what it protects, how, and where each control is tested. Most co
     - The delay test of a node from a page uses the saved test address only. A page may save one only if it is
       http or https to a host whose every address is public. The address is checked when it is saved; the core
       resolves it again at each test. A group's own test address (from its config) is the config's: see
-      "The core's own fetches" below.
+      "The core's own fetches" below, and item 17.
     - *Tests:* `a_page_can_not_read_or_map_this_machines_services`, `a_page_can_not_point_the_delay_test_at_this_machine`,
       `a_subscription_that_leads_to_this_machine_tells_nothing_of_it` (`tests/lan.rs`: a public address's
       redirect, 17 MB with and without its length).
@@ -175,8 +190,8 @@ These notes say what it protects, how, and where each control is tested. Most co
     - This bounds what one client holds, not how many come: many addresses opening connections again and again
       can still keep the page from loading (see Availability).
     - *Tests:* `before_sign_in_the_page_files_stream_and_hold_no_one_up_for_ever`,
-      `with_a_certificate_every_page_is_https_and_its_cookie_secure` (64 silent handshakes). The 512 cap itself
-      has no test.
+      `with_a_certificate_every_page_is_https_and_its_cookie_secure` (64 silent handshakes),
+      `so_many_connections_at_once_and_no_more`.
 15. **A signed-in page fills the memory or the disk.**
     - A config is counted before it is parsed, with its aliases unfolded: more than 5,000,000 values is refused
       (a few aliases of a big anchor would otherwise unfold to gigabytes). Real subscriptions have a few hundred
@@ -194,6 +209,19 @@ These notes say what it protects, how, and where each control is tested. Most co
       server, so the update is the server's package, not the desktop app's.
     - *Tests:* `an_old_signed_manifest_offers_nothing`, `the_servers_tarball_replaces_the_server_and_its_page`
       (`update.rs`).
+17. **A signed-in page reads a service on this machine or its network through a provider.** A config's
+    `proxy-providers` and `rule-providers` may point anywhere, and the core quotes what it read when it cannot
+    use it. In mihomo 1.19.33 that is: every rule-set line that is not a domain, a rule or an IP range; a YAML
+    error's first characters; an HTTP status line; a `subscription-userinfo` header.
+    - The core's log lines and the errors of updating a provider reach a page with the provider's name and the
+      kind of error only (`fetched.rs`, where page-bound messages are built). The core's own log file,
+      `logs/core.log`, keeps every word for the owner.
+    - The rule-set lines do not name their provider in mihomo, and providers load at the same time, so those
+      lines say only what kind of line was skipped.
+    - Whether something answers there still shows: see "The core's own fetches" under Not covered.
+    - *Tests:* `a_config_can_not_read_this_machines_services_through_the_cores_own_fetches` (a real core: a
+      local HTML page and a text served to domain, classical and IP-range rule sets and a proxy provider, and
+      both updates); `the_lines_that_quote_what_was_fetched_say_only_what_kind_of_error` (`fetched.rs`).
 
 ## Where to listen, and TLS
 
@@ -233,19 +261,14 @@ These notes say what it protects, how, and where each control is tested. Most co
 - **Availability.** A signed-in person can stop the proxy. That is the point. Before sign-in, the limits of
   item 14 keep the server's memory and files bounded, but someone who keeps opening connections from many
   addresses can keep the page from loading for others while they do. The proxy itself is not affected.
-- **The core's own fetches (open).** Item 11 covers the server's own fetches only. The core fetches what a config
-  names by itself: `proxy-providers`, `rule-providers`, and the health checks of `url-test`/`fallback` groups.
-  A signed-in page can put such a config in place (an override, an imported file, a subscription from a server it
-  controls).
-  - Pointed at an address on this machine or its network, these show whether something answers there, as a
-    provider's error or a delay.
-  - A `rule-provider` in text format shows more: the core logs every line it cannot parse, at warning level, and
-    the page's Logs view shows that line. Tried against mihomo 1.19.33 in a namespace:
-    `skip invalid domain from rule provider: invalid domain "<html><body>Internal dashboard: …"` and
-    `parse classical rule [LINE-ONE-… is here] error`.
-  - A stolen session can therefore read a local text or HTML service line by line through a config. Closing this
-    needs the server to refuse configs whose providers point at this machine or its network, which would also
-    refuse a provider served from the owner's own network. It is a decision, not yet made.
+- **The core's own fetches: which ports answer.** Item 11 covers the server's own fetches. The core fetches what
+  a config names by itself: `proxy-providers`, `rule-providers`, and the health checks of `url-test`/`fallback`
+  groups. A signed-in page can put such a config in place (an override, an imported file, a subscription from a
+  server it controls), and a provider on the owner's own network is a normal setup, so such configs are not
+  refused.
+  - What the core read never reaches a page (item 17). What does reach it is whether something answers at an
+    address on this machine or its network: a provider's kind of error ("nothing answered", "the server answered
+    HTTP 404", "its content is not valid YAML") or a group's delay. This is accepted.
 - **What the sign-in page tells before sign-in.** Anyone who reaches it learns the machine's name, and whether a
   password is set yet (the page shows the name, and the setup form or the sign-in form). A signed-in page learns
   Kairo's folder, which names the account. These stay: the page shows all three.
@@ -270,3 +293,5 @@ These notes say what it protects, how, and where each control is tested. Most co
    listens on the network, that they do not know.
 6. `serve.rs` and `tls.rs`: what a client that has not signed in can hold open (an upgraded WebSocket gives its
    connection place back; it needs a session to upgrade), and `Options::refused` for an address it misjudges.
+7. `fetched.rs`: a line of the core's log, or an error, that quotes what a provider served in a form it does
+   not know (a core newer than 1.19.33 may word them differently: check them again when the core is updated).

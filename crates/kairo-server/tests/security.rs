@@ -29,9 +29,25 @@ struct Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        stop(&mut self.child);
     }
+}
+
+/// Stops a server as systemd does: TERM, so it stops its core too, then KILL
+/// if it is still there after 10 s. A KILL alone leaves its core running.
+fn stop(child: &mut std::process::Child) {
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGTERM);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// A scratch place: Kairo's folder in `home` (no subscription, no core, geo
@@ -176,8 +192,7 @@ fn exit_within(mut child: Child, limit: Duration) -> Option<(std::process::ExitS
             return Some((status, err));
         }
         if std::time::Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop(&mut child);
             return None;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -437,6 +452,108 @@ async fn a_subscription_link_and_the_controller_secret_never_reach_a_page() {
             assert!(!t.contains(leak), "{leak} went out in {t}");
         }
     }
+}
+
+#[tokio::test]
+async fn a_server_stopped_as_systemd_stops_it_leaves_no_core_behind() {
+    let dir = folder_with_core();
+    let server = start(dir.path(), &[]);
+    let cookie = server.set_up().await;
+    let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
+    let config = "proxies:\n  - {name: a, type: direct}\nrules:\n  - MATCH,a\n";
+    let r = call(&mut ws, 1, "add_yaml", json!({ "name": "c", "text": config })).await;
+    assert!(r.get("ok").is_some(), "{r}");
+    call(&mut ws, 2, "connect", json!({ "on": true })).await;
+    let pid_file = server.home.join("state/core.pid");
+    let mut core = None;
+    for _ in 0..100 {
+        core = std::fs::read_to_string(&pid_file).ok().and_then(|p| p.trim().parse::<u32>().ok()).filter(|p| *p > 0);
+        if core.is_some_and(|p| Path::new(&format!("/proc/{p}")).exists()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let core = core.expect("the core runs");
+    assert!(Path::new(&format!("/proc/{core}")).exists());
+    drop(ws);
+    drop(server);
+    let gone = |p: u32| {
+        std::fs::read_to_string(format!("/proc/{p}/stat"))
+            .map(|s| s.split_whitespace().nth(2) == Some("Z"))
+            .unwrap_or(true)
+    };
+    for _ in 0..50 {
+        if gone(core) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the core {core} outlived its server");
+}
+
+#[tokio::test]
+async fn so_many_connections_at_once_and_no_more() {
+    let dir = folder();
+    let server = start(dir.path(), &[]);
+    // Every place taken by a client that says nothing (each is let go after 20 s).
+    let mut silent = Vec::new();
+    for _ in 0..512 {
+        silent.push(tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap());
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let quick = reqwest::Client::builder().timeout(Duration::from_secs(3)).build().unwrap();
+    let r = quick.get(server.url("/api/session")).send().await;
+    assert!(r.is_err(), "a 513th connection was served at once: {r:?}");
+    // One place given back: the next one gets in.
+    silent.truncate(500);
+    let r = tokio::time::timeout(Duration::from_secs(10), reqwest::get(server.url("/api/session"))).await;
+    assert!(matches!(&r, Ok(Ok(r)) if r.status() == StatusCode::OK), "{r:?}");
+}
+
+#[tokio::test]
+async fn a_config_can_not_read_this_machines_services_through_the_cores_own_fetches() {
+    // A service on this machine that a page should never read: an HTML page,
+    // and a text whose lines are not rules.
+    let (port, _) = http_server(|path, _| match path {
+        "/dash" => Some(ok("text/html", b"<html><body>Internal dashboard: PROVIDER-SECRET-4242 key=abc</body></html>\n".to_vec())),
+        "/lines" => Some(ok("text/plain", b"LINE-ONE-SECRET-5151 is here\nLINE-TWO-SECRET-6262\n".to_vec())),
+        _ => None,
+    });
+    let config = format!(
+        "proxies:\n  - {{name: a, type: direct}}\nproxy-providers:\n  pp:\n    type: http\n    url: http://127.0.0.1:{port}/lines\n    path: ./p/pp.yaml\n    interval: 3600\nproxy-groups:\n  - {{name: G, type: select, proxies: [a], use: [pp]}}\nrule-providers:\n  dash:\n    {{type: http, behavior: domain, format: text, url: 'http://127.0.0.1:{port}/dash', path: ./r/dash.txt, interval: 3600}}\n  cls:\n    {{type: http, behavior: classical, format: text, url: 'http://127.0.0.1:{port}/lines', path: ./r/cls.txt, interval: 3600}}\n  cidr:\n    {{type: http, behavior: ipcidr, format: text, url: 'http://127.0.0.1:{port}/dash', path: ./r/cidr.txt, interval: 3600}}\nrules:\n  - RULE-SET,dash,G\n  - RULE-SET,cls,G\n  - RULE-SET,cidr,G\n  - MATCH,G\n"
+    );
+    let dir = folder_with_core();
+    let server = start(dir.path(), &[]);
+    let cookie = server.set_up().await;
+    let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
+    send(&mut ws, 1, "add_yaml", json!({ "name": "local", "text": config })).await;
+    send(&mut ws, 2, "connect", json!({ "on": true })).await;
+    let (mut all, _) = frames(&mut ws, Duration::from_secs(8)).await;
+    send(&mut ws, 3, "update_provider", json!({ "name": "pp" })).await;
+    send(&mut ws, 4, "update_rule_provider", json!({ "name": "cls" })).await;
+    let (more, _) = frames(&mut ws, Duration::from_secs(4)).await;
+    all.extend(more);
+    // The core read the service and said so, line by line, in its own log on disk.
+    let on_disk = std::fs::read_to_string(server.home.join("logs/core.log")).unwrap_or_default();
+    assert!(on_disk.contains("PROVIDER-SECRET-4242") && on_disk.contains("LINE-ONE-SECRET-5151"), "the core's log keeps it all: {on_disk}");
+    // Never what it read.
+    for leak in ["PROVIDER-SECRET", "SECRET-5151", "LINE-ON", "Internal dashboard", "LINE-TWO", "SECRET-6262"] {
+        for t in &all {
+            assert!(!t.contains(leak), "{leak} went out in {t}");
+        }
+    }
+    // But the page heard of it: which provider, what kind of error.
+    let logs: Vec<&String> = all.iter().filter(|t| t.starts_with("{\"t\":\"logs\"")).collect();
+    for said in ["a line that is not a domain", "a line that is not a rule", "a line that is not an IP range", "pp"] {
+        assert!(logs.iter().any(|t| t.contains(said)), "no log line saying {said:?}");
+    }
+    let reply = |id: u64| {
+        all.iter()
+            .filter_map(|t| serde_json::from_str::<Value>(t).ok())
+            .find(|v| v["t"] == "reply" && v["v"]["id"] == id)
+            .map(|v| v["v"].to_string())
+    };
+    assert!(reply(3).is_some_and(|r| r.contains("pp was not updated")), "{:?}", reply(3));
 }
 
 // --- Helpers for the tests below ------------------------------------------------------------

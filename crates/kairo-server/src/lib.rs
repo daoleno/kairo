@@ -20,6 +20,7 @@ pub mod control;
 pub mod dispatch;
 pub mod http;
 pub mod link;
+pub mod fetched;
 pub mod redact;
 pub mod serve;
 pub mod tls;

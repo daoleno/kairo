@@ -130,12 +130,27 @@ pub fn redact_state(state: &State) -> State {
     s
 }
 
-/// One message, ready to send: redacted and scrubbed.
+/// One message, ready to send: redacted and scrubbed, and the core's log
+/// lines without what it fetched for a provider ([`crate::fetched`]).
 pub fn encode(msg: &ServerMsg, secrets: &Secrets) -> String {
     let redacted;
     let msg = match msg {
         ServerMsg::State(s) => {
             redacted = ServerMsg::State(Box::new(redact_state(s)));
+            &redacted
+        }
+        ServerMsg::Logs { reset, lines, seq } if lines.iter().any(|l| crate::fetched::log_line(&l.payload).is_some()) => {
+            let lines = lines
+                .iter()
+                .map(|l| {
+                    let mut l = l.clone();
+                    if let Some(shown) = crate::fetched::log_line(&l.payload) {
+                        l.payload = shown;
+                    }
+                    l
+                })
+                .collect();
+            redacted = ServerMsg::Logs { reset: *reset, lines, seq: *seq };
             &redacted
         }
         other => other,

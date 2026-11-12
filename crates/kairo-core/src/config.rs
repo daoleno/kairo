@@ -319,6 +319,42 @@ fn drop_tun_listeners(config: &mut Mapping) {
 /// resolved for it.
 pub const LOOPBACK_GUARD: &str = "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((SRC-IP-CIDR,::1/128))),(OR,((DOMAIN,localhost),(DOMAIN-SUFFIX,localhost),(IP-CIDR,127.0.0.0/8),(IP-CIDR,0.0.0.0/8),(IP-CIDR6,::1/128),(IP-CIDR6,::/128)))),REJECT";
 
+/// [`LOOPBACK_GUARD`] while TUN is on: a connection TUN captured from this
+/// machine is local too. It comes in through TUN (`IN-TYPE,TUN`) from TUN's
+/// own addresses, which only this machine has: with TUN up those addresses
+/// route into the TUN device, so a device on the network that forged one
+/// would never get a TCP handshake's answer, and a datagram it forged to the
+/// proxy's port comes in as SOCKS, not TUN.
+pub fn loopback_guard_with_tun(tun_v4: &str, tun_v6: &str) -> String {
+    format!(
+        "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((SRC-IP-CIDR,::1/128))),(NOT,((AND,((IN-TYPE,TUN),(OR,((SRC-IP-CIDR,{tun_v4}),(SRC-IP-CIDR,{tun_v6}))))))),(OR,((DOMAIN,localhost),(DOMAIN-SUFFIX,localhost),(IP-CIDR,127.0.0.0/8),(IP-CIDR,0.0.0.0/8),(IP-CIDR6,::1/128),(IP-CIDR6,::/128)))),REJECT"
+    )
+}
+
+/// TUN's own addresses in `config` as mihomo 1.19.33 sets them: IPv4 is the
+/// fake-IP range's first address with a /30 (`tun.inet4-address` is not read),
+/// IPv6 `tun.inet6-address` or its default.
+fn tun_ranges(config: &Mapping) -> (String, String) {
+    let dns = config.get("dns").and_then(Value::as_mapping);
+    let v4 = dns
+        .and_then(|d| d.get("fake-ip-range"))
+        .and_then(Value::as_str)
+        .and_then(|r| r.split('/').next()?.trim().parse::<std::net::Ipv4Addr>().ok())
+        .unwrap_or(std::net::Ipv4Addr::new(198, 18, 0, 1));
+    let v6 = config
+        .get("tun")
+        .and_then(Value::as_mapping)
+        .and_then(|t| t.get("inet6-address"))
+        .and_then(|a| match a {
+            Value::Sequence(s) => s.first().and_then(Value::as_str).map(str::to_owned),
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .filter(|a| a.split('/').next().is_some_and(|h| h.trim().parse::<std::net::Ipv6Addr>().is_ok()))
+        .unwrap_or_else(|| "fdfe:dcba:9876::1/126".to_owned());
+    (format!("{v4}/30"), v6)
+}
+
 /// With other devices allowed, the core runs its `rule` mode always, so the
 /// [`LOOPBACK_GUARD`] comes before anything: mihomo's `direct` and `global`
 /// modes, and an inbound's own `proxy`, skip every rule. Direct is then
@@ -328,7 +364,14 @@ pub const LOOPBACK_GUARD: &str = "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((
 /// only, and every list of `sub-rules` (a listener's `rule:`) starts with the
 /// guard too.
 fn guard_loopback(config: &mut Mapping) {
-    let mut first: Vec<Value> = vec![LOOPBACK_GUARD.into()];
+    let tun_on = config.get("tun").and_then(Value::as_mapping).and_then(|t| t.get("enable")).and_then(Value::as_bool) == Some(true);
+    let guard: String = if tun_on {
+        let (v4, v6) = tun_ranges(config);
+        loopback_guard_with_tun(&v4, &v6)
+    } else {
+        LOOPBACK_GUARD.to_owned()
+    };
+    let mut first: Vec<Value> = vec![guard.clone().into()];
     if let Some(Value::Sequence(ls)) = config.get_mut("listeners") {
         for l in ls.iter_mut().filter_map(Value::as_mapping_mut) {
             let listen = l.get("listen").and_then(Value::as_str).unwrap_or("0.0.0.0").to_owned();
@@ -375,7 +418,7 @@ fn guard_loopback(config: &mut Mapping) {
     if let Some(Value::Mapping(subs)) = config.get_mut("sub-rules") {
         for list in subs.values_mut() {
             if let Value::Sequence(rules) = list {
-                rules.insert(0, LOOPBACK_GUARD.into());
+                rules.insert(0, guard.clone().into());
             }
         }
     }
@@ -895,6 +938,42 @@ rules:
             get(geox, "mmdb").as_str(),
             Some("https://example.com/x.metadb")
         );
+    }
+
+    #[test]
+    fn the_guard_lets_tuns_own_connections_through_only_while_tun_is_on() {
+        let guard_of = |profile: &str, s: &Settings| {
+            let m = parse_mapping(&build(profile, "listeners:\n  - {name: own, type: http, port: 17999, rule: r}\nsub-rules:\n  r:\n    - MATCH,DIRECT\n", s).unwrap()).unwrap();
+            let rules = get(&m, "rules").as_sequence().unwrap().clone();
+            let sub = get(get(&m, "sub-rules").as_mapping().unwrap(), "r").as_sequence().unwrap()[0].as_str().unwrap().to_owned();
+            (rules[0].as_str().unwrap().to_owned(), rules, sub)
+        };
+        let off = Settings { allow_lan: true, tun: false, ..Settings::default() };
+        let (first, rules, sub) = guard_of(PROFILE, &off);
+        assert_eq!(first, LOOPBACK_GUARD);
+        assert_eq!(sub, LOOPBACK_GUARD);
+        assert!(rules.iter().all(|r| !r.as_str().unwrap_or_default().contains("IN-TYPE,TUN")), "no exemption with TUN off");
+
+        let on = Settings { allow_lan: true, tun: true, ..Settings::default() };
+        let (first, _, sub) = guard_of(PROFILE, &on);
+        assert_eq!(first, loopback_guard_with_tun("198.18.0.1/30", "fdfe:dcba:9876::1/126"));
+        assert_eq!(sub, first);
+        let balanced = |s: &str| {
+            s.chars().try_fold(0i32, |d, c| {
+                let d = d + (c == '(') as i32 - (c == ')') as i32;
+                (d >= 0).then_some(d)
+            }) == Some(0)
+        };
+        assert!(balanced(LOOPBACK_GUARD) && balanced(&first), "{first}");
+        // TUN's address follows the fake-IP range, as the core's does.
+        let own_range = PROFILE.replacen("dns:\n  enable: true\n", "dns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 10.200.0.1/16\n", 1);
+        assert_ne!(own_range, PROFILE);
+        let (first, _, _) = guard_of(&own_range, &on);
+        assert!(first.contains("(SRC-IP-CIDR,10.200.0.1/30)"), "{first}");
+        // Without other devices there is no guard at all.
+        let alone = Settings { allow_lan: false, tun: true, ..Settings::default() };
+        let m = parse_mapping(&build(PROFILE, "", &alone).unwrap()).unwrap();
+        assert!(get(&m, "rules").as_sequence().unwrap().iter().all(|r| !r.as_str().unwrap_or_default().contains("REJECT") || !r.as_str().unwrap_or_default().contains("127.0.0.0/8")));
     }
 
     #[test]
