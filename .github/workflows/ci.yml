@@ -30,7 +30,7 @@ jobs:
           echo "KAIRO_TEST_CORE=$RUNNER_TEMP/core/mihomo" >> "$GITHUB_ENV"
       - name: Unit and e2e tests (a real core on free ports)
         run: cargo test --workspace
-      - name: TUN e2e in a user + network namespace
+      - name: TUN and "Allow other devices" e2e in a user + network namespace
         run: |
           # Ubuntu 24.04 confines unprivileged user namespaces by default.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -57,7 +57,11 @@ jobs:
           AR_wasm32_unknown_unknown: llvm-ar
           CC_wasm32_unknown_unknown: clang
         run: cargo check -p nsh-app-kairo --lib --target wasm32-unknown-unknown
-      - name: kairo-server's tests (auth, redaction, origins)
+      - name: The pinned mihomo core, for kairo-server's tests that run one
+        run: |
+          scripts/fetch-mihomo.sh linux-x86_64 "$RUNNER_TEMP/core"
+          echo "KAIRO_TEST_CORE=$RUNNER_TEMP/core/mihomo" >> "$GITHUB_ENV"
+      - name: kairo-server's tests (auth, redaction, origins, the page's commands)
         run: cargo test -p kairo-server
       - name: nsh and wasm-bindgen (the version Cargo.lock pins)
         run: |

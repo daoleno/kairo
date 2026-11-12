@@ -13,6 +13,30 @@ use crate::Ctx;
 use crate::auth::SessionKey;
 use crate::redact::{keep_hidden_settings, keep_hidden_url};
 
+/// A delay-test address a page may set: http or https, to a host whose
+/// every address is out on the internet (the core fetches it, from here;
+/// behind TUN's fake addresses, by the core's own DNS).
+pub async fn public_test_url(svc: &Service, url: &str) -> Result<(), String> {
+    const REFUSED: &str = "The delay test address must be http or https to a public host";
+    let u = url::Url::parse(url).map_err(|_| REFUSED.to_string())?;
+    if !matches!(u.scheme(), "http" | "https") || !u.username().is_empty() || u.password().is_some() {
+        return Err(REFUSED.into());
+    }
+    if let Some(url::Host::Domain(d)) = u.host()
+        && !d.contains('.')
+    {
+        return Err(REFUSED.into());
+    }
+    let (addrs, private) = svc.addresses_of(&u).await;
+    if addrs.is_empty() {
+        return Err("The delay test address does not resolve".into());
+    }
+    if private {
+        return Err(REFUSED.into());
+    }
+    Ok(())
+}
+
 fn json<T: Serialize>(r: Result<T, String>) -> Result<Value, String> {
     r.and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
 }
@@ -24,6 +48,13 @@ fn done() -> Result<Value, String> {
 /// Does `cmd` for the person signed in with `session`.
 pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value, String> {
     let svc = &ctx.svc;
+    // A subscription is named by its id, which the page only echoes: one it
+    // does not have is refused before anything touches a file.
+    if let Some(id) = profile_id_of(&cmd)
+        && !svc.snapshot().profiles.profiles.iter().any(|p| p.id == id)
+    {
+        return Err("There is no such subscription".into());
+    }
     match cmd {
         Command::Connect { on } => json(svc.connect(on).await),
         Command::StartCore => json(svc.start_core().await),
@@ -36,7 +67,11 @@ pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value,
         Command::SetLocation { name } => json(svc.set_location(name).await),
         Command::TestPlaces => json(svc.test_places().await),
         Command::UpdateSettings { settings } => {
-            let next = keep_hidden_settings(*settings, &svc.settings());
+            let current = svc.settings();
+            let next = keep_hidden_settings(*settings, &current);
+            if next.test_url != current.test_url {
+                public_test_url(svc, &next.test_url).await?;
+            }
             json(svc.update_settings(next).await)
         }
         Command::SetSystemProxy { on } => json(svc.set_system_proxy(on).await),
@@ -81,7 +116,9 @@ pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value,
         }
         Command::RefreshProxies => json(svc.refresh_proxies().await),
         Command::Select { group, name } => json(svc.select(group, name).await),
-        Command::TestNode { name, url } => json(svc.test_node(name, url).await),
+        // The saved test address only (checked when it was set): a page's
+        // own would have the core probe this machine's or the network's ports.
+        Command::TestNode { name, url: _ } => json(svc.test_node(name, None).await),
         Command::TestGroup { group } => json(svc.test_group(group).await),
         Command::UpdateProvider { name } => json(svc.update_provider(name).await),
         Command::HealthcheckProvider { name } => json(svc.healthcheck_provider(name).await),
@@ -146,6 +183,18 @@ pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value,
             ctx.auth.sign_out(session);
             done()
         }
+    }
+}
+
+/// The subscription a command names, if it names one.
+fn profile_id_of(cmd: &Command) -> Option<&str> {
+    match cmd {
+        Command::Activate { id }
+        | Command::DeleteProfile { id }
+        | Command::UpdateProfile { id }
+        | Command::RenameProfile { id, .. }
+        | Command::DismissFailure { id } => Some(id),
+        _ => None,
     }
 }
 

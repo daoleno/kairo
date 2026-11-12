@@ -69,8 +69,9 @@ try {
   fs.mkdirSync(home, { recursive: true });
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ testUrl: `http://127.0.0.1:${PORT + 3}/generate_204`, testTimeoutMs: 2000 }));
   server = await startServer();
-  const code = server.text().match(/Setup code: (\S+)/)[1];
-  check(!!code, 'the server printed a one-time setup code');
+  const code = fs.readFileSync(path.join(home, 'web/setup-code'), 'utf8').trim();
+  check(!!code, 'the server made a one-time setup code (kairo-server status shows it)');
+  check(!server.text().includes(code), 'the setup code is in no log or journal');
 
   browser = await chromium.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome-stable', headless: true, args: ['--no-sandbox'] });
   const frames = [];
@@ -182,7 +183,7 @@ try {
   server.s.kill('SIGTERM');
   await new Promise(r => server.s.on('exit', r));
   server = await startServer();
-  check(!/Setup code/.test(server.text()), 'after a restart no setup code: the password stands');
+  check(!fs.existsSync(path.join(home, 'web/setup-code')), 'after a restart no setup code: the password stands');
   await pa.reload();
   await pa.getByText('Connected', { exact: true }).first().waitFor({ timeout: 90000 });
   await shot(pa, '12-desktop-after-restart');

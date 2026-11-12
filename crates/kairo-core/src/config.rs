@@ -43,6 +43,23 @@ pub fn parse_mapping(text: &str) -> Result<Mapping, String> {
     }
 }
 
+/// The links of a config's `proxy-providers` and `rule-providers` (they
+/// often carry the account's token, as the subscription link does).
+pub fn provider_urls(text: &str) -> Vec<String> {
+    let Ok(config) = parse_mapping(text) else { return Vec::new() };
+    let mut urls = Vec::new();
+    for key in ["proxy-providers", "rule-providers"] {
+        if let Some(Value::Mapping(providers)) = config.get(key) {
+            for p in providers.values().filter_map(Value::as_mapping) {
+                if let Some(url) = p.get("url").and_then(Value::as_str).filter(|u| !u.is_empty()) {
+                    urls.push(url.to_owned());
+                }
+            }
+        }
+    }
+    urls
+}
+
 /// Merges `patch` into `base`: mappings merge key by key, anything else replaces.
 /// The `prepend-*` / `append-*` keys add to the named list instead.
 pub fn merge(base: &mut Mapping, patch: Mapping) {
@@ -172,6 +189,9 @@ pub fn build_full(
     if all_traffic && settings.ai.enabled && applied.as_ref().is_none_or(|a| a.main.is_none()) {
         set(&mut config, "mode", "global");
     }
+    if settings.allow_lan {
+        guard_loopback(&mut config);
+    }
     Ok(Built {
         text: serde_yaml::to_string(&Value::Mapping(config)).expect("yaml serialize"),
         applied,
@@ -197,9 +217,17 @@ fn port_of(addr: &str) -> Option<u16> {
     addr.rsplit(':').next()?.trim().parse().ok()
 }
 
-/// "Allow other devices on the network" off holds for the profile's own
-/// listeners too: its DNS server (`dns.listen`, often `0.0.0.0:1053`) and
-/// extra `listeners` answer on this machine only.
+/// Old single-purpose inbounds: each listens on every address whatever
+/// `allow-lan` says (mihomo 1.19.33, tried in a network namespace), and none
+/// takes a listen address of its own. `tcptun-config`/`udptun-config` are
+/// read by no current core; they go too.
+const LEGACY_INBOUNDS: [&str; 5] = ["ss-config", "vmess-config", "tuic-server", "tcptun-config", "udptun-config"];
+
+/// "Allow other devices on the network" off holds for every inbound of the
+/// config, the profile's or the override's: its DNS server (`dns.listen`,
+/// often `0.0.0.0:1053`), extra `listeners` and port `tunnels` answer on this
+/// machine only (each of them listens on every address otherwise, whatever
+/// `allow-lan` says), and the old inbounds that take no address go.
 fn keep_listeners_local(config: &mut Mapping) {
     if let Some(Value::Mapping(dns)) = config.get_mut("dns")
         && let Some(Value::String(listen)) = dns.get_mut("listen")
@@ -211,6 +239,140 @@ fn keep_listeners_local(config: &mut Mapping) {
             let listen = l.get("listen").and_then(Value::as_str).unwrap_or("0.0.0.0");
             if !is_loopback_host(listen) {
                 l.insert("listen".into(), "127.0.0.1".into());
+            }
+        }
+    }
+    if let Some(Value::Sequence(ts)) = config.get_mut("tunnels") {
+        for t in ts.iter_mut() {
+            tunnel_on_loopback(t);
+        }
+    }
+    for key in LEGACY_INBOUNDS {
+        if config.remove(key).is_some() {
+            log::warn!("the config's `{key}` listens on every address: left out (other devices are not allowed)");
+        }
+    }
+}
+
+/// A `tunnels` entry, "tcp/udp,0.0.0.0:6553,1.1.1.1:53,proxy" or
+/// `{network, address, target, proxy}`, on this machine only.
+fn tunnel_on_loopback(t: &mut Value) {
+    match t {
+        Value::String(line) => {
+            let mut parts: Vec<String> = line.split(',').map(|p| p.trim().to_owned()).collect();
+            if let Some(addr) = parts.get_mut(1) {
+                *addr = on_loopback(addr);
+            }
+            *line = parts.join(",");
+        }
+        Value::Mapping(m) => {
+            if let Some(Value::String(addr)) = m.get_mut("address") {
+                *addr = on_loopback(addr);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn tunnel_address(t: &Value) -> Option<String> {
+    match t {
+        Value::String(line) => line.split(',').nth(1).map(|a| a.trim().to_owned()),
+        Value::Mapping(m) => m.get("address").and_then(Value::as_str).map(str::to_owned),
+        _ => None,
+    }
+}
+
+fn tunnel_has_proxy(t: &Value) -> bool {
+    match t {
+        Value::String(line) => line.split(',').nth(3).is_some_and(|p| !p.trim().is_empty()),
+        Value::Mapping(m) => m.get("proxy").and_then(Value::as_str).is_some_and(|p| !p.is_empty()),
+        _ => false,
+    }
+}
+
+fn host_of(addr: &str) -> &str {
+    match addr.rfind(':') {
+        Some(i) => &addr[..i],
+        None => addr,
+    }
+}
+
+/// A TUN inbound of the config's own: it would take this machine's routes
+/// beside Kairo's TUN (or with no TUN on). Never kept.
+fn drop_tun_listeners(config: &mut Mapping) {
+    if let Some(Value::Sequence(ls)) = config.get_mut("listeners") {
+        let before = ls.len();
+        ls.retain(|l| !l.get("type").and_then(Value::as_str).is_some_and(|t| t.eq_ignore_ascii_case("tun")));
+        if ls.len() != before {
+            log::warn!("the config's `listeners` of type tun are left out: Kairo's TUN setting is the only one");
+        }
+    }
+}
+
+/// Connections from other devices to this machine's own loopback (127/8,
+/// ::1, 0.0.0.0, `localhost` names, and names that resolve there) are refused:
+/// "Allow other devices" opens the proxy, not this machine's local services.
+/// The source is checked first, so a local program's connection is never
+/// resolved for it.
+pub const LOOPBACK_GUARD: &str = "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((SRC-IP-CIDR,::1/128))),(OR,((DOMAIN,localhost),(DOMAIN-SUFFIX,localhost),(IP-CIDR,127.0.0.0/8),(IP-CIDR,0.0.0.0/8),(IP-CIDR6,::1/128),(IP-CIDR6,::/128)))),REJECT";
+
+/// With other devices allowed, the core runs its `rule` mode always, so the
+/// [`LOOPBACK_GUARD`] comes before anything: mihomo's `direct` and `global`
+/// modes, and an inbound's own `proxy`, skip every rule. Direct is then
+/// "everything DIRECT", All Traffic "everything through GLOBAL"; a listener
+/// on the network with a `proxy` of its own becomes an `IN-NAME` rule (the
+/// same route), a port tunnel on the network with one answers this machine
+/// only, and every list of `sub-rules` (a listener's `rule:`) starts with the
+/// guard too.
+fn guard_loopback(config: &mut Mapping) {
+    let mut first: Vec<Value> = vec![LOOPBACK_GUARD.into()];
+    if let Some(Value::Sequence(ls)) = config.get_mut("listeners") {
+        for l in ls.iter_mut().filter_map(Value::as_mapping_mut) {
+            let listen = l.get("listen").and_then(Value::as_str).unwrap_or("0.0.0.0").to_owned();
+            if is_loopback_host(&listen) {
+                continue;
+            }
+            let Some(proxy) = l.get("proxy").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_owned) else {
+                continue;
+            };
+            match l.get("name").and_then(Value::as_str).filter(|n| !n.is_empty() && !n.contains(',')) {
+                Some(name) => {
+                    first.push(format!("IN-NAME,{name},{proxy}").into());
+                    l.remove("proxy");
+                }
+                None => {
+                    l.insert("listen".into(), "127.0.0.1".into());
+                }
+            }
+        }
+    }
+    if let Some(Value::Sequence(ts)) = config.get_mut("tunnels") {
+        for t in ts.iter_mut() {
+            let on_network = tunnel_address(t).is_some_and(|a| !is_loopback_host(host_of(&a)));
+            if on_network && tunnel_has_proxy(t) {
+                log::warn!("a port tunnel with a proxy of its own skips the rules: it answers this machine only");
+                tunnel_on_loopback(t);
+            }
+        }
+    }
+    let mode = config.get("mode").and_then(Value::as_str).unwrap_or("rule").to_ascii_lowercase();
+    let rest: Vec<Value> = match mode.as_str() {
+        "direct" => vec!["MATCH,DIRECT".into()],
+        "global" => vec!["MATCH,GLOBAL".into()],
+        _ => match config.get("rules") {
+            Some(Value::Sequence(r)) => r.clone(),
+            _ => Vec::new(),
+        },
+    };
+    first.extend(rest);
+    set(config, "rules", Value::Sequence(first));
+    set(config, "mode", "rule");
+    // A listener's `rule: <name>` runs that list of `sub-rules` in place of
+    // the rules: the guard heads each of them too.
+    if let Some(Value::Mapping(subs)) = config.get_mut("sub-rules") {
+        for list in subs.values_mut() {
+            if let Value::Sequence(rules) = list {
+                rules.insert(0, LOOPBACK_GUARD.into());
             }
         }
     }
@@ -428,6 +590,7 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
         set(config, "find-process-mode", "always");
     }
     set(config, "allow-lan", s.allow_lan);
+    drop_tun_listeners(config);
     if s.allow_lan {
         set(config, "bind-address", "*");
     } else {
@@ -586,6 +749,15 @@ pub fn explain(output: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_links_are_found_for_redaction() {
+        let text = "proxy-providers:\n  a: {type: http, url: 'https://p.example/sub?token=AAA', path: a.yaml}\n  b: {type: file, path: b.yaml}\nrule-providers:\n  r: {type: http, url: 'https://r.example/x?k=BBB', behavior: domain, path: r.yaml}\n";
+        let mut urls = provider_urls(text);
+        urls.sort();
+        assert_eq!(urls, ["https://p.example/sub?token=AAA", "https://r.example/x?k=BBB"]);
+        assert!(provider_urls("not: [yaml").is_empty());
+    }
 
     #[test]
     fn without_the_network_the_profiles_own_listeners_answer_this_machine_only() {

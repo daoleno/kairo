@@ -310,6 +310,30 @@ impl Service {
         self.modify(|s| s.notice = Some(Notice { id, text, error }));
     }
 
+    /// Where `url` points, and whether that is this machine or its network
+    /// (see [`profile::addresses_of`]: behind TUN's fake addresses too).
+    pub async fn addresses_of(&self, url: &url::Url) -> (Vec<std::net::SocketAddr>, bool) {
+        let core = self.running().then(|| self.controller());
+        profile::addresses_of(url, core.as_ref()).await
+    }
+
+    /// Whether TUN is really up: the core runs, says its TUN is on, and (on
+    /// Linux) its device exists. Not the setting.
+    pub async fn tun_up(&self) -> bool {
+        if !self.running() {
+            return false;
+        }
+        let Ok(c) = self.controller().configs().await else { return false };
+        let Some(tun) = c.tun.filter(|t| t.enable) else { return false };
+        if cfg!(target_os = "linux") {
+            // This network namespace's links (/sys may be another's).
+            let links = std::fs::read_to_string("/proc/self/net/dev").unwrap_or_default();
+            return !tun.device.is_empty()
+                && links.lines().skip(2).any(|l| l.split(':').next().map(str::trim) == Some(tun.device.as_str()));
+        }
+        true
+    }
+
     fn controller(&self) -> Controller {
         let s = self.0.state.borrow();
         Controller::new(s.settings.controller_port, &s.settings.secret)
@@ -1124,7 +1148,9 @@ impl Service {
                 // "All Traffic" with the AI layer on is other rules, not the
                 // core's global mode: the config is rebuilt and reloaded
                 // (open connections stay on their route through a reload).
-                if before.ai.enabled && (before.mode == Mode::Global || mode == Mode::Global) {
+                // With other devices allowed the core stays in its rule mode
+                // (see `config::guard_loopback`): a mode is other rules too.
+                if before.allow_lan || (before.ai.enabled && (before.mode == Mode::Global || mode == Mode::Global)) {
                     svc.write_config(true).await?;
                 } else {
                     svc.controller()
@@ -1183,6 +1209,7 @@ impl Service {
                 || prev.core_path != next.core_path;
             let reload = prev.mixed_port != next.mixed_port
                 || prev.allow_lan != next.allow_lan
+                || prev.mode != next.mode
                 || prev.ipv6 != next.ipv6
                 || prev.log_level != next.log_level
                 || prev.tun != next.tun
@@ -1568,7 +1595,7 @@ impl Service {
                 return Err("Subscriptions use http or https".into());
             }
             let download = svc.download(&url).await?;
-            let stats = profile::inspect(&download.body).map_err(|e| e.to_string())?;
+            let stats = download.inspect().map_err(|e| e.to_string())?;
             let id = profile::new_id();
             profile::write_config(&svc.0.paths, &id, &download.body).map_err(|e| e.to_string())?;
             let profile = Profile {
@@ -1651,13 +1678,16 @@ impl Service {
     }
 
     async fn download(&self, url: &str) -> Result<profile::Download, String> {
-        match profile::download(url, None).await {
+        let core = self.running().then(|| self.controller());
+        match profile::download(url, None, core.as_ref()).await {
             Ok(d) => Ok(d),
+            // This machine or its network: never through the core.
+            Err(profile::ProfileError::Private) => Err(profile::ProfileError::Private.to_string()),
             Err(direct) => {
                 // Blocked directly? Try through the core when it runs.
                 if self.running() {
                     let proxy = format!("http://127.0.0.1:{}", self.settings().mixed_port);
-                    profile::download(url, Some(&proxy))
+                    profile::download(url, Some(&proxy), core.as_ref())
                         .await
                         .map_err(|e| e.to_string())
                 } else {
@@ -1680,7 +1710,7 @@ impl Service {
             svc.modify(|s| s.updating.insert(id.clone()));
             let result = async {
                 let d = svc.download(&url).await?;
-                let stats = profile::inspect(&d.body).map_err(|e| e.to_string())?;
+                let stats = d.inspect().map_err(|e| e.to_string())?;
                 profile::write_config(&svc.0.paths, &id, &d.body).map_err(|e| e.to_string())?;
                 Ok::<_, String>((d, stats))
             }
@@ -1764,6 +1794,9 @@ impl Service {
     }
 
     async fn activate_inner(&self, id: String) -> Result<(), String> {
+        if !self.0.state.borrow().profiles.profiles.iter().any(|p| p.id == id) {
+            return Err("There is no such subscription".into());
+        }
         let previous = self.0.state.borrow().profiles.active.clone();
         self.modify(|s| s.profiles.active = Some(id.clone()));
         let result = if self.running() {
@@ -1823,6 +1856,10 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             let was_active = svc.0.state.borrow().profiles.active.as_deref() == Some(id.as_str());
+            let known = svc.0.state.borrow().profiles.profiles.iter().any(|p| p.id == id);
+            if !known {
+                return Err("There is no such subscription".into());
+            }
             svc.modify(|s| {
                 s.profiles.profiles.retain(|p| p.id != id);
                 if was_active {
@@ -1830,8 +1867,14 @@ impl Service {
                 }
             });
             svc.save_profiles();
-            let _ = std::fs::remove_file(svc.0.paths.profile(&id));
-            let _ = std::fs::remove_file(svc.0.paths.override_file(&id));
+            // Only a subscription that exists, by an id Kairo made (`Paths`
+            // refuses anything else): never a file named by the caller.
+            if let (Ok(config), Ok(over)) = (svc.0.paths.profile(&id), svc.0.paths.override_file(&id))
+                && known
+            {
+                let _ = std::fs::remove_file(config);
+                let _ = std::fs::remove_file(over);
+            }
             // The last one gone: no exit pinned to its servers stays behind.
             if svc.0.state.borrow().profiles.profiles.is_empty() {
                 svc.modify(|s| {

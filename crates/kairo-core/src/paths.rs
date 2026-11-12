@@ -74,11 +74,18 @@ impl Paths {
     pub fn profiles_dir(&self) -> PathBuf {
         self.home.join("profiles")
     }
-    pub fn profile(&self, id: &str) -> PathBuf {
-        self.profiles_dir().join(format!("{id}.yaml"))
+    pub fn overrides_dir(&self) -> PathBuf {
+        self.home.join("overrides")
     }
-    pub fn override_file(&self, id: &str) -> PathBuf {
-        self.home.join("overrides").join(format!("{id}.yaml"))
+    /// A profile's config file. Only an id Kairo made (`profile::new_id`:
+    /// 12 hex digits) names one: anything else (a path, `../`) is refused,
+    /// whoever passes it.
+    pub fn profile(&self, id: &str) -> std::io::Result<PathBuf> {
+        Ok(self.profiles_dir().join(format!("{}.yaml", profile_id(id)?)))
+    }
+    /// A profile's override file (an id as for [`Paths::profile`]).
+    pub fn override_file(&self, id: &str) -> std::io::Result<PathBuf> {
+        Ok(self.home.join("overrides").join(format!("{}.yaml", profile_id(id)?)))
     }
     /// The pictures of apps and sites (`icons`).
     pub fn icons_dir(&self) -> PathBuf {
@@ -194,6 +201,15 @@ pub fn bundled_core_for(exe: &Path) -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
+/// `id` when it is a profile id as Kairo makes them (12 lower-case hex digits).
+pub fn profile_id(id: &str) -> std::io::Result<&str> {
+    if id.len() == 12 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        Ok(id)
+    } else {
+        Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a subscription of Kairo's"))
+    }
+}
+
 /// Writes `bytes` to `path` through a temporary file in the same directory, so a
 /// crash never leaves a half-written file behind. On Unix only the owner may
 /// read it: Kairo's files hold subscription links, node passwords, the
@@ -279,6 +295,23 @@ mod plain_tests {
     }
 }
 
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    #[test]
+    fn only_an_id_kairo_made_names_a_file() {
+        let paths = Paths { home: PathBuf::from("/k"), bundled_core: None };
+        assert_eq!(paths.profile("0123456789ab").unwrap(), PathBuf::from("/k/profiles/0123456789ab.yaml"));
+        assert_eq!(paths.override_file("0123456789ab").unwrap(), PathBuf::from("/k/overrides/0123456789ab.yaml"));
+        assert_eq!(profile_id(&crate::profile::new_id()).ok().map(str::len), Some(12));
+        for id in ["", "../settings", "../../etc/passwd", "/etc/passwd", "0123456789AB", "0123456789a", "0123456789abc", "01234567/9ab", "0123456789a\0", "..", "x"] {
+            assert!(paths.profile(id).is_err(), "{id:?}");
+            assert!(paths.override_file(id).is_err(), "{id:?}");
+        }
+    }
+}
+
 #[cfg(all(test, unix))]
 mod private_tests {
     use super::*;
@@ -295,7 +328,7 @@ mod private_tests {
         write_atomic(&paths.settings(), b"{\"secret\":\"s\"}").unwrap();
         assert_eq!(mode(&paths.settings()), 0o600);
         // An older Kairo's files, readable by everyone, and a core that must run.
-        let old = paths.profile("a");
+        let old = paths.profile("0123456789ab").unwrap();
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::write(&old, "proxies: []").unwrap();
         std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o644)).unwrap();

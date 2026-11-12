@@ -20,3 +20,16 @@ trap 'rm -f "$resolv"' EXIT
 echo "nameserver 203.0.113.53" > "$resolv"
 KAIRO_TEST_TUN=1 KAIRO_TEST_CORE="$KAIRO_TEST_CORE" unshare -rnm sh -c \
   'mount --bind "$1" /etc/resolv.conf && exec "$2" tun_in_a_network_namespace --nocapture' sh "$resolv" "$bin"
+
+# "Allow other devices" against the real core, and subscriptions that lead to
+# this machine: the namespace's loopback also carries 10.77.0.1 (another
+# device on the network), 10.77.0.2 (a server on it) and 203.0.113.5 (one out
+# on the internet, as Kairo counts it).
+lan=$(cargo test -p kairo-core --test lan --no-run --message-format=json 2>/dev/null \
+  | python3 -c 'import sys, json
+for line in sys.stdin:
+    m = json.loads(line)
+    if m.get("reason") == "compiler-artifact" and m.get("executable") and m["target"]["name"] == "lan":
+        print(m["executable"])')
+KAIRO_TEST_NETNS=1 KAIRO_TEST_CORE="$KAIRO_TEST_CORE" unshare -rn sh -c \
+  'ip link set lo up && ip addr add 10.77.0.1/32 dev lo && ip addr add 10.77.0.2/32 dev lo && ip addr add 203.0.113.5/32 dev lo && exec "$1" --test-threads=1 --nocapture' sh "$lan"

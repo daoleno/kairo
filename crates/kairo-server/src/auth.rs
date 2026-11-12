@@ -9,13 +9,15 @@
 //!   days from its last use, survives restarts, and ends when signed out,
 //!   revoked from another browser, or by `kairo-server password` (which
 //!   ends them all).
-//! - Tries are limited: per address, and in all ([`Limiter`]); a password
-//!   is checked one at a time (argon2 takes memory).
+//! - Tries are limited ([`Limiter`]): per address (IPv6 per /64), per
+//!   browser that signed in before (a device cookie, its SHA-256 kept in
+//!   `<home>/web/devices.json`), and everyone else together; a password is
+//!   checked one at a time (argon2 takes memory).
 //!
 //! `kairo-server password` and the server are two processes on one folder:
 //! the server reads the files again when they change.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -76,9 +78,37 @@ impl AuthError {
     }
 }
 
+/// A browser signed in: its session token, and its device token (for the
+/// device cookie: the next sign-in from this browser is never held by others).
+#[derive(Debug, PartialEq, Eq)]
+pub struct SignedIn {
+    pub token: String,
+    pub device: String,
+}
+
+/// Browsers and addresses that signed in before (by SHA-256 and by the
+/// address as counted), with when: the newest [`MAX_KNOWN`] of each.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Known {
+    #[serde(default)]
+    devices: HashMap<String, i64>,
+    #[serde(default)]
+    addresses: HashMap<String, i64>,
+}
+
+const MAX_KNOWN: usize = 64;
+
+fn keep_newest(map: &mut HashMap<String, i64>) {
+    while map.len() > MAX_KNOWN {
+        let Some(oldest) = map.iter().min_by_key(|(_, t)| **t).map(|(k, _)| k.clone()) else { break };
+        map.remove(&oldest);
+    }
+}
+
 pub struct Auth {
     dir: PathBuf,
     inner: Mutex<Inner>,
+    known: Mutex<Known>,
     limiter: Mutex<Limiter>,
     /// argon2 runs one at a time: a flood of tries cannot take the memory.
     verify: Semaphore,
@@ -180,6 +210,30 @@ fn check_new_password(password: &str) -> Result<(), AuthError> {
     Ok(())
 }
 
+/// A try in flight: answered once, and counted wrong if never answered (the
+/// browser went away during the check): no way out leaves it in flight.
+struct Answer<'a> {
+    limiter: &'a Mutex<Limiter>,
+    ticket: Option<Ticket>,
+}
+
+impl Answer<'_> {
+    fn finish(mut self, outcome: Outcome) {
+        self.answer(outcome);
+    }
+    fn answer(&mut self, outcome: Outcome) {
+        if let Some(t) = self.ticket.take() {
+            self.limiter.lock().unwrap_or_else(|e| e.into_inner()).finish(t, outcome, Instant::now());
+        }
+    }
+}
+
+impl Drop for Answer<'_> {
+    fn drop(&mut self) {
+        self.answer(Outcome::Wrong);
+    }
+}
+
 impl Auth {
     /// The folder's state; a setup code is made when there is no password.
     pub fn open(dir: impl Into<PathBuf>) -> std::io::Result<Auth> {
@@ -200,10 +254,15 @@ impl Auth {
                 sessions_mtime: None,
                 dirty_since: None,
             }),
+            known: Mutex::new(Known::default()),
             limiter: Mutex::new(Limiter::default()),
             verify: Semaphore::new(1),
             ended: broadcast::channel(64).0,
         };
+        *auth.known.lock().unwrap_or_else(|e| e.into_inner()) = std::fs::read(auth.devices_file())
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
         {
             let mut inner = auth.lock();
             auth.reload(&mut inner);
@@ -230,6 +289,57 @@ impl Auth {
     }
     pub fn code_file(&self) -> PathBuf {
         self.dir.join("setup-code")
+    }
+    fn devices_file(&self) -> PathBuf {
+        self.dir.join("devices.json")
+    }
+
+    /// Who is trying: a browser that signed in before (its device cookie), or
+    /// an address; and whether that one signed in before.
+    fn trier(&self, ip: IpAddr, device: Option<&str>) -> (Trier, bool) {
+        let known = self.known.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(d) = device.filter(|d| !d.is_empty() && d.len() <= 128) {
+            let key = hex_sha256(d.as_bytes());
+            if known.devices.contains_key(&key) {
+                return (Trier::Device(key), true);
+            }
+        }
+        let net = Trier::net(ip);
+        let seen = known.addresses.contains_key(&net.to_string());
+        (Trier::Net(net), seen)
+    }
+
+    /// Remembers this browser and address: the device token to set (the one
+    /// it had, if known, so its cookie stays).
+    fn remember(&self, ip: IpAddr, device: Option<&str>) -> String {
+        let mut known = self.known.lock().unwrap_or_else(|e| e.into_inner());
+        let t = now();
+        let kept = device
+            .filter(|d| !d.is_empty() && d.len() <= 128)
+            .filter(|d| known.devices.contains_key(&hex_sha256(d.as_bytes())))
+            .map(str::to_owned);
+        let token = kept.unwrap_or_else(new_token);
+        known.devices.insert(hex_sha256(token.as_bytes()), t);
+        known.addresses.insert(Trier::net(ip).to_string(), t);
+        keep_newest(&mut known.devices);
+        keep_newest(&mut known.addresses);
+        if let Ok(bytes) = serde_json::to_vec_pretty(&*known)
+            && let Err(e) = write_private(&self.devices_file(), &bytes)
+        {
+            log::warn!("cannot keep the signed-in browsers: {e}");
+        }
+        token
+    }
+
+    /// Lets a try through, or says how long to wait.
+    fn limited(&self, trier: Trier, known: bool) -> Result<Answer<'_>, AuthError> {
+        let ticket = self
+            .limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .allow(trier, known, Instant::now())
+            .map_err(AuthError::Wait)?;
+        Ok(Answer { limiter: &self.limiter, ticket: Some(ticket) })
     }
 
     /// Reads the files again if another process (the CLI) changed them.
@@ -303,9 +413,24 @@ impl Auth {
     }
 
     /// Sets the first password with the setup code; signs this browser in.
-    pub async fn setup(&self, code: &str, password: &str, ip: IpAddr, agent: &str) -> Result<String, AuthError> {
-        self.limited(ip)?;
+    pub async fn setup(
+        &self,
+        code: &str,
+        password: &str,
+        ip: IpAddr,
+        device: Option<&str>,
+        agent: &str,
+    ) -> Result<SignedIn, AuthError> {
         check_new_password(password)?;
+        let (trier, known) = self.trier(ip, device);
+        let ticket = self.limited(trier, known)?;
+        let result = self.setup_checked(code, password, ip, agent).await;
+        ticket.finish(outcome(&result));
+        let token = result?;
+        Ok(SignedIn { token, device: self.remember(ip, device) })
+    }
+
+    async fn setup_checked(&self, code: &str, password: &str, ip: IpAddr, agent: &str) -> Result<String, AuthError> {
         let expected = {
             let mut inner = self.lock();
             self.reload(&mut inner);
@@ -316,7 +441,6 @@ impl Auth {
         };
         let given = code.trim().to_ascii_uppercase().replace(' ', "");
         if !expected.is_some_and(|c| constant_eq(c.as_bytes(), given.as_bytes())) {
-            self.failed(ip);
             return Err(AuthError::Wrong);
         }
         let _permit = self.verify.acquire().await.map_err(|e| AuthError::Io(e.to_string()))?;
@@ -334,20 +458,32 @@ impl Auth {
         inner.password_mtime = mtime(&self.password_file());
         inner.setup_code = None;
         let _ = std::fs::remove_file(self.code_file());
-        self.succeeded(ip);
         self.start_session(&mut inner, agent, &ip.to_string())
     }
 
     /// Signs a browser in: its new session token.
-    pub async fn login(&self, password: &str, ip: IpAddr, agent: &str) -> Result<String, AuthError> {
-        self.limited(ip)?;
+    pub async fn login(
+        &self,
+        password: &str,
+        ip: IpAddr,
+        device: Option<&str>,
+        agent: &str,
+    ) -> Result<SignedIn, AuthError> {
+        let (trier, known) = self.trier(ip, device);
+        let ticket = self.limited(trier, known)?;
+        let result = self.login_checked(password, ip, agent).await;
+        ticket.finish(outcome(&result));
+        let token = result?;
+        Ok(SignedIn { token, device: self.remember(ip, device) })
+    }
+
+    async fn login_checked(&self, password: &str, ip: IpAddr, agent: &str) -> Result<String, AuthError> {
         let hash = {
             let mut inner = self.lock();
             self.reload(&mut inner);
             inner.password.clone().ok_or(AuthError::NotSet)?
         };
         if password.len() > MAX_PASSWORD {
-            self.failed(ip);
             return Err(AuthError::Wrong);
         }
         let _permit = self.verify.acquire().await.map_err(|e| AuthError::Io(e.to_string()))?;
@@ -356,10 +492,8 @@ impl Auth {
             .await
             .unwrap_or(false);
         if !ok {
-            self.failed(ip);
             return Err(AuthError::Wrong);
         }
-        self.succeeded(ip);
         let mut inner = self.lock();
         self.start_session(&mut inner, agent, &ip.to_string())
     }
@@ -395,7 +529,10 @@ impl Auth {
     pub fn alive(&self, key: &SessionKey) -> bool {
         let mut inner = self.lock();
         self.reload(&mut inner);
-        inner.sessions.contains_key(&key.0)
+        inner
+            .sessions
+            .get(&key.0)
+            .is_some_and(|r| now() - r.last_seen <= SESSION_DAYS * 86_400)
     }
 
     pub fn sessions(&self, current: &SessionKey) -> Vec<SessionInfo> {
@@ -477,80 +614,160 @@ impl Auth {
         }
     }
 
-    fn limited(&self, ip: IpAddr) -> Result<(), AuthError> {
-        self.limiter
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .allow(ip, Instant::now())
-            .map_err(AuthError::Wait)
-    }
+}
 
-    fn failed(&self, ip: IpAddr) {
-        self.limiter.lock().unwrap_or_else(|e| e.into_inner()).failed(ip, Instant::now());
-    }
+/// How many wrong passwords one trier (an address, or a browser that signed
+/// in before) may try before it waits.
+const FREE_TRIES: u32 = 5;
+/// The longest a trier waits.
+const MAX_WAIT: Duration = Duration::from_secs(15 * 60);
+/// Tries of everyone else together: a bucket this deep...
+const GLOBAL_BURST: f64 = 30.0;
+/// ...that fills by one try a minute (so at most about 1,500 a day).
+const GLOBAL_REFILL: Duration = Duration::from_secs(60);
+/// Triers remembered at once (the oldest go first).
+const MAX_TRIERS: usize = 10_000;
 
-    fn succeeded(&self, ip: IpAddr) {
-        self.limiter.lock().unwrap_or_else(|e| e.into_inner()).succeeded(ip);
+/// Who is trying a password.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Trier {
+    /// A browser that signed in before: the SHA-256 of its device token.
+    Device(String),
+    /// Anyone else, by address (IPv6 by its /64: one machine has many).
+    Net(IpAddr),
+}
+
+impl Trier {
+    /// The address as counted: an IPv4-mapped address as IPv4, IPv6 as its /64.
+    pub fn net(ip: IpAddr) -> IpAddr {
+        match ip {
+            IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) => IpAddr::V4(v4),
+                None => {
+                    let s = v6.segments();
+                    IpAddr::V6(std::net::Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
+                }
+            },
+            v4 => v4,
+        }
     }
 }
 
-/// How many wrong passwords an address may try before it waits.
-const FREE_TRIES: u32 = 5;
-/// The longest an address waits.
-const MAX_WAIT: Duration = Duration::from_secs(15 * 60);
-/// Tries of every address together, per minute.
-const GLOBAL_PER_MINUTE: usize = 30;
+#[derive(Debug, Clone, Copy)]
+struct Tries {
+    /// Wrong ones since the last right one.
+    failures: u32,
+    /// Ones being checked now (counted before the answer: tries sent at
+    /// once cannot pass the limit together).
+    pending: u32,
+    last: Instant,
+}
 
-/// Login tries: each address gets [`FREE_TRIES`] wrong ones, then waits
-/// 30 s, doubling with each further wrong one (at most [`MAX_WAIT`]); all
-/// addresses together get [`GLOBAL_PER_MINUTE`] tries a minute (behind a
-/// proxy every browser has one address).
-#[derive(Default)]
+/// What a try let through came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Right,
+    Wrong,
+    /// Neither (no password yet, one set already, a failure of the server):
+    /// it counts neither way.
+    Neither,
+}
+
+fn outcome<T>(r: &Result<T, AuthError>) -> Outcome {
+    match r {
+        Ok(_) => Outcome::Right,
+        Err(AuthError::Wrong) => Outcome::Wrong,
+        Err(_) => Outcome::Neither,
+    }
+}
+
+/// A try let through: its answer goes back with [`Limiter::finish`].
+#[derive(Debug)]
+pub struct Ticket {
+    trier: Trier,
+    /// It took from the shared bucket (given back if it was right).
+    shared: bool,
+}
+
+/// Sign-in tries.
+///
+/// - Every trier gets [`FREE_TRIES`] wrong ones, then waits 30 s, doubling
+///   with each further wrong one (at most [`MAX_WAIT`]). A try counts from
+///   the moment it starts, so tries sent at once count too.
+/// - A browser that signed in before (its device cookie) is its own trier
+///   and is never held by what others do: not by its address, not by the
+///   shared bucket. Nor is an address that signed in before.
+/// - Everyone else shares one bucket of [`GLOBAL_BURST`] tries, filled by
+///   one a [`GLOBAL_REFILL`]: guessing from many addresses is bounded to
+///   about 1,500 tries a day, whoever spreads them.
 pub struct Limiter {
-    fails: HashMap<IpAddr, (u32, Instant)>,
-    recent: VecDeque<Instant>,
+    tries: HashMap<Trier, Tries>,
+    shared: f64,
+    filled: Instant,
+}
+
+impl Default for Limiter {
+    fn default() -> Self {
+        Limiter { tries: HashMap::new(), shared: GLOBAL_BURST, filled: Instant::now() }
+    }
 }
 
 impl Limiter {
-    pub fn allow(&mut self, ip: IpAddr, now: Instant) -> Result<(), Duration> {
-        while self.recent.front().is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60)) {
-            self.recent.pop_front();
-        }
-        if let Some((n, last)) = self.fails.get(&ip).copied() {
-            if n >= FREE_TRIES {
-                let wait = (Duration::from_secs(30) * 2u32.saturating_pow(n - FREE_TRIES)).min(MAX_WAIT);
-                let passed = now.duration_since(last);
-                if passed < wait {
-                    return Err(wait - passed);
+    /// Lets a try through, or says how long to wait. `known`: the trier
+    /// signed in before (a device, or an address that did).
+    pub fn allow(&mut self, trier: Trier, known: bool, now: Instant) -> Result<Ticket, Duration> {
+        if let Some(t) = self.tries.get(&trier).copied() {
+            // Quiet for a day, with nothing in flight: it starts over.
+            if t.pending == 0 && now.duration_since(t.last) > Duration::from_secs(86_400) {
+                self.tries.remove(&trier);
+            } else {
+                let attempts = t.failures + t.pending;
+                if attempts >= FREE_TRIES {
+                    let wait = (Duration::from_secs(30) * 2u32.saturating_pow(attempts - FREE_TRIES)).min(MAX_WAIT);
+                    let passed = now.duration_since(t.last);
+                    if passed < wait {
+                        return Err(wait - passed);
+                    }
                 }
             }
-            // An address quiet for a day starts over.
-            if now.duration_since(last) > Duration::from_secs(86_400) {
-                self.fails.remove(&ip);
+        }
+        let shared = !known;
+        if shared {
+            let refilled = now.duration_since(self.filled).as_secs_f64() / GLOBAL_REFILL.as_secs_f64();
+            self.shared = (self.shared + refilled).min(GLOBAL_BURST);
+            self.filled = now;
+            if self.shared < 1.0 {
+                return Err(GLOBAL_REFILL.mul_f64(1.0 - self.shared).max(Duration::from_secs(1)));
             }
+            self.shared -= 1.0;
         }
-        if self.recent.len() >= GLOBAL_PER_MINUTE {
-            let oldest = *self.recent.front().expect("not empty");
-            return Err(Duration::from_secs(60).saturating_sub(now.duration_since(oldest)));
+        let t = self.tries.entry(trier.clone()).or_insert(Tries { failures: 0, pending: 0, last: now });
+        t.pending += 1;
+        t.last = now;
+        if self.tries.len() > MAX_TRIERS
+            && let Some(oldest) = self.tries.iter().filter(|(_, t)| t.pending == 0).min_by_key(|(_, t)| t.last).map(|(k, _)| k.clone())
+        {
+            self.tries.remove(&oldest);
         }
-        self.recent.push_back(now);
-        Ok(())
+        Ok(Ticket { trier, shared })
     }
 
-    pub fn failed(&mut self, ip: IpAddr, now: Instant) {
-        let e = self.fails.entry(ip).or_insert((0, now));
-        e.0 += 1;
-        e.1 = now;
-        // Bounded: the oldest addresses go first.
-        if self.fails.len() > 10_000 {
-            if let Some(oldest) = self.fails.iter().min_by_key(|(_, v)| v.1).map(|(k, _)| *k) {
-                self.fails.remove(&oldest);
+    /// The answer to a try let through: right clears its trier, wrong counts.
+    pub fn finish(&mut self, ticket: Ticket, outcome: Outcome, now: Instant) {
+        if outcome == Outcome::Right {
+            self.tries.remove(&ticket.trier);
+            if ticket.shared {
+                self.shared = (self.shared + 1.0).min(GLOBAL_BURST);
+            }
+            return;
+        }
+        if let Some(t) = self.tries.get_mut(&ticket.trier) {
+            t.pending = t.pending.saturating_sub(1);
+            if outcome == Outcome::Wrong {
+                t.failures += 1;
+                t.last = now;
             }
         }
-    }
-
-    pub fn succeeded(&mut self, ip: IpAddr) {
-        self.fails.remove(&ip);
     }
 }
 
@@ -562,36 +779,163 @@ mod tests {
         IpAddr::from([192, 168, 1, n])
     }
 
+    fn net(n: u8) -> Trier {
+        Trier::Net(ip(n))
+    }
+
+    fn wrong(l: &mut Limiter, who: Trier, known: bool, t: Instant) -> Result<(), Duration> {
+        let ticket = l.allow(who, known, t)?;
+        l.finish(ticket, Outcome::Wrong, t);
+        Ok(())
+    }
+
     #[test]
     fn an_address_waits_after_five_wrong_tries_and_others_do_not() {
         let mut l = Limiter::default();
         let t = Instant::now();
         for _ in 0..FREE_TRIES {
-            assert!(l.allow(ip(1), t).is_ok());
-            l.failed(ip(1), t);
+            wrong(&mut l, net(1), false, t).unwrap();
         }
-        let wait = l.allow(ip(1), t).unwrap_err();
+        let wait = l.allow(net(1), false, t).unwrap_err();
         assert_eq!(wait, Duration::from_secs(30));
-        assert!(l.allow(ip(2), t).is_ok(), "another address is not held");
+        assert!(wrong(&mut l, net(2), false, t).is_ok(), "another address is not held");
         // After the wait, one more try; wrong again, the wait doubles.
         let later = t + Duration::from_secs(31);
-        assert!(l.allow(ip(1), later).is_ok());
-        l.failed(ip(1), later);
-        assert_eq!(l.allow(ip(1), later).unwrap_err(), Duration::from_secs(60));
+        wrong(&mut l, net(1), false, later).unwrap();
+        assert_eq!(l.allow(net(1), false, later).unwrap_err(), Duration::from_secs(60));
         // Right: free again.
-        l.succeeded(ip(1));
-        assert!(l.allow(ip(1), later).is_ok());
+        let after = later + Duration::from_secs(61);
+        let ticket = l.allow(net(1), false, after).unwrap();
+        l.finish(ticket, Outcome::Right, after);
+        assert!(l.allow(net(1), false, after).is_ok());
     }
 
     #[test]
-    fn all_addresses_together_are_limited_per_minute() {
+    fn tries_at_once_cannot_pass_the_limit_together() {
         let mut l = Limiter::default();
         let t = Instant::now();
-        for i in 0..GLOBAL_PER_MINUTE {
-            assert!(l.allow(ip(i as u8), t).is_ok());
+        // Twenty tries sent at once: none answered yet.
+        let let_through: Vec<Ticket> = (0..20).filter_map(|_| l.allow(net(1), false, t).ok()).collect();
+        assert_eq!(let_through.len(), FREE_TRIES as usize);
+        // An answer that is neither right nor wrong frees its place, no more.
+        let mut it = let_through.into_iter();
+        l.finish(it.next().unwrap(), Outcome::Neither, t);
+        assert!(l.allow(net(1), false, t).is_ok());
+        assert!(l.allow(net(1), false, t).is_err());
+    }
+
+    #[test]
+    fn ipv6_counts_by_its_64() {
+        let a: IpAddr = "2001:db8:1:2::1".parse().unwrap();
+        let b: IpAddr = "2001:db8:1:2:ffff::9".parse().unwrap();
+        let c: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        assert_eq!(Trier::net(a), Trier::net(b));
+        assert_ne!(Trier::net(a), Trier::net(c));
+        let mapped: IpAddr = "::ffff:192.168.1.1".parse().unwrap();
+        assert_eq!(Trier::net(mapped), ip(1));
+        let mut l = Limiter::default();
+        let t = Instant::now();
+        for i in 0..FREE_TRIES {
+            let one = std::net::Ipv6Addr::new(0x2001, 0xdb8, 1, 2, 0, 0, 0, i as u16 + 1);
+            wrong(&mut l, Trier::Net(Trier::net(IpAddr::V6(one))), false, t).unwrap();
         }
-        assert!(l.allow(ip(250), t).is_err());
-        assert!(l.allow(ip(250), t + Duration::from_secs(61)).is_ok());
+        assert!(l.allow(Trier::Net(Trier::net(b)), false, t).is_err(), "the same /64");
+        assert!(l.allow(Trier::Net(Trier::net(c)), false, t).is_ok(), "another /64");
+    }
+
+    #[test]
+    fn everyone_unknown_together_shares_one_slow_bucket() {
+        let mut l = Limiter::default();
+        let t = Instant::now();
+        for i in 0..GLOBAL_BURST as u32 {
+            wrong(&mut l, Trier::Net(IpAddr::from(std::net::Ipv4Addr::from((10u32 << 24) + i))), false, t).unwrap();
+        }
+        assert!(l.allow(net(250), false, t).is_err(), "the bucket is empty");
+        assert!(l.allow(net(250), false, t + Duration::from_secs(61)).is_ok(), "one a minute");
+        // Over a day of guessing from ever new addresses, at most this many tries.
+        let mut l = Limiter::default();
+        let mut tries = 0u32;
+        for s in 0..86_400u32 {
+            let now = t + Duration::from_secs(s as u64);
+            if wrong(&mut l, Trier::Net(IpAddr::from(std::net::Ipv4Addr::from(s))), false, now).is_ok() {
+                tries += 1;
+            }
+        }
+        assert!(tries <= 30 + 1440, "{tries} tries a day");
+    }
+
+    #[test]
+    fn nobody_keeps_a_known_browser_or_address_out() {
+        let mut l = Limiter::default();
+        let t = Instant::now();
+        let mine = Trier::Device("my browser".into());
+        // Others empty the shared bucket, and wear out my address.
+        for i in 0..200u32 {
+            let _ = wrong(&mut l, Trier::Net(IpAddr::from(std::net::Ipv4Addr::from((10u32 << 24) + i))), false, t);
+        }
+        for _ in 0..50 {
+            let _ = wrong(&mut l, net(1), false, t);
+        }
+        assert!(l.allow(net(1), false, t).is_err());
+        // My browser (its device cookie) still signs in from that address.
+        let ticket = l.allow(mine.clone(), true, t).unwrap();
+        l.finish(ticket, Outcome::Right, t);
+        // An address that signed in before is not held by the shared bucket.
+        assert!(l.allow(net(7), true, t).is_ok());
+        assert!(l.allow(net(8), false, t).is_err());
+        // My browser's own wrong tries still count, for it alone.
+        for _ in 0..FREE_TRIES {
+            wrong(&mut l, mine.clone(), true, t).unwrap();
+        }
+        assert!(l.allow(mine, true, t).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_try_cut_short_counts_and_does_not_stay_in_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = Auth::open(dir.path().join("web")).unwrap();
+        auth.reset_password("long enough").unwrap();
+        for _ in 0..FREE_TRIES {
+            let ticket = auth.limited(net(1), false).unwrap();
+            drop(ticket);
+        }
+        assert!(matches!(auth.login("long enough", ip(1), None, "t").await, Err(AuthError::Wait(_))));
+    }
+
+    #[tokio::test]
+    async fn a_signed_in_browser_gets_its_device_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = Auth::open(dir.path().join("web")).unwrap();
+        auth.reset_password("long enough").unwrap();
+        let first = auth.login("long enough", ip(1), None, "t").await.unwrap();
+        let again = auth.login("long enough", ip(2), Some(&first.device), "t").await.unwrap();
+        assert_eq!(first.device, again.device, "the cookie stays");
+        let other = auth.login("long enough", ip(2), Some("made up"), "t").await.unwrap();
+        assert_ne!(other.device, "made up", "an unknown device is not taken");
+        // Kept across a restart, by hash only.
+        let file = std::fs::read_to_string(dir.path().join("web/devices.json")).unwrap();
+        assert!(!file.contains(&first.device));
+        let restarted = Auth::open(dir.path().join("web")).unwrap();
+        assert!(matches!(restarted.trier(ip(9), Some(&first.device)), (Trier::Device(_), true)));
+        assert!(matches!(restarted.trier(ip(1), None), (Trier::Net(_), true)));
+        assert!(matches!(restarted.trier(ip(9), None), (Trier::Net(_), false)));
+    }
+
+    #[test]
+    fn a_session_past_its_days_is_not_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = Auth::open(dir.path().join("web")).unwrap();
+        let key = "k".repeat(64);
+        {
+            let mut inner = auth.lock();
+            inner.sessions.insert(
+                key.clone(),
+                Record { id: "x".into(), agent: "t".into(), address: "a".into(), created: 0, last_seen: now() },
+            );
+        }
+        assert!(auth.alive(&SessionKey(key.clone())));
+        auth.lock().sessions.get_mut(&key).unwrap().last_seen = now() - SESSION_DAYS * 86_400 - 1;
+        assert!(!auth.alive(&SessionKey(key)), "an open socket ends with its session");
     }
 
     #[tokio::test]
@@ -606,14 +950,14 @@ mod tests {
             "status can show it"
         );
         let me = ip(1);
-        assert_eq!(auth.setup("WRONG-CODE-0000", "long enough", me, "t").await, Err(AuthError::Wrong));
-        assert_eq!(auth.setup(&code, "short", me, "t").await, Err(AuthError::TooShort));
-        let first = auth.setup(&code.to_lowercase(), "long enough", me, "t").await.unwrap();
+        assert_eq!(auth.setup("WRONG-CODE-0000", "long enough", me, None, "t").await, Err(AuthError::Wrong));
+        assert_eq!(auth.setup(&code, "short", me, None, "t").await, Err(AuthError::TooShort));
+        let first = auth.setup(&code.to_lowercase(), "long enough", me, None, "t").await.unwrap().token;
         assert!(!auth.code_file().exists(), "the code is gone once used");
-        assert_eq!(auth.setup(&code, "another one", me, "t").await, Err(AuthError::AlreadySet));
+        assert_eq!(auth.setup(&code, "another one", me, None, "t").await, Err(AuthError::AlreadySet));
         let a = auth.check(&first).expect("signed in");
-        assert_eq!(auth.login("wrong password", me, "t").await, Err(AuthError::Wrong));
-        let second = auth.login("long enough", me, "phone").await.unwrap();
+        assert_eq!(auth.login("wrong password", me, None, "t").await.map(|s| s.token), Err(AuthError::Wrong));
+        let second = auth.login("long enough", me, None, "phone").await.unwrap().token;
         let b = auth.check(&second).unwrap();
         assert_ne!(a, b);
         // The files hold no token.
@@ -633,8 +977,8 @@ mod tests {
         // The CLI's new password ends every session, seen by a running server.
         again.reset_password("a new password").unwrap();
         assert!(auth.check(&first).is_none(), "the other process sees the change");
-        assert_eq!(auth.login("long enough", ip(9), "t").await, Err(AuthError::Wrong));
-        assert!(auth.login("a new password", ip(9), "t").await.is_ok());
+        assert_eq!(auth.login("long enough", ip(9), None, "t").await.map(|s| s.token), Err(AuthError::Wrong));
+        assert!(auth.login("a new password", ip(9), None, "t").await.is_ok());
     }
 
     #[cfg(unix)]

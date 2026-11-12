@@ -490,6 +490,17 @@ pub struct RunningConfig {
     pub ipv6: bool,
     #[serde(rename = "log-level")]
     pub log_level: String,
+    /// The core's TUN as it is (`enable` goes false when it could not start).
+    #[serde(default)]
+    pub tun: Option<RunningTun>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+pub struct RunningTun {
+    #[serde(default)]
+    pub enable: bool,
+    #[serde(default)]
+    pub device: String,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Default)]

@@ -150,9 +150,10 @@ pub fn encode(msg: &ServerMsg, secrets: &Secrets) -> String {
 /// would do), and the desktop app's login item, minimizing and tray (the
 /// server starts with the machine; a login item would start the desktop app).
 pub fn keep_hidden_settings(mut next: Settings, current: &Settings) -> Settings {
-    if next.secret == HIDDEN || next.secret.is_empty() {
-        next.secret = current.secret.clone();
-    }
+    // The controller's secret is the server's: a page never sets it (a new
+    // one is `NewSecret`, made here). One a page chose would let whoever
+    // drives that page use the controller directly.
+    next.secret = current.secret.clone();
     next.core_path = current.core_path.clone();
     next.launch_at_login = current.launch_at_login;
     next.start_minimized = current.start_minimized;
