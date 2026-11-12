@@ -426,7 +426,7 @@ fn table(
                 ))
                 .child(
                     cell(
-                        f(|c| age(&c.start, kairo_core::service::unix())),
+                        f(|c| age(&c.start, kairo_core::unix())),
                         Some(W_TIME()),
                         false,
                         true,
@@ -508,7 +508,7 @@ fn phone_row(
                 .child(
                     ui::muted(line(|c, _| {
                         if c.down_speed == 0 {
-                            age(&c.start, kairo_core::service::unix())
+                            age(&c.start, kairo_core::unix())
                         } else {
                             format!("↓ {}", kairo_core::speed(c.down_speed))
                         }

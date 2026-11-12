@@ -486,24 +486,7 @@ pub fn local_midnight(now: i64, tz: i64) -> i64 {
     local - local.rem_euclid(DAY) - tz
 }
 
-/// The offset of the local time zone from UTC at `t`, in seconds.
-#[cfg(unix)]
-pub fn local_offset(t: i64) -> i64 {
-    // SAFETY: localtime_r writes into the struct we give it.
-    unsafe {
-        let tt: libc::time_t = t as libc::time_t;
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&tt, &mut tm).is_null() {
-            return 0;
-        }
-        tm.tm_gmtoff as i64
-    }
-}
-
-#[cfg(not(unix))]
-pub fn local_offset(_t: i64) -> i64 {
-    0
-}
+pub use crate::time::local_offset;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bucket {

@@ -1,0 +1,18 @@
+[Unit]
+Description=Kairo (the proxy, and its page)
+Documentation=https://github.com/daoleno/kairo
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Other addresses: add --listen ADDR (and read SECURITY-NOTES.md first).
+ExecStart=@BIN@ serve
+# Always: an update ends the server so that this starts the new one.
+Restart=always
+RestartSec=2
+UMask=0077
+# No NoNewPrivileges=: the core's TUN permission is a file capability, which
+# a process under no_new_privs does not get.
+
+[Install]
+WantedBy=default.target

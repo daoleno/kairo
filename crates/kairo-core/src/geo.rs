@@ -7,9 +7,12 @@
 //! in place.
 
 use std::path::Path;
+#[cfg(feature = "engine")]
 use std::time::Duration;
 
-use crate::paths::{Paths, write_atomic};
+use crate::paths::Paths;
+#[cfg(feature = "engine")]
+use crate::paths::write_atomic;
 
 /// A file the core reads from its working directory, and where it comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +32,7 @@ pub const GEOSITE: GeoFile = GeoFile {
 
 /// MetaCubeX's releases: jsDelivr's mirrors first (they answer where GitHub
 /// is slow), GitHub itself last.
+#[cfg(feature = "engine")]
 const MIRRORS: [&str; 4] = [
     "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release",
     "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release",
@@ -62,6 +66,7 @@ pub fn needed(config: &str) -> Vec<GeoFile> {
     out
 }
 
+#[cfg(feature = "engine")]
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent(concat!("Kairo/", env!("CARGO_PKG_VERSION")))
@@ -73,6 +78,7 @@ fn client() -> Result<reqwest::Client, String> {
 /// Puts `file` in place unless it already is: asks every mirror at once, takes
 /// the first that answers, and falls back to the next if it fails midway.
 /// `Ok(true)` when it downloaded the file.
+#[cfg(feature = "engine")]
 pub async fn fetch(paths: &Paths, file: GeoFile) -> Result<bool, String> {
     let target = paths.runtime_dir().join(file.name);
     if usable(&target) {

@@ -60,19 +60,18 @@ pub fn page() -> impl IntoElement {
         let skip = lines.len().saturating_sub(DIAGNOSTIC_LINES);
         lines.drain(..skip);
         let text = diagnostics_text(&Report {
-            kairo_version: env!("CARGO_PKG_VERSION"),
+            kairo_version: &svc.version(),
             core: core_text(&state),
-            os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+            os: svc.os_text(),
             ports: (state.settings.mixed_port, state.settings.controller_port),
             lines: &lines,
             hidden: &hidden_strings(
                 &state,
                 svc.paths().home.to_str(),
-                std::env::var("HOME").ok().as_deref(),
+                svc.user_home().as_deref(),
             ),
         });
-        set_clipboard(text);
-        store.info("Diagnostics copied");
+        ui::copy(store, text, "Diagnostics copied");
     };
 
     view()
@@ -252,7 +251,7 @@ fn header() -> impl IntoElement {
     let home = store.svc().paths().home.clone();
     let shown_home = tilde(
         &home.display().to_string(),
-        std::env::var("HOME").ok().as_deref(),
+        store.svc().user_home().as_deref(),
     );
     let core_line = move || -> SharedString {
         let (text, running) = store.state.with(|s| (core_text(s), s.core.is_running()));

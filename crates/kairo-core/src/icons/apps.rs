@@ -53,17 +53,7 @@ pub fn lookup(name: &str) -> Option<Found> {
     }
 }
 
-/// `Firefox`, `firefox-bin`, `chrome.exe` → `firefox`, `firefox`, `chrome`: a program's name as
-/// the matching reads it.
-pub fn program_name(name: &str) -> String {
-    let mut n = name.trim().to_lowercase();
-    for suffix in [".exe", ".app", "-bin", ".bin", "-desktop"] {
-        if let Some(s) = n.strip_suffix(suffix) {
-            n = s.to_owned();
-        }
-    }
-    n
-}
+pub use super::program_name;
 
 #[cfg(target_os = "android")]
 fn android_lookup(name: &str) -> Option<Found> {

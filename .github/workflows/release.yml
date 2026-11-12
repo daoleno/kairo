@@ -30,8 +30,39 @@ jobs:
           test -s "docs/releases/v$version.md" || { echo "missing docs/releases/v$version.md"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  linux:
+  # The page of kairo-server, once (it is the same on every machine).
+  web:
     needs: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: System libraries (nsh builds the app for this host too; clang for wasm C code)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev clang llvm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: nsh and wasm-bindgen (the version Cargo.lock pins)
+        run: |
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.4.0 sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          cargo install wasm-bindgen-cli --version "$(cargo metadata --format-version 1 | python3 -c 'import sys,json; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="wasm-bindgen"))')" --locked
+      - name: The page
+        env:
+          AR_wasm32_unknown_unknown: llvm-ar
+          CC_wasm32_unknown_unknown: clang
+        run: |
+          nsh package --target web -o dist/web .
+          test -s dist/web/Kairo/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-page
+          path: dist/web/Kairo
+
+  linux:
+    needs: [verify, web]
     strategy:
       matrix:
         include:
@@ -58,6 +89,21 @@ jobs:
           test -s /usr/share/doc/kairo/LICENSE.mihomo
           grep -q "MetaCubeX/mihomo/tree/$MIHOMO_VERSION" /usr/share/doc/kairo/copyright
           tar -tzf dist/Kairo-*.tar.gz | grep -q '/lib/kairo/mihomo$'
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-page
+          path: web-page
+      - name: kairo-server's package, and it starts and serves its page
+        run: |
+          scripts/package-server.sh web-page
+          tar -tzf dist/Kairo-server-*.tar.gz | grep -q '/share/kairo-server/web/index.html$'
+          dir=$(ls -d dist/Kairo-server-*/)
+          home=$(mktemp -d)
+          KAIRO_HOME=$home KAIRO_NO_SYSPROXY=1 "$dir/bin/kairo-server" serve --listen 127.0.0.1:7979 > server.log 2>&1 &
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:7979/api/session && break; sleep 1; done
+          curl -fsS http://127.0.0.1:7979/ | grep -q '<html'
+          grep -q 'Setup code' server.log
+          kill %1
       - uses: actions/upload-artifact@v4
         with:
           name: dist-linux-${{ runner.arch }}

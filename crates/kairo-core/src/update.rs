@@ -28,13 +28,17 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(feature = "engine")]
 use ed25519_dalek::{Signature, VerifyingKey};
+#[cfg(feature = "engine")]
 use futures_util::StreamExt;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "engine")]
 use crate::core_bin::is_newer;
 use crate::paths::write_atomic;
+#[cfg(feature = "engine")]
 use crate::service::Service;
 
 /// The release workflow's signing key (public half; the private half is the
@@ -86,41 +90,7 @@ const fn nibble(c: u8) -> u8 {
     }
 }
 
-/// What the updater is doing, for the UI.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum UpdateStatus {
-    #[default]
-    Idle,
-    Checking,
-    /// When the last check found nothing newer (`HH:MM`, local time).
-    UpToDate {
-        checked: String,
-    },
-    /// A newer Kairo exists (its manifest is signed and checked); nothing is
-    /// downloaded until [`Service::download_update`] is asked.
-    Available {
-        version: String,
-    },
-    Downloading {
-        version: String,
-        progress: Option<f32>,
-    },
-    /// Downloaded and verified: one tap installs it.
-    Ready {
-        version: String,
-    },
-    /// This installation cannot update itself: the release page.
-    Manual {
-        version: String,
-        url: String,
-    },
-    Installing {
-        version: String,
-    },
-    Failed {
-        message: String,
-    },
-}
+pub use crate::view::UpdateStatus;
 
 /// The signed manifest.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -147,6 +117,10 @@ pub enum Install {
     WindowsDir { dir: PathBuf },
     /// `/usr/bin/kairo` from the .deb.
     Deb,
+    /// `<prefix>/bin/kairo-server`, its core in `lib/kairo` and its page in
+    /// `share/kairo-server/web`, writable by the user (the server's tarball). It is
+    /// replaced in place and the server exits: its service starts the new one.
+    Server { prefix: PathBuf },
     /// The Android app: the APK is handed to the system's installer, which asks
     /// the user and replaces the app.
     Android,
@@ -169,6 +143,11 @@ impl Install {
     }
 
     pub fn detect_for(exe: &Path, dpkg_list: &Path) -> Install {
+        // The server is its own package (bin/kairo-server and its page): never
+        // replaced by the desktop app's.
+        if exe.file_stem().is_some_and(|n| n == "kairo-server") {
+            return server_install(exe);
+        }
         if cfg!(target_os = "macos") {
             let bundle = exe.parent().and_then(Path::parent).and_then(Path::parent);
             if let Some(bundle) = bundle
@@ -226,6 +205,7 @@ impl Install {
             Install::MacApp { .. } => Some("macos-universal-zip".into()),
             Install::Prefix { .. } => Some(format!("linux-{arch}-tar")),
             Install::Deb => Some(format!("linux-{arch}-deb")),
+            Install::Server { .. } => Some(format!("{}-{arch}-server-tar", std::env::consts::OS)),
             Install::WindowsDir { .. } => Some(format!("windows-{arch}-zip")),
             Install::Android => Some(
                 match std::env::consts::ARCH {
@@ -237,6 +217,24 @@ impl Install {
             ),
             Install::Other => None,
         }
+    }
+}
+
+/// What a `kairo-server` binary is: the server's tarball, unpacked in a
+/// prefix the user can write, or else a copy that updates by hand.
+fn server_install(exe: &Path) -> Install {
+    let Some(prefix) = exe.parent().filter(|b| b.file_name().is_some_and(|n| n == "bin")).and_then(Path::parent) else {
+        return Install::Other;
+    };
+    let complete = prefix.join("lib/kairo/mihomo").is_file()
+        && prefix.join("share/kairo-server/web/index.html").is_file();
+    let owned = [prefix.join("bin"), prefix.join("lib/kairo"), prefix.join("share/kairo-server")]
+        .iter()
+        .all(|d| writable(d));
+    if complete && owned {
+        Install::Server { prefix: prefix.to_owned() }
+    } else {
+        Install::Other
     }
 }
 
@@ -333,6 +331,7 @@ fn file_url(version: &str, name: &str) -> String {
     }
 }
 
+#[cfg(feature = "engine")]
 fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
     let mut b = reqwest::Client::builder()
         .user_agent(concat!("Kairo/", env!("CARGO_PKG_VERSION")))
@@ -343,6 +342,7 @@ fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
     b.build().map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "engine")]
 async fn get(
     url: &str,
     proxy: Option<&str>,
@@ -424,6 +424,7 @@ fn shown_for_screenshots(value: &str) -> Option<UpdateStatus> {
 /// Starts the background checks (unless `KAIRO_NO_UPDATE` is set). A
 /// download left from an earlier run is offered again; one already
 /// installed is cleaned up.
+#[cfg(feature = "engine")]
 pub fn spawn_checks(svc: Service) {
     let dir = svc.paths().update_dir();
     match staged_info(&dir) {
@@ -834,6 +835,7 @@ pub async fn install(svc: &Service) -> Result<PathBuf, String> {
         Install::MacApp { bundle } => install_mac(&bundle, &file, &work),
         Install::Prefix { prefix } => install_prefix(&prefix, &bytes, &work),
         Install::Deb => install_deb(&file),
+        Install::Server { prefix } => install_server(&prefix, &bytes, &work),
         Install::WindowsDir { dir } => install_windows(&dir, &bytes, &work),
         Install::Android => install_android(&file),
         Install::Other => Err("This copy of Kairo cannot update itself".into()),
@@ -952,6 +954,75 @@ fn install_prefix(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
         replace_file(&top.join(rel), &prefix.join(rel))?;
     }
     Ok(prefix.join("bin/kairo"))
+}
+
+/// Unpacks the server's tarball and replaces its core, docs and page, and
+/// `bin/kairo-server` last (if anything before fails, the old one runs on).
+/// The page is a folder: the new one is renamed in, the old one removed.
+fn install_server(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(tar_gz));
+    archive.set_preserve_permissions(true);
+    archive
+        .unpack(work)
+        .map_err(|e| format!("Could not unpack the update: {e}"))?;
+    let top = std::fs::read_dir(work)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.join("bin/kairo-server").is_file())
+        .ok_or("The update has no bin/kairo-server")?;
+    if !top.join("lib/kairo/mihomo").is_file() {
+        return Err("The update has no core".into());
+    }
+    if !top.join("share/kairo-server/web/index.html").is_file() {
+        return Err("The update has no page".into());
+    }
+    let mut files = Vec::new();
+    for sub in ["lib/kairo", "share/doc/kairo"] {
+        if let Ok(rd) = std::fs::read_dir(top.join(sub)) {
+            for e in rd.filter_map(Result::ok) {
+                if e.path().is_file() {
+                    files.push(Path::new(sub).join(e.file_name()));
+                }
+            }
+        }
+    }
+    for rel in &files {
+        replace_file(&top.join(rel), &prefix.join(rel))?;
+    }
+    // The page: copied beside the old one (the work folder may be on another
+    // file system), then swapped by renames.
+    let web = prefix.join("share/kairo-server/web");
+    let next = prefix.join("share/kairo-server/.web-update");
+    let old = prefix.join("share/kairo-server/.web-old");
+    let _ = std::fs::remove_dir_all(&next);
+    let _ = std::fs::remove_dir_all(&old);
+    copy_dir(&top.join("share/kairo-server/web"), &next).map_err(|e| format!("The page: {e}"))?;
+    if web.exists() {
+        std::fs::rename(&web, &old).map_err(|e| format!("The page: {e}"))?;
+    }
+    if let Err(e) = std::fs::rename(&next, &web) {
+        let _ = std::fs::rename(&old, &web);
+        return Err(format!("The page: {e}"));
+    }
+    let _ = std::fs::remove_dir_all(&old);
+    replace_file(&top.join("bin/kairo-server"), &prefix.join("bin/kairo-server"))?;
+    Ok(prefix.join("bin/kairo-server"))
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let target = to.join(e.file_name());
+        if e.file_type()?.is_dir() {
+            copy_dir(&e.path(), &target)?;
+        } else {
+            std::fs::copy(e.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 /// Copies `from` next to `to` and renames it over `to`.
@@ -1262,6 +1333,7 @@ mod tests {
     }
 
     use super::*;
+    #[cfg(feature = "engine")]
     use ed25519_dalek::{Signer, SigningKey};
 
     fn signed(key: &SigningKey, json: &str) -> String {
@@ -1599,6 +1671,70 @@ mod tests {
             Install::detect_for(Path::new("/home/x/target/debug/kairo"), &none),
             Install::Other
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_servers_tarball_replaces_the_server_and_its_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let prefix = dir.path().join("p");
+        for (f, body) in [
+            ("bin/kairo-server", "old"),
+            ("lib/kairo/mihomo", "old core"),
+            ("share/kairo-server/web/index.html", "old page"),
+            ("share/kairo-server/web/nsh.0123456789.js", "old script"),
+        ] {
+            std::fs::create_dir_all(prefix.join(f).parent().unwrap()).unwrap();
+            std::fs::write(prefix.join(f), body).unwrap();
+        }
+        let none = dir.path().join("no-dpkg");
+        assert_eq!(
+            Install::detect_for(&prefix.join("bin/kairo-server"), &none),
+            Install::Server { prefix: prefix.clone() }
+        );
+        assert_eq!(
+            Install::Server { prefix: prefix.clone() }.package_key().unwrap(),
+            format!("{}-{}-server-tar", std::env::consts::OS, std::env::consts::ARCH)
+        );
+        // A server built in a work tree updates by hand.
+        assert_eq!(
+            Install::detect_for(Path::new("/home/x/target/debug/kairo-server"), &none),
+            Install::Other
+        );
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for (f, body) in [
+            ("Kairo-server-0.4.0-linux-x86_64/bin/kairo-server", "new"),
+            ("Kairo-server-0.4.0-linux-x86_64/lib/kairo/mihomo", "new core"),
+            ("Kairo-server-0.4.0-linux-x86_64/share/kairo-server/web/index.html", "new page"),
+            ("Kairo-server-0.4.0-linux-x86_64/share/kairo-server/web/nsh.abcdef0123.js", "new script"),
+        ] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64);
+            h.set_mode(0o755);
+            h.set_cksum();
+            tar.append_data(&mut h, f, body.as_bytes()).unwrap();
+        }
+        let gz = tar.into_inner().unwrap().finish().unwrap();
+        let exe = install_server(&prefix, &gz, &dir.path().join("work")).unwrap();
+        assert_eq!(exe, prefix.join("bin/kairo-server"));
+        let read = |f: &str| std::fs::read_to_string(prefix.join(f)).unwrap();
+        assert_eq!(read("bin/kairo-server"), "new");
+        assert_eq!(read("lib/kairo/mihomo"), "new core");
+        assert_eq!(read("share/kairo-server/web/index.html"), "new page");
+        assert!(!prefix.join("share/kairo-server/web/nsh.0123456789.js").exists(), "the old page is gone");
+        assert!(!prefix.join("share/kairo-server/.web-old").exists());
+        // A tarball without its page changes nothing.
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for f in ["K/bin/kairo-server", "K/lib/kairo/mihomo"] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(1);
+            h.set_mode(0o755);
+            h.set_cksum();
+            tar.append_data(&mut h, f, &b"x"[..]).unwrap();
+        }
+        let gz = tar.into_inner().unwrap().finish().unwrap();
+        assert!(install_server(&prefix, &gz, &dir.path().join("work2")).is_err());
+        assert_eq!(read("bin/kairo-server"), "new");
     }
 
     #[cfg(target_os = "linux")]

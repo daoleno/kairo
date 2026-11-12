@@ -112,10 +112,68 @@ pub mod size {
 /// The height of a toolbar / page header.
 pub const HEADER_HEIGHT: f32 = 52.0;
 
-/// Whether this is a phone (Android): one column, tabs, no hover.
+/// Whether this is a phone: one column, tabs, no hover. Android on a phone,
+/// or a browser window narrower than a phone's ([`PHONE_WIDTH`]), whatever
+/// the device (it is read when the shell is made; the shell is made again
+/// when the window crosses the width, see [`narrow`]).
 pub fn phone() -> bool {
     use nsh_core::platform::{Idiom, Os};
-    try_os() == Some(Os::Android) && idiom() == Idiom::Phone
+    match try_os() {
+        Some(Os::Android) => idiom() == Idiom::Phone,
+        Some(Os::Web) => untracked(|| window().width.0 < PHONE_WIDTH),
+        _ => false,
+    }
+}
+
+thread_local! {
+    /// The name of the machine the service runs on, when that is not this one.
+    static MACHINE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The machine the switches change, when it is not the one showing them (the
+/// page of a server): its name.
+pub fn machine() -> Option<String> {
+    MACHINE.with(|m| m.borrow().clone())
+}
+
+pub fn set_machine(name: Option<String>) {
+    MACHINE.with(|m| *m.borrow_mut() = name);
+}
+
+/// Copies `text` and says so with `done`. A browser copies only on a secure
+/// page (HTTPS, or this computer's own address): elsewhere, say why not.
+pub fn copy(store: crate::store::Store, text: String, done: impl Into<SharedString>) {
+    #[cfg(target_arch = "wasm32")]
+    if !web_sys::window().is_some_and(|w| w.is_secure_context()) {
+        store.error("This browser copies only on an HTTPS page");
+        return;
+    }
+    set_clipboard(text);
+    store.info(done);
+}
+
+/// Copies the lines that send a terminal through Kairo (they work on the
+/// machine Kairo runs on).
+pub fn copy_terminal_env(store: crate::store::Store) {
+    let done = match machine() {
+        Some(m) => format!("Copied, for a terminal on {m}"),
+        None => "Copied".into(),
+    };
+    copy(store, store.svc().terminal_env(), done);
+}
+
+/// Below this width a browser shows the phone's layout.
+pub const PHONE_WIDTH: f32 = 600.0;
+
+/// Whether the window is a phone's now (tracked: a browser window resized
+/// across [`PHONE_WIDTH`] changes it).
+pub fn narrow() -> bool {
+    use nsh_core::platform::{Idiom, Os};
+    match try_os() {
+        Some(Os::Android) => idiom() == Idiom::Phone,
+        Some(Os::Web) => window().width.0 < PHONE_WIDTH,
+        _ => false,
+    }
 }
 /// The height of a control a thumb presses (Android's guideline is 48 dp for
 /// the target, 40 for the drawn control); `desktop` where a pointer is exact.
@@ -658,7 +716,7 @@ pub fn setting_row(
 
 /// A row whose description follows state.
 pub fn setting_row_dyn(
-    label: &'static str,
+    label: impl IntoReactive<SharedString>,
     detail: impl Fn() -> SharedString + 'static,
     control: impl IntoElement,
 ) -> View {
@@ -690,6 +748,11 @@ pub fn setting_row_dyn(
 
 /// A settings group: a label above a card of rows separated by hairlines.
 pub fn group(label: Option<&'static str>, rows: Vec<AnyElement>) -> View {
+    group_titled(label.map(SharedString::from), rows)
+}
+
+/// A settings group whose label is made at run time.
+pub fn group_titled(label: Option<SharedString>, rows: Vec<AnyElement>) -> View {
     let count = rows.len();
     let mut inner = card();
     for (i, row) in rows.into_iter().enumerate() {

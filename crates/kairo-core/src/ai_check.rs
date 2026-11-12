@@ -6,12 +6,14 @@
 //! It reports what it read. A country comes from the service's own Cloudflare
 //! trace when it has one, else it is an estimate and is marked so.
 
+#[cfg(feature = "engine")]
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "engine")]
 use crate::ai::{AiService, SERVICES};
 
 /// Where the country came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Country {
     /// Read from the service's own answer (a Cloudflare trace).
     Seen {
@@ -36,7 +38,7 @@ impl Country {
 }
 
 /// The API's answer to a call without a key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Api {
     /// An answer that means "reachable" (a 401 is the API asking for a key).
     Answers {
@@ -54,9 +56,10 @@ pub enum Api {
 }
 
 /// One service's check.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Check {
-    pub service: &'static str,
+    #[serde(with = "crate::wire::name")]
+    pub service: crate::wire::Static,
     /// The trace host (or the API) answered at all.
     pub reachable: bool,
     pub api: Api,
@@ -110,6 +113,7 @@ pub fn country_name(code: &str) -> String {
     .to_owned()
 }
 
+#[cfg(feature = "engine")]
 fn client(proxy_port: u16) -> Option<reqwest::Client> {
     reqwest::Client::builder()
         .proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{proxy_port}")).ok()?)
@@ -119,6 +123,7 @@ fn client(proxy_port: u16) -> Option<reqwest::Client> {
         .ok()
 }
 
+#[cfg(feature = "engine")]
 async fn trace(http: &reqwest::Client, host: &str) -> Option<(String, bool)> {
     let r = http
         .get(format!("https://{host}/cdn-cgi/trace"))
@@ -133,6 +138,7 @@ async fn trace(http: &reqwest::Client, host: &str) -> Option<(String, bool)> {
 
 /// Checks one service. `estimate` is the country of another service's trace
 /// over the same exit, for those that have none of their own.
+#[cfg(feature = "engine")]
 pub async fn check_service(
     proxy_port: u16,
     service: &'static AiService,
@@ -192,6 +198,7 @@ pub async fn check_service(
     }
 }
 
+#[cfg(feature = "engine")]
 fn short(e: &reqwest::Error) -> String {
     if e.is_timeout() {
         "no answer in 12 s".into()
@@ -204,6 +211,7 @@ fn short(e: &reqwest::Error) -> String {
 
 /// Checks every service. The estimate for those without a trace is the first
 /// country a service with one reported.
+#[cfg(feature = "engine")]
 pub async fn check_all(proxy_port: u16, now: i64) -> Vec<Check> {
     let mut done = Vec::new();
     let mut estimate: Option<String> = None;
@@ -267,7 +275,7 @@ pub fn odd_ones(checks: &[Check]) -> Option<(String, Vec<&'static str>)> {
 
 /// A connection held open for a while: what a long answer streaming in needs
 /// from the exit and the network between.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Hold {
     /// Still open after `secs` seconds, and a second request on it worked.
     Held { secs: u64 },
@@ -280,6 +288,7 @@ pub enum Hold {
 /// Watches a connection until `secs` have passed. `Ok` when `alive` stayed
 /// true; `Err(elapsed)` at the first look where it was not. Checks every
 /// `step`.
+#[cfg(feature = "engine")]
 pub async fn watch_alive(
     secs: u64,
     step: Duration,
@@ -299,6 +308,7 @@ pub async fn watch_alive(
 /// seconds and asks on it again. `find` returns the id of the open connection
 /// to `host` that began at or after a unix time; `alive` says whether an id
 /// is still open (both read what the core reports).
+#[cfg(feature = "engine")]
 pub async fn hold(
     proxy_port: u16,
     host: &str,

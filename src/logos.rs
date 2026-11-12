@@ -20,7 +20,7 @@ pub enum Named {
 pub fn bundled(named: Named, name: &str) -> Option<&'static str> {
     let key = match named {
         Named::Site => name.trim().trim_end_matches('.').to_lowercase(),
-        _ => kairo_core::icons::apps::program_name(name),
+        _ => kairo_core::icons::program_name(name),
     };
     if key.is_empty() {
         return None;

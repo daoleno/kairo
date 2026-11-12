@@ -16,7 +16,7 @@ use crate::ui::charts::{self, Col, Line, Mark, Row, Ser, Tone};
 use crate::ui::{self, Icon, size, toolbar};
 
 pub fn now() -> i64 {
-    kairo_core::service::unix()
+    kairo_core::unix()
 }
 
 fn tz(t: i64) -> i64 {

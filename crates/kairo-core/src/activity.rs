@@ -8,12 +8,14 @@ use crate::ai;
 use crate::model::Connection;
 
 /// Where a connection goes, in the terms of this view.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum Target {
     /// One of the AI services Kairo knows (`ai::SERVICES` id).
-    Service(&'static str),
+    Service(#[serde(with = "crate::wire::name")] crate::wire::Static),
     /// A domestic AI, direct.
-    Domestic(&'static str),
+    Domestic(#[serde(with = "crate::wire::name")] crate::wire::Static),
     /// Stays on this machine or the LAN (local models).
     Local,
 }
@@ -130,7 +132,7 @@ pub fn parse_time(s: &str) -> Option<i64> {
 }
 
 /// What one (tool, target) pair has done.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Flow {
     /// Bytes sent and received since Kairo started counting (today).
     pub up: u64,
@@ -146,7 +148,9 @@ pub struct Flow {
 }
 
 /// Where a connection leaves, in Kairo's three exits and the rest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum ExitKind {
     Ai,
     Rest,
@@ -178,7 +182,7 @@ impl ExitKind {
 }
 
 /// The names of the groups that stand for the exits in the running config.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExitNames {
     pub ai: String,
     pub downloads: String,
@@ -224,7 +228,7 @@ pub fn site_of(host: &str) -> String {
 }
 
 /// What one app has done, over every connection (not only AI's).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppFlow {
     pub up: u64,
     pub down: u64,
@@ -232,7 +236,8 @@ pub struct AppFlow {
     /// Bytes per site.
     pub sites: BTreeMap<String, u64>,
     /// Bytes per AI service.
-    pub services: BTreeMap<&'static str, u64>,
+    #[serde(with = "crate::wire::name_map")]
+    pub services: BTreeMap<crate::wire::Static, u64>,
     /// Bytes per exit.
     pub exits: BTreeMap<ExitKind, u64>,
     /// The exits of the connections open now.
@@ -246,13 +251,15 @@ impl AppFlow {
 }
 
 /// Counts the stream of snapshots. `ingest` is called once per snapshot.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Tally {
+    #[serde(with = "crate::wire::pairs")]
     flows: BTreeMap<(String, Target), Flow>,
     apps: BTreeMap<String, AppFlow>,
     /// The groups that are the exits, for telling where a connection left.
     pub names: ExitNames,
     /// Last bytes seen per connection id, and its key and start.
+    #[serde(skip)]
     last: HashMap<String, Seen>,
     /// Connections that ended through the core's own close (user or Kairo).
     pub cut: u32,

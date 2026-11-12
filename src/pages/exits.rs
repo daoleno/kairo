@@ -140,7 +140,7 @@ pub fn subtitle(exit: Exit) -> String {
 
 /// "today", "2 days", "3 weeks": how long ago a pin was made.
 pub fn pinned_for(since: i64) -> String {
-    let days = (kairo_core::service::unix() - since).max(0) / 86400;
+    let days = (kairo_core::unix() - since).max(0) / 86400;
     match days {
         0 => "today".into(),
         1 => "1 day".into(),
@@ -434,8 +434,7 @@ fn mirror_card() -> impl IntoElement {
                     .child(
                         view().flex_row().child(
                             ui::btn("Copy for terminal", Variant::Secondary).on_press(move || {
-                                set_clipboard(copy.clone());
-                                store.info("Copied");
+                                ui::copy(store, copy.clone(), "Copied");
                             }),
                         ),
                     )
@@ -805,7 +804,7 @@ mod tests {
 
     #[test]
     fn a_pin_is_dated_in_days() {
-        let now = kairo_core::service::unix();
+        let now = kairo_core::unix();
         assert_eq!(pinned_for(now), "today");
         assert_eq!(pinned_for(now - 5 * 86400), "5 days");
         assert_eq!(pinned_for(now - 21 * 86400), "3 weeks");

@@ -195,7 +195,10 @@ pub fn bundled_core_for(exe: &Path) -> Option<PathBuf> {
 }
 
 /// Writes `bytes` to `path` through a temporary file in the same directory, so a
-/// crash never leaves a half-written file behind.
+/// crash never leaves a half-written file behind. On Unix only the owner may
+/// read it: Kairo's files hold subscription links, node passwords, the
+/// controller's secret and what was visited (a program that must run is
+/// made executable after, see `core_bin::install_binary`).
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -204,8 +207,54 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
         std::process::id()
     ));
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = std::fs::remove_file(&tmp);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+    }
+    #[cfg(not(unix))]
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)
+}
+
+/// Makes what Kairo wrote before its files were private (an older version's)
+/// its owner's alone: the folder, and every file in it that may carry a
+/// secret. Executable bits stay (the core must run).
+#[cfg(unix)]
+pub fn make_private(paths: &Paths) {
+    use std::os::unix::fs::PermissionsExt;
+    let private = |p: &Path| {
+        if let Ok(m) = std::fs::symlink_metadata(p)
+            && !m.file_type().is_symlink()
+            && m.permissions().mode() & 0o077 != 0
+        {
+            let mode = m.permissions().mode() & 0o700;
+            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode));
+        }
+    };
+    private(&paths.home);
+    let files_of = |dir: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .map(|d| d.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect())
+            .unwrap_or_default()
+    };
+    for f in files_of(&paths.home) {
+        private(&f);
+    }
+    for dir in ["profiles", "overrides", "runtime", "state", "logs", "update", "web"] {
+        let dir = paths.home.join(dir);
+        private(&dir);
+        for f in files_of(&dir) {
+            private(&f);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -227,5 +276,37 @@ mod plain_tests {
             plain(PathBuf::from("/usr/bin/kairo")),
             PathBuf::from("/usr/bin/kairo")
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod private_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(p: &Path) -> u32 {
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn what_kairo_writes_is_its_owners_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths { home: dir.path().join("kairo"), bundled_core: None };
+        write_atomic(&paths.settings(), b"{\"secret\":\"s\"}").unwrap();
+        assert_eq!(mode(&paths.settings()), 0o600);
+        // An older Kairo's files, readable by everyone, and a core that must run.
+        let old = paths.profile("a");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, "proxies: []").unwrap();
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(&paths.home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let core = paths.core_dir().join("mihomo");
+        std::fs::create_dir_all(paths.core_dir()).unwrap();
+        std::fs::write(&core, "#!/bin/sh").unwrap();
+        std::fs::set_permissions(&core, std::fs::Permissions::from_mode(0o755)).unwrap();
+        make_private(&paths);
+        assert_eq!(mode(&old), 0o600);
+        assert_eq!(mode(&paths.home), 0o700);
+        assert_eq!(mode(&core), 0o755, "the core is left as it is");
     }
 }

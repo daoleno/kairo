@@ -8,7 +8,7 @@ use kairo_core::activity::{Tally, Target};
 use kairo_core::ai::{self, AiService};
 use kairo_core::ai_check::{self, Api, Check, Country, Hold};
 use kairo_core::places;
-use kairo_core::service::{AiAlert, State};
+use kairo_core::view::{AiAlert, State};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
@@ -329,7 +329,7 @@ fn site_routes<'a>(state: &'a State, service: &AiService) -> Vec<&'a kairo_core:
             kairo_core::routes::RouteKind::Site { domain } => service
                 .suffixes
                 .iter()
-                .any(|s| domain == s || domain.ends_with(&format!(".{s}"))),
+                .any(|s| domain.as_str() == *s || domain.ends_with(&format!(".{s}"))),
             _ => false,
         })
         .collect()
@@ -764,10 +764,7 @@ fn apply_fix(store: crate::store::Store, id: &'static str, fix: Fix) {
     match fix {
         Fix::UseAiExit => use_ai_exit(store, id),
         Fix::UseEveryApp => crate::pages::home::set_via(crate::pages::home::Via::Tun),
-        Fix::CopyForTerminal => {
-            set_clipboard(store.svc().terminal_env());
-            store.info("Copied");
-        }
+        Fix::CopyForTerminal => ui::copy_terminal_env(store),
     }
 }
 
@@ -922,7 +919,7 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
             )
         });
         untracked(move || {
-            let now = kairo_core::service::unix();
+            let now = kairo_core::unix();
             let rows: Vec<AnyElement> = match &check {
                 None => vec![
                     ui::muted(if checking {

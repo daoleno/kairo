@@ -55,10 +55,19 @@ pub fn current() -> Accent {
     *CURRENT.get_or_init(|| {
         let wanted = std::env::var("KAIRO_ACCENT")
             .ok()
-            .or_else(|| kairo_core::Service::try_global().map(|s| s.settings().accent))
+            .or_else(setting)
             .unwrap_or_default();
         named(&wanted).unwrap_or_else(|| named(DEFAULT).expect("the default accent"))
     })
+}
+
+/// The accent the settings name (the service in this process; a page of a
+/// server keeps the default).
+fn setting() -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    return kairo_core::Service::try_global().map(|s| s.settings().accent);
+    #[cfg(target_arch = "wasm32")]
+    None
 }
 
 pub fn named(name: &str) -> Option<Accent> {

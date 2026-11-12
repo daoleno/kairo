@@ -630,7 +630,7 @@ impl Footer {
             .visible(false)
             .child(&update_area)
             .build();
-        update.connect_clicked(|_| chrome::update_pressed(&Service::global()));
+        update.connect_clicked(|_| chrome::update_pressed_local(&Service::global()));
         root.append(&top);
         root.append(&speeds);
         root.append(&update);

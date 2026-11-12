@@ -3,7 +3,7 @@
 //! The UI and the tray both talk to it: commands in (async methods), state out
 //! (`watch` channels the UI turns into signals).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -19,7 +19,6 @@ mod route_ops;
 mod stats_ops;
 
 use crate::activity::Tally;
-use crate::ai_check;
 use crate::config;
 use crate::controller::{ApiError, Controller};
 use crate::core_bin;
@@ -31,161 +30,7 @@ use crate::supervisor::CoreProcess;
 use crate::sysproxy::{self, ProxySpec};
 use crate::tun::{self, Privilege};
 
-/// The core's state.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum CoreStatus {
-    #[default]
-    Stopped,
-    Starting,
-    Running {
-        version: String,
-    },
-    Stopping,
-    /// It stopped by itself, or could not start: why, in the core's words.
-    Failed {
-        message: String,
-    },
-}
-
-impl CoreStatus {
-    pub fn is_running(&self) -> bool {
-        matches!(self, CoreStatus::Running { .. })
-    }
-
-    pub fn title(&self) -> &'static str {
-        match self {
-            CoreStatus::Stopped => "Stopped",
-            CoreStatus::Starting => "Starting",
-            CoreStatus::Running { .. } => "Running",
-            CoreStatus::Stopping => "Stopping",
-            CoreStatus::Failed { .. } => "Stopped with an error",
-        }
-    }
-
-    /// The state as a person says it (the core runs: connected).
-    pub fn plain(&self) -> &'static str {
-        match self {
-            CoreStatus::Stopped => "Not Connected",
-            CoreStatus::Starting => "Connecting",
-            CoreStatus::Running { .. } => "Connected",
-            CoreStatus::Stopping => "Disconnecting",
-            CoreStatus::Failed { .. } => "Couldn't Connect",
-        }
-    }
-}
-
-/// A message for the user, shown once.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Notice {
-    pub id: u64,
-    pub text: String,
-    pub error: bool,
-}
-
-/// Work in progress that the UI shows (a download).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Task {
-    pub label: String,
-    /// 0..=1 when known.
-    pub progress: Option<f32>,
-}
-
-/// What the AI layer knows: where AI goes and how the checks stand.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct AiView {
-    /// The group AI traffic goes to, once the config has it.
-    pub group: String,
-    /// The subscription's own AI group, not one of Kairo's.
-    pub adopted: bool,
-    /// The last check of each service, in the order they are shown.
-    pub checks: Vec<ai_check::Check>,
-    /// The last 90 s hold of each service (by id).
-    pub holds: Vec<(String, ai_check::Hold)>,
-    /// A check is running.
-    pub checking: bool,
-    /// Something the person should know about the exit.
-    pub alert: Option<AiAlert>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum AiAlert {
-    /// The pinned exit is no longer in the subscription; AI follows the
-    /// Location until one is chosen.
-    ExitGone { was: String },
-}
-
-/// Everything that changes rarely.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct State {
-    pub core: CoreStatus,
-    /// The core's version.
-    pub core_version: Option<String>,
-    /// Kairo's own update, when there is one.
-    pub update: crate::update::UpdateStatus,
-    pub settings: Settings,
-    pub profiles: ProfileIndex,
-    /// Profiles being downloaded.
-    pub updating: HashSet<String>,
-    /// Whether the system proxy currently points at Kairo.
-    pub sysproxy_active: bool,
-    pub sysproxy_supported: bool,
-    pub tun_privilege: Option<Privilege>,
-    pub task: Option<Task>,
-    pub notice: Option<Notice>,
-    /// A problem the core reported at start that it survives (a port in use).
-    pub warning: Option<String>,
-    /// Something done for the user that they may want to know (Kairo moved
-    /// to a free port); shown quietly while connected.
-    pub note: Option<String>,
-    /// Kairo is finding the first place of a new subscription (or replacing
-    /// a provider's note in use); later checks happen without saying so.
-    pub locating: bool,
-    pub ai: AiView,
-    /// The Downloads exit: where it goes, the mirror and its test.
-    pub downloads: crate::downloads::DownloadsInfo,
-    /// Routes (ids) the running config leaves out because their exit is not
-    /// in it (a node the subscription no longer has).
-    pub routes_skipped: Vec<String>,
-    /// AI tools whose connections go around the proxy (system-proxy mode
-    /// only; empty with TUN, or when the core is not running).
-    pub bypass: Vec<crate::bypass::Bypass>,
-}
-
-impl State {
-    /// The connection as a person says it: nothing to connect through yet
-    /// is "Not Set Up", whatever the core does meanwhile.
-    pub fn plain(&self) -> &'static str {
-        if self.profiles.active.is_none() {
-            "Not Set Up"
-        } else {
-            self.core.plain()
-        }
-    }
-}
-
-/// The live numbers.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Live {
-    pub up: u64,
-    pub down: u64,
-    pub upload_total: u64,
-    pub download_total: u64,
-    pub memory: u64,
-    pub connections: usize,
-    /// The last 90 seconds, oldest first.
-    pub history: VecDeque<Traffic>,
-}
-
-pub const HISTORY: usize = 90;
-
-/// Groups and providers.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Proxies {
-    pub groups: Vec<Group>,
-    pub providers: Vec<ProxyProvider>,
-    /// Nodes and groups being tested.
-    pub testing: HashSet<String>,
-}
+pub use crate::view::{AiAlert, AiView, CoreStatus, HISTORY, Live, Notice, Proxies, State, Task};
 
 const LOG_CAPACITY: usize = 3000;
 
@@ -593,6 +438,9 @@ impl Service {
     // --- Boot ---------------------------------------------------------------------
 
     async fn boot(self) {
+        // Files an older Kairo left readable by others become the owner's.
+        #[cfg(unix)]
+        crate::paths::make_private(&self.0.paths);
         let geo = self.clone();
         tokio::spawn(async move { geo.prefetch_geo().await });
         // The bundled core, copied in place (first run, or after an app update).
@@ -621,8 +469,8 @@ impl Service {
             (Some(_), _) => {
                 // Android: the VPN (and its permission screen) waits for a
                 // subscription to connect with, not the first launch.
-                let waits_for_profile = cfg!(target_os = "android")
-                    && self.0.state.borrow().profiles.active.is_none();
+                let waits_for_profile =
+                    cfg!(target_os = "android") && self.0.state.borrow().profiles.active.is_none();
                 if self.settings().auto_start_core
                     && !waits_for_profile
                     && let Err(e) = self.start_core().await
@@ -789,9 +637,7 @@ impl Service {
             .map_err(|e| e.to_string())
             .and_then(|r| r)
         {
-            self.set_core(CoreStatus::Failed {
-                message: e.clone(),
-            });
+            self.set_core(CoreStatus::Failed { message: e.clone() });
             return Err(e);
         }
         // A fresh config from the active profile and the current settings.
@@ -1432,6 +1278,14 @@ impl Service {
         })
     }
 
+    /// Reads the core's TUN permission again (granted from a shell, say) and
+    /// shows it.
+    pub fn recheck_tun(&self) -> Privilege {
+        let status = tun::status(&self.core_path());
+        self.modify(|s| s.tun_privilege = Some(status));
+        status
+    }
+
     /// Sets (or restores) the system proxy now, recording the outcome.
     fn apply_sysproxy(&self, on: bool) {
         let paths = self.0.paths.clone();
@@ -1978,13 +1832,20 @@ impl Service {
             svc.save_profiles();
             let _ = std::fs::remove_file(svc.0.paths.profile(&id));
             let _ = std::fs::remove_file(svc.0.paths.override_file(&id));
-            if was_active {
-                let next = svc.0.state.borrow().profiles.active.clone();
-                match next {
-                    Some(_) if svc.running() => svc.write_config(true).await?,
-                    None => svc.stop_core().await,
-                    _ => {}
-                }
+            // The last one gone: no exit pinned to its servers stays behind.
+            if svc.0.state.borrow().profiles.profiles.is_empty() {
+                svc.modify(|s| {
+                    s.settings.ai.exit = None;
+                    s.settings.ai.follow = true;
+                    s.settings.downloads.exit = None;
+                    s.settings.downloads.fastest = true;
+                });
+                svc.save_settings();
+            }
+            // With none left the core keeps running and sends everything
+            // direct, as on the first start: what points at its port works on.
+            if was_active && svc.running() {
+                svc.write_config(true).await?;
             }
             Ok(())
         })
@@ -2412,6 +2273,13 @@ impl Service {
                 svc.set_update(previous);
                 return Ok(());
             }
+            // A server ends here: its service (Restart=always) starts the
+            // new one; a copy started by hand is started again by hand.
+            if matches!(crate::update::Install::detect(), crate::update::Install::Server { .. }) {
+                log::warn!("updated to {}; exiting so that the service starts it", exe.display());
+                svc.shutdown();
+                std::process::exit(0);
+            }
             crate::update::relaunch(&exe)?;
             let quit = svc.0.quit.lock().expect("quit hook").clone();
             match quit {
@@ -2426,36 +2294,5 @@ impl Service {
     }
 }
 
-/// Unix seconds now.
-pub fn unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-/// The local wall clock as `HH:MM:SS`.
-pub fn clock() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let offset = local_offset_seconds();
-    let t = (now + offset).rem_euclid(86400);
-    format!("{:02}:{:02}:{:02}", t / 3600, t % 3600 / 60, t % 60)
-}
-
-/// The local time zone's offset from UTC, in seconds.
-pub fn local_offset_seconds() -> i64 {
-    #[cfg(unix)]
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&now, &mut tm);
-        tm.tm_gmtoff
-    }
-    #[cfg(not(unix))]
-    {
-        0
-    }
-}
+pub use crate::time::{clock, local_offset_seconds};
+pub use crate::unix;

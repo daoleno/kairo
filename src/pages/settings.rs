@@ -8,6 +8,7 @@
 
 use std::cell::{Cell, RefCell};
 
+use kairo_core::protocol::SessionInfo;
 use kairo_core::tun::Privilege;
 use kairo_core::{CoreStatus, Settings, Theme, UpdateStatus};
 use nsh_base::{button, theme};
@@ -148,10 +149,15 @@ pub fn page() -> impl IntoElement {
         });
     });
     // Leaving for an Inspect view keeps what was typed.
+    // What already went with its owner (the whole view leaving) is not read.
     cleanup(move || {
-        let d = draft.get_untracked();
-        let keep = d != saved.get_untracked() && store.page.get_untracked().inspect();
-        PENDING.with(|p| *p.borrow_mut() = keep.then_some(d));
+        let (draft, saved, page) =
+            untracked(|| (draft.try_get(), saved.try_get(), store.page.try_get()));
+        let keep = match (draft, saved) {
+            (Some(d), Some(s)) if d != s && page.is_some_and(|p| p.inspect()) => Some(d),
+            _ => None,
+        };
+        PENDING.with(|p| *p.borrow_mut() = keep);
     });
     let dirty = move || draft.with(|d| saved.with(|s| d != s));
 
@@ -253,6 +259,7 @@ enum Follow {
 
 fn general(settings: Memo<Settings>) -> impl IntoElement {
     let mac = cfg!(target_os = "macos");
+    let remote = store().svc().is_remote();
     view()
         .gap_5()
         .child(ui::group(
@@ -261,6 +268,7 @@ fn general(settings: Memo<Settings>) -> impl IntoElement {
         ))
         .child(connection_group(settings))
         .child(ai_group(settings))
+        .child(remote.then(sessions_group))
         .child(about_group())
 }
 
@@ -330,7 +338,8 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
                 .into_element(),
             ];
     // A phone has no login items, tray or window to close: only the look.
-    if phone {
+    // Nor has the page of a server (the server starts with the machine).
+    if phone || store.svc().is_remote() {
         rows.into_iter().take(1).collect()
     } else {
         rows
@@ -367,24 +376,32 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
         Follow::Tun => match privilege.get_untracked() {
             Some(Privilege::Granted) => store.run(store.svc().set_tun(true)),
             Some(Privilege::Needed) => allow(true),
-            Some(Privilege::Unsupported) => {
-                store.error("Every app (TUN) is not available on this system")
-            }
+            Some(Privilege::Unsupported) => store.error(match ui::machine() {
+                Some(m) => format!("Every app (TUN) is not available on {m}"),
+                None => "Every app (TUN) is not available on this system".into(),
+            }),
             None => store.error("Install the core to use Every app (TUN)"),
         },
     };
     // On Android every app is in the VPN: there is nothing to follow or grant.
-    if ui::phone() {
+    if ui::phone() && !store.svc().is_remote() {
         return view().into_element();
     }
-    ui::group(
-        Some("Connection"),
+    // A server's page changes the server's apps: it says so.
+    let machine = ui::machine();
+    let grant = store.svc().tun_grant();
+    let here = machine.clone().unwrap_or_else(|| "This desktop".into());
+    ui::group_titled(
+        Some(match &machine {
+            Some(m) => format!("Connection on {m}").into(),
+            None => "Connection".into(),
+        }),
         vec![
             ui::setting_row_dyn(
                 "Apps follow",
                 move || -> SharedString {
                     if !settings.with(|s| s.tun) && !store.state.with(|s| s.sysproxy_supported) {
-                        "This desktop has no system proxy setting Kairo can use; choose Every app (TUN).".into()
+                        format!("{here} has no system proxy setting Kairo can use; choose Every app (TUN).").into()
                     } else {
                         "".into()
                     }
@@ -399,16 +416,23 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
             ui::setting_row_dyn(
                 "Every app permission",
                 move || -> SharedString {
-                    match privilege.get() {
-                        None => "Install the core to use Every app (TUN).".into(),
-                        Some(Privilege::Granted | Privilege::Needed) => "".into(),
-                        Some(Privilege::Unsupported) => "Not available on this platform".into(),
+                    match (privilege.get(), &grant) {
+                        (None, _) => "Install the core to use Every app (TUN).".into(),
+                        // A server: its owner runs the command there.
+                        (Some(Privilege::Needed), Some(cmd)) => format!("Run on {}: {cmd}", machine.as_deref().unwrap_or("it")).into(),
+                        (Some(Privilege::Granted | Privilege::Needed), _) => "".into(),
+                        (Some(Privilege::Unsupported), _) => "Not available on this platform".into(),
                     }
                 },
                 dynamic(move || {
                     let p = privilege.get();
+                    let remote = store.svc().is_remote();
                     untracked(move || match p {
                         Some(Privilege::Granted) => ui::muted("Granted").into_element(),
+                        Some(Privilege::Needed) if remote => ui::btn("Check Again", Variant::Secondary)
+                            .disabled(move || granting.get())
+                            .on_press(move || allow(false))
+                            .into_element(),
                         Some(Privilege::Needed) => ui::btn_icon(Icon::Shield, "Allow", Variant::Secondary)
                             .disabled(move || granting.get())
                             .on_press(move || allow(false))
@@ -451,6 +475,86 @@ fn ai_group(settings: Memo<Settings>) -> impl IntoElement {
             .into_element(),
         ],
     )
+}
+
+/// How many other browsers the list shows by name.
+const SESSIONS_SHOWN: usize = 5;
+
+/// The browsers signed in to this server; any of them signs out from here.
+fn sessions_group() -> AnyElement {
+    let store = store();
+    let list = signal(Vec::<SessionInfo>::new());
+    let tick = signal(0u32);
+    effect(move || {
+        let _ = tick.get();
+        let asked = store.svc().sessions();
+        spawn(async move {
+            if let Ok(l) = asked.await {
+                list.set(l);
+            }
+        });
+    });
+    let again = move || tick.update(|t| *t += 1);
+    dynamic(move || {
+        let sessions = list.get();
+        untracked(move || {
+            let others = sessions.iter().filter(|s| !s.current).count();
+            let now = kairo_core::unix();
+            // This browser (listed first), then the latest few; the rest
+            // sign out together.
+            let mut rows: Vec<AnyElement> = sessions
+                .into_iter()
+                .take(SESSIONS_SHOWN + 1)
+                .map(|s| {
+                    let detail = session_detail(&s, now);
+                    let id = s.id.clone();
+                    let control = if s.current {
+                        ui::btn("Sign Out", Variant::Secondary)
+                            .on_press(move || store.run(store.svc().sign_out()))
+                    } else {
+                        ui::btn("Sign Out", Variant::Secondary).on_press(move || {
+                            store.run_then(store.svc().revoke_session(id.clone()), move |_| again())
+                        })
+                    };
+                    ui::setting_row_dyn(s.agent.clone(), move || detail.clone().into(), control).into_element()
+                })
+                .collect();
+            if others > 1 {
+                rows.push(
+                    ui::setting_row(
+                        if others > SESSIONS_SHOWN {
+                            SharedString::from(format!("All {others} other browsers"))
+                        } else {
+                            "All other browsers".into()
+                        },
+                        None,
+                        ui::btn("Sign Out", Variant::Secondary).on_press(move || {
+                            store.run_then(store.svc().revoke_other_sessions(), move |_| again())
+                        }),
+                    )
+                    .into_element(),
+                );
+            }
+            ui::group(Some("Signed-in browsers"), rows).into_element()
+        })
+    })
+    .into_element()
+}
+
+/// "This browser · 192.168.1.20", or where and when another was last used.
+fn session_detail(s: &SessionInfo, now: i64) -> String {
+    if s.current {
+        return format!("This browser · {}", s.address);
+    }
+    let offset = kairo_core::time::local_offset_seconds();
+    let when = if now - s.last_seen < 120 {
+        "active now".to_owned()
+    } else if (s.last_seen + offset).div_euclid(86_400) == (now + offset).div_euclid(86_400) {
+        "active today".to_owned()
+    } else {
+        format!("last active {}", date_text(s.last_seen + offset, now + offset))
+    };
+    format!("{} · {when}", s.address)
 }
 
 /// What the updater is doing, in a line.
@@ -562,6 +666,9 @@ fn advanced(
               w: f32| { text_field(draft, apply, get, put, placeholder, w) };
     let home = store.svc().paths().home.clone();
     let revealed = signal(false);
+    // A server keeps its secret and its files to itself: the page shows
+    // neither, and does not pick a program for it to run.
+    let remote = store.svc().is_remote();
 
     view()
         .gap_5()
@@ -639,15 +746,24 @@ fn advanced(
                                     )
                                 },
                             )
-                            .otherwise(move || secret_mask(revealed)),
+                            .otherwise(move || secret_mask(revealed, remote)),
                         )
                         .child(ui::btn("New Secret", Variant::Secondary).on_press(move || {
-                            draft.update(|d| d.secret = kairo_core::settings::new_secret());
-                            revealed.set(true);
+                            store.run_then(store.svc().new_secret(), move |r| {
+                                if let Ok(secret) = r {
+                                    // The server's stays there: nothing to show.
+                                    if remote {
+                                        store.info("New secret made");
+                                        return;
+                                    }
+                                    draft.update(|d| d.secret = secret);
+                                    revealed.set(true);
+                                }
+                            });
                         })),
                 )
                 .into_element(),
-                core_row(draft, apply),
+                core_row(draft, apply, remote),
                 geo_row(),
                 ui::setting_row(
                     "Delay test",
@@ -676,6 +792,14 @@ fn advanced(
                         .child(ui::muted("ms")),
                 )
                 .into_element(),
+                if remote {
+                    ui::setting_row(
+                        "Config folder",
+                        None,
+                        ui::muted(home.display().to_string()).selectable(true),
+                    )
+                    .into_element()
+                } else {
                 ui::setting_row(
                     "Config folder",
                     None,
@@ -694,17 +818,22 @@ fn advanced(
                         });
                     }),
                 )
-                .into_element(),
+                .into_element()
+                },
             ],
         ))
         .child(inspect_group())
 }
 
-/// The secret, hidden until asked for.
-fn secret_mask(revealed: Signal<bool>) -> impl IntoElement {
+/// The secret, hidden until asked for (a server's is never shown).
+fn secret_mask(revealed: Signal<bool>, remote: bool) -> impl IntoElement {
     button()
         .accessibility_label("Show secret")
-        .on_press(move || revealed.set(true))
+        .on_press(move || {
+            if !remote {
+                revealed.set(true)
+            }
+        })
         .flex_row()
         .items_center()
         .h(px(ui::touch_h(28.0)))
@@ -715,7 +844,7 @@ fn secret_mask(revealed: Signal<bool>) -> impl IntoElement {
         .border_1()
         .border_color(move || theme().input)
         .bg(move || theme().background)
-        .cursor_pointer()
+        .when(!remote, |b| b.cursor_pointer())
         .child(
             text("••••••••")
                 .text_size(px(size::body()))
@@ -724,7 +853,7 @@ fn secret_mask(revealed: Signal<bool>) -> impl IntoElement {
 }
 
 /// The core: its version and state, Restart, and a core of one's own.
-fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static) -> AnyElement {
+fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static, remote: bool) -> AnyElement {
     let store = store();
     let _ = apply;
     let line = move || -> SharedString {
@@ -761,11 +890,11 @@ fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static) -> AnyEleme
                     .disabled(move || !store.state.with(|s| s.core.is_running()))
                     .on_press(move || store.run(store.svc().restart_core())),
             )
-            .child(when(custom, move || {
+            .child(when(move || custom() && !remote, move || {
                 ui::btn("Use Kairo's", Variant::Secondary)
                     .on_press(move || draft.update(|d| d.core_path.clear()))
             }))
-            .child(ui::btn("Custom", Variant::Secondary).on_press(move || {
+            .child((!remote).then(|| ui::btn("Custom", Variant::Secondary).on_press(move || {
                 spawn(async move {
                     let picked = pick_paths(
                         OpenDialog::files()
@@ -779,7 +908,7 @@ fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static) -> AnyEleme
                         draft.update(|d| d.core_path = path.display().to_string());
                     }
                 });
-            })),
+            }))),
     )
     .into_element()
 }
@@ -790,15 +919,24 @@ fn geo_row() -> AnyElement {
     let tick = signal(0u32);
     let updating = signal(false);
     let running = computed(move || store.state.with(|s| s.core.is_running()));
-    let detail = move || -> SharedString {
+    // When they were written: asked again after each update.
+    let updated = signal(None::<i64>);
+    effect(move || {
         let _ = tick.get();
-        let paths = store.svc().paths().clone();
-        match geo_mtime(&paths) {
+        let asked = store.svc().geo_updated();
+        spawn(async move {
+            if let Ok(at) = asked.await {
+                updated.set(at);
+            }
+        });
+    });
+    let detail = move || -> SharedString {
+        match updated.get() {
             Some(secs) => format!(
                 "Updated {}",
                 date_text(
-                    secs + kairo_core::service::local_offset_seconds(),
-                    kairo_core::service::unix() + kairo_core::service::local_offset_seconds()
+                    secs + kairo_core::time::local_offset_seconds(),
+                    kairo_core::unix() + kairo_core::time::local_offset_seconds()
                 )
             )
             .into(),
@@ -831,21 +969,6 @@ fn geo_row() -> AnyElement {
         }),
     )
     .into_element()
-}
-
-/// When the newest geo file was written (unix seconds).
-fn geo_mtime(paths: &kairo_core::paths::Paths) -> Option<i64> {
-    [kairo_core::geo::MMDB, kairo_core::geo::GEOSITE]
-        .into_iter()
-        .filter_map(|f| {
-            std::fs::metadata(paths.runtime_dir().join(f.name))
-                .ok()?
-                .modified()
-                .ok()
-        })
-        .filter_map(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64)
-        .max()
 }
 
 /// A day as "Nov 8" (with the year when it is not this one). Both times are

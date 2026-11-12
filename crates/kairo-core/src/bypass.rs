@@ -19,12 +19,13 @@ use std::net::IpAddr;
 use crate::ai::{self, AiService};
 
 /// A tool whose connection goes out directly, not through Kairo.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Bypass {
     /// The program's name (`claude`, `Cursor`).
     pub tool: String,
     /// The AI service it belongs to (the id in [`ai::SERVICES`]).
-    pub service: Option<&'static str>,
+    #[serde(with = "crate::wire::opt_name")]
+    pub service: Option<crate::wire::Static>,
     pub pid: u32,
     /// Where it is connected: `ip:port`, or `[ip]:port` for IPv6.
     pub remote: String,

@@ -243,10 +243,7 @@ fn bypass_banner() -> impl IntoElement {
                     ui::capsule("Copy for terminal", false)
                         .h(px(30.0))
                         .px_4()
-                        .on_press(move || {
-                            set_clipboard(store.svc().terminal_env());
-                            store.info("Copied");
-                        }),
+                        .on_press(move || ui::copy_terminal_env(store)),
                 )
         },
     )

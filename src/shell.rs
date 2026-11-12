@@ -394,9 +394,26 @@ fn tab(page: Page) -> impl IntoElement {
 }
 
 pub fn shell() -> impl IntoElement {
+    if os() == Os::Web {
+        // A browser: the phone's layout in a narrow window, the desktop's in
+        // a wide one, made again when the window crosses over.
+        let narrow = computed(crate::ui::narrow);
+        return dynamic(move || {
+            if narrow.get() {
+                untracked(phone_shell).into_element()
+            } else {
+                untracked(desktop_shell).into_element()
+            }
+        })
+        .into_element();
+    }
     if os() == Os::Android && idiom() == Idiom::Phone {
         return phone_shell().into_element();
     }
+    desktop_shell().into_element()
+}
+
+fn desktop_shell() -> impl IntoElement {
     let store = store();
     view()
         .flex_1()

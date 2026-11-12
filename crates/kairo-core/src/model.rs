@@ -42,7 +42,7 @@ pub struct ProxiesResponse {
 }
 
 /// A proxy node, with its last measured delay.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Node {
     pub name: String,
     pub kind: String,
@@ -55,7 +55,7 @@ pub struct Node {
 }
 
 /// A proxy group and its members.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Group {
     pub name: String,
     /// `Selector`, `URLTest`, `Fallback`, `LoadBalance`, `Relay`.
@@ -165,7 +165,7 @@ pub struct RawProvider {
     pub subscription_info: Option<SubscriptionInfo>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default, serde::Serialize)]
 pub struct SubscriptionInfo {
     #[serde(rename = "Upload", default)]
     pub upload: u64,
@@ -182,7 +182,7 @@ pub struct ProvidersResponse<T> {
     pub providers: HashMap<String, T>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProxyProvider {
     pub name: String,
     pub vehicle: String,
@@ -212,7 +212,7 @@ pub fn proxy_providers_of(resp: ProvidersResponse<RawProvider>) -> Vec<ProxyProv
 }
 
 /// A rule provider (`/providers/rules`).
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, serde::Serialize)]
 pub struct RuleProvider {
     pub name: String,
     #[serde(default)]
@@ -228,7 +228,7 @@ pub struct RuleProvider {
 }
 
 /// A rule (`/rules`).
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, serde::Serialize)]
 pub struct Rule {
     #[serde(rename = "type")]
     pub kind: String,
@@ -246,7 +246,7 @@ pub struct RulesResponse {
 }
 
 /// One second of traffic (`/traffic`), bytes per second.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default, serde::Serialize)]
 pub struct Traffic {
     pub up: u64,
     pub down: u64,
@@ -270,7 +270,7 @@ pub struct LogLine {
 }
 
 /// A log line with when it arrived and a sequence number.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LogEntry {
     pub seq: u64,
     /// Local time, `HH:MM:SS`.
@@ -338,7 +338,7 @@ pub struct ConnectionsResponse {
 }
 
 /// A connection for the UI, with its current speed.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Connection {
     pub id: String,
     /// The host, or the destination IP when there is no host.
@@ -433,7 +433,7 @@ impl Connection {
 }
 
 /// A snapshot of the open connections.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Connections {
     pub upload_total: u64,
     pub download_total: u64,
@@ -441,7 +441,7 @@ pub struct Connections {
 }
 
 /// The answer of `/dns/query`.
-#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Default, serde::Serialize)]
 pub struct DnsResponse {
     #[serde(rename = "Status", default)]
     pub status: i32,
@@ -449,7 +449,7 @@ pub struct DnsResponse {
     pub answer: Option<Vec<DnsAnswer>>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, serde::Serialize)]
 pub struct DnsAnswer {
     #[serde(default)]
     pub name: String,

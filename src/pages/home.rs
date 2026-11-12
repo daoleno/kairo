@@ -187,7 +187,14 @@ pub fn explain(e: &str) -> (String, Option<String>) {
     {
         return (
             "Kairo can't reach the provider.".into(),
-            Some(format!("Check that {} is online, then try again.", if cfg!(target_os = "android") { "this phone" } else { "this Mac or PC" })),
+            Some(format!(
+                "Check that {} is online, then try again.",
+                match crate::ui::machine() {
+                    Some(m) => m,
+                    None if cfg!(target_os = "android") => "this phone".into(),
+                    None => "this Mac or PC".into(),
+                }
+            )),
         );
     }
     if low.contains("base64 node list") {
@@ -254,7 +261,7 @@ fn home() -> impl IntoElement {
 fn hero() -> impl IntoElement {
     let store = store();
     let state = computed(conn);
-    let last_press = signal(None::<(bool, std::time::Instant)>);
+    let last_press = signal(None::<(bool, nsh_core::time::Instant)>);
     let on = move || {
         matches!(state.get(), Conn::On | Conn::Connecting(_))
             && !matches!(state.get(), Conn::Connecting("Disconnecting…"))
@@ -292,7 +299,7 @@ fn hero() -> impl IntoElement {
                         on(),
                         matches!(state.get(), Conn::Failed(_)),
                     );
-                    last_press.set(Some((next, std::time::Instant::now())));
+                    last_press.set(Some((next, nsh_core::time::Instant::now())));
                     store.run(store.svc().connect(next));
                 }))
                 .child(
@@ -442,21 +449,25 @@ fn fix_button(message: impl Fn() -> String + Copy + 'static, failed: bool) -> im
                 ui::capsule("Use a Free Port", true)
                     .on_press(move || {
                         let mut next = store.svc().settings();
-                        if controller {
-                            next.controller_port = kairo_core::settings::free_port(
-                                next.controller_port + 1,
-                                &[next.mixed_port],
-                            );
+                        // The port that is busy moves; the other stays.
+                        let (from_mixed, from_controller) = if controller {
+                            (next.mixed_port, next.controller_port + 1)
                         } else {
-                            next.mixed_port = kairo_core::settings::free_port(
-                                next.mixed_port + 1,
-                                &[next.controller_port],
-                            );
-                        }
-                        store.run_then(store.svc().update_settings(next), move |r| {
-                            if r.is_ok() {
-                                store.run(store.svc().connect(true));
+                            (next.mixed_port + 1, next.controller_port)
+                        };
+                        let free = store.svc().free_ports(from_mixed, from_controller);
+                        store.run_then(free, move |r| {
+                            let Ok((mixed, controller_port)) = r else { return };
+                            if controller {
+                                next.controller_port = controller_port;
+                            } else {
+                                next.mixed_port = mixed;
                             }
+                            store.run_then(store.svc().update_settings(next), move |r| {
+                                if r.is_ok() {
+                                    store.run(store.svc().connect(true));
+                                }
+                            });
                         });
                     })
                     .into_element()
@@ -521,6 +532,7 @@ fn choices() -> impl IntoElement {
         })
     };
     let phone = ui::phone();
+    let remote = store.svc().is_remote();
     view()
         .gap_2()
         .flex_shrink_0()
@@ -536,12 +548,17 @@ fn choices() -> impl IntoElement {
                 move |m| store.run(store.svc().set_mode(m)),
             ),
         ))
-        // On Android every app is in the VPN: nothing to choose.
+        // On Android every app is in the VPN: nothing to choose (a server's
+        // page, phone-sized or not, chooses for the server).
         .child(when(
-            move || !phone,
+            move || !phone || remote,
             move || {
+                // A server's page switches the server's apps.
                 labelled(
-                    "Apps",
+                    match ui::machine() {
+                        Some(m) => SharedString::from(format!("Apps on {m}")),
+                        None => "Apps".into(),
+                    },
                     ui::segmented(
                         vec![(Via::System, "System settings"), (Via::Tun, "Every app")],
                         via,
@@ -552,7 +569,7 @@ fn choices() -> impl IntoElement {
         ))
 }
 
-fn labelled(label: &'static str, control: impl IntoElement) -> impl IntoElement {
+fn labelled(label: impl IntoReactive<SharedString>, control: impl IntoElement) -> impl IntoElement {
     let phone = ui::phone();
     // On a phone the label and its control wrap rather than push the label off the edge.
     let row = view().flex_row().flex_wrap().items_center().gap_3();
@@ -572,7 +589,7 @@ pub enum Via {
 /// first undoes it, whatever the screen shows yet (the core takes a moment to
 /// stop or start): the last press wins. After a while, or after a failure,
 /// the screen is the truth.
-fn next_press(last: Option<(bool, std::time::Instant)>, shown_on: bool, failed: bool) -> bool {
+fn next_press(last: Option<(bool, nsh_core::time::Instant)>, shown_on: bool, failed: bool) -> bool {
     match last {
         Some((v, at)) if at.elapsed() < std::time::Duration::from_secs(3) && !failed => !v,
         _ => !shown_on,
