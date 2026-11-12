@@ -23,6 +23,8 @@ struct Server {
     port: u16,
     home: PathBuf,
     setup_code: Option<String>,
+    /// Everything it wrote, stdout and stderr.
+    output: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl Drop for Server {
@@ -51,6 +53,10 @@ fn folder() -> tempfile::TempDir {
 
 /// Starts a server on the scratch place `dir` (see [`folder`]).
 fn start(dir: &Path, extra: &[&str]) -> Server {
+    start_with(dir, extra, &[])
+}
+
+fn start_with(dir: &Path, extra: &[&str], envs: &[(&str, &str)]) -> Server {
     let home = dir.join("home");
     let mut child = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
         .args(["serve", "--listen", "127.0.0.1:0", "--web"])
@@ -61,28 +67,37 @@ fn start(dir: &Path, extra: &[&str]) -> Server {
         .env("KAIRO_NO_UPDATE", "1")
         .env("KAIRO_NO_ICON_FETCH", "1")
         .env("RUST_LOG", "error")
+        .envs(envs.iter().copied())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("kairo-server runs");
-    let out = BufReader::new(child.stdout.take().unwrap());
+    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        for line in out.lines().map_while(Result::ok) {
-            if tx.send(line).is_err() {
-                break;
+    {
+        let (out, keep) = (BufReader::new(child.stdout.take().unwrap()), output.clone());
+        std::thread::spawn(move || {
+            for line in out.lines().map_while(Result::ok) {
+                keep.lock().unwrap().push(line.clone());
+                let _ = tx.send(line);
             }
-        }
-    });
-    let mut setup_code = None;
+        });
+        let (err, keep) = (BufReader::new(child.stderr.take().unwrap()), output.clone());
+        std::thread::spawn(move || {
+            for line in err.lines().map_while(Result::ok) {
+                keep.lock().unwrap().push(line);
+            }
+        });
+    }
     loop {
         let line = rx.recv_timeout(Duration::from_secs(30)).expect("the server says where it is");
-        if let Some(code) = line.strip_prefix("Setup code: ") {
-            setup_code = Some(code.trim().to_owned());
-        }
-        if let Some(rest) = line.strip_prefix("Kairo is at http://") {
+        // The harness's own address (others may come first, or never).
+        if let Some(rest) = line.strip_prefix("Kairo is at http://").filter(|r| r.starts_with("localhost:")) {
             let port = rest.rsplit(':').next().unwrap().trim().parse().unwrap();
-            return Server { child, port, home, setup_code };
+            // As its owner reads it (`kairo-server status`): never printed
+            // where a journal keeps it.
+            let setup_code = std::fs::read_to_string(home.join("web/setup-code")).ok().map(|c| c.trim().to_owned());
+            return Server { child, port, home, setup_code, output };
         }
     }
 }
@@ -147,6 +162,27 @@ impl Server {
     }
 }
 
+/// The child's exit and stderr if it exits within `limit`; else it is killed: `None`.
+fn exit_within(mut child: Child, limit: Duration) -> Option<(std::process::ExitStatus, String)> {
+    use std::io::Read;
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            let mut err = String::new();
+            if let Some(mut e) = child.stderr.take() {
+                let _ = e.read_to_string(&mut err);
+            }
+            return Some((status, err));
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// `name=value` of the response's cookie.
@@ -191,6 +227,11 @@ async fn first_run_needs_the_setup_code_and_no_password_is_set_by_default() {
     let r = server.post("/api/setup", json!({ "code": "000000", "password": PASSWORD }), None).await;
     assert_ne!(r.status(), StatusCode::OK);
     assert_eq!(server.session_state(None).await, "setup");
+    // The code is for its owner (`kairo-server status`, the file): never in
+    // what the server writes out, which a journal keeps.
+    let code = server.setup_code.clone().unwrap();
+    let said = server.output.lock().unwrap().join("\n");
+    assert!(!said.contains(&code), "the setup code went out: {said}");
     // The right one does, once.
     server.set_up().await;
     let again = server.setup_code.clone().unwrap();
@@ -274,8 +315,11 @@ async fn another_sites_page_can_not_sign_in_or_open_the_socket() {
         }
         assert_eq!(r.send().await.unwrap().status(), StatusCode::FORBIDDEN, "{origin:?}");
     }
-    // Cross-site WebSocket hijacking: even with the cookie, another origin is refused.
-    for origin in [Some("http://evil.example"), None] {
+    // Cross-site WebSocket hijacking: even with the cookie, another origin is
+    // refused; so is this host under another scheme (a page served over https
+    // by someone else on this name).
+    let other_scheme = format!("https://127.0.0.1:{}", server.port);
+    for origin in [Some("http://evil.example"), None, Some(other_scheme.as_str())] {
         match server.socket(Some(&cookie), origin).await {
             Err(tungstenite::Error::Http(r)) => assert_eq!(r.status(), 403, "{origin:?}"),
             other => panic!("{origin:?} opened the socket: {:?}", other.map(|_| ())),
@@ -331,30 +375,380 @@ async fn wrong_passwords_are_slowed_down_even_before_the_right_one() {
 
 #[tokio::test]
 async fn a_subscription_link_and_the_controller_secret_never_reach_a_page() {
-    let dir = folder();
+    // A provider: the subscription for Kairo; for the core, which fetches the
+    // config's providers itself, the connection just closes, and its log
+    // line quotes the link it tried ("Get \"<link>\": EOF").
+    const SUB_TOKEN: &str = "a8f3c2e7d91b04f6c5e2";
+    const PROVIDER_TOKEN: &str = "f00dfeed5eed1234abcd";
+    let provider = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let (port, _) = http_server({
+        let provider = provider.clone();
+        move |path, request| {
+            let to_kairo = request.to_ascii_lowercase().contains("user-agent: kairo/");
+            if path.starts_with("/api/v1/client/subscribe") && to_kairo {
+                let config = provider.lock().unwrap().clone();
+                Some(ok("text/yaml", config.into_bytes()))
+            } else {
+                None
+            }
+        }
+    });
+    let link = format!("http://127.0.0.1:{port}/api/v1/client/subscribe?token={SUB_TOKEN}");
+    let provider_link = format!("http://127.0.0.1:{port}/providers/extra?token={PROVIDER_TOKEN}");
+    *provider.lock().unwrap() = format!(
+        "proxies:\n  - {{name: a, type: direct}}\nproxy-providers:\n  same:\n    type: http\n    url: '{link}'\n    path: ./p/same.yaml\n    interval: 3600\n  extra:\n    type: http\n    url: '{provider_link}'\n    path: ./p/extra.yaml\n    interval: 3600\nproxy-groups:\n  - {{name: G, type: select, proxies: [a], use: [same, extra]}}\nrules:\n  - MATCH,G\n"
+    );
+    let dir = folder_with_core();
     let server = start(dir.path(), &[]);
     let cookie = server.set_up().await;
     let other = server.sign_in().await;
     let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
     let mut watcher = server.socket(Some(&other), Some(&server.origin())).await.unwrap();
-    // Nothing listens there: the add fails and its error quotes the link.
-    const TOKEN: &str = "a8f3c2e7d91b04f6c5e2";
-    let link = format!("http://127.0.0.1:9/api/v1/client/subscribe?token={TOKEN}");
     send(&mut ws, 1, "add_remote", json!({ "url": link, "name": null })).await;
-    let (mine, _) = frames(&mut ws, Duration::from_secs(4)).await;
+    send(&mut ws, 2, "connect", json!({ "on": true })).await;
+    let (mut mine, _) = frames(&mut ws, Duration::from_secs(8)).await;
+    // A link a page sent that never became a subscription.
+    let never = format!("http://127.0.0.1:9/api/v1/client/subscribe?token={SUB_TOKEN}9");
+    send(&mut ws, 3, "add_remote", json!({ "url": never, "name": null })).await;
+    send(&mut ws, 4, "update_provider", json!({ "name": "extra" })).await;
+    let (more, _) = frames(&mut ws, Duration::from_secs(4)).await;
+    mine.extend(more);
     let (theirs, _) = frames(&mut watcher, Duration::from_millis(500)).await;
-    let secret = std::fs::read_to_string(server.home.join("settings.json")).unwrap();
-    let secret: Value = serde_json::from_str(&secret).unwrap();
+    let secret: Value = serde_json::from_str(&std::fs::read_to_string(server.home.join("settings.json")).unwrap()).unwrap();
     let secret = secret["secret"].as_str().unwrap().to_owned();
     assert!(secret.len() >= 16);
     let all: Vec<&String> = mine.iter().chain(theirs.iter()).collect();
-    let reply = all.iter().find(|t| t.contains("\"id\":1")).expect("the add was answered");
-    assert!(reply.contains("\"err\""), "the add failed: {reply}");
+    let reply = |id: u64| {
+        all.iter()
+            .filter_map(|t| serde_json::from_str::<Value>(t).ok())
+            .find(|v| v["t"] == "reply" && v["v"]["id"] == id)
+            .map(|v| v["v"].to_string())
+    };
+    assert!(reply(1).is_some_and(|r| r.contains("\"ok\"")), "the subscription was added: {:?}", reply(1));
+    // The frames really carried what is redacted: the core's lines about
+    // both providers, and the provider update's error.
+    let logs: Vec<&&String> = all.iter().filter(|t| t.starts_with("{\"t\":\"logs\"")).collect();
+    assert!(logs.iter().any(|t| t.contains("same")), "no log line about the provider that is the subscription");
+    assert!(logs.iter().any(|t| t.contains("extra")), "no log line about the other provider");
+    assert!(reply(4).is_some_and(|r| r.contains("\"err\"")), "the provider update failed: {:?}", reply(4));
     for t in all {
-        for leak in [TOKEN, "/api/v1/client/subscribe", secret.as_str()] {
+        for leak in [SUB_TOKEN, PROVIDER_TOKEN, "/api/v1/client/subscribe", "/providers/extra", secret.as_str()] {
             assert!(!t.contains(leak), "{leak} went out in {t}");
         }
     }
+}
+
+// --- Helpers for the tests below ------------------------------------------------------------
+
+/// The core the tests run (`KAIRO_TEST_CORE`, as the core's own e2e tests).
+fn core() -> String {
+    std::env::var("KAIRO_TEST_CORE").expect("KAIRO_TEST_CORE: the mihomo core (scripts/fetch-mihomo.sh)")
+}
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
+/// [`folder`], with Kairo's settings on the test core and free ports.
+fn folder_with_core() -> tempfile::TempDir {
+    let dir = folder();
+    let settings = json!({
+        "corePath": core(),
+        "mixedPort": free_port(),
+        "controllerPort": free_port(),
+        "testTimeoutMs": 2000,
+    });
+    std::fs::write(dir.path().join("home/settings.json"), settings.to_string()).unwrap();
+    dir
+}
+
+/// An HTTP answer.
+fn ok(kind: &str, body: Vec<u8>) -> Vec<u8> {
+    let mut r = format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())
+        .into_bytes();
+    r.extend(body);
+    r
+}
+
+/// A server on 127.0.0.1: `answer(path, request)` is the whole answer, or
+/// `None` to close without one. Its port, and how many requests it had.
+fn http_server(
+    answer: impl Fn(&str, &str) -> Option<Vec<u8>> + Send + Sync + 'static,
+) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (count, answer) = (hits.clone(), std::sync::Arc::new(answer));
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let answer = answer.clone();
+            std::thread::spawn(move || {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                if let Some(bytes) = answer(&path, &request) {
+                    let _ = stream.write_all(&bytes);
+                }
+            });
+        }
+    });
+    (port, hits)
+}
+
+/// Sends a command and waits for its reply (other frames are skipped).
+async fn call(ws: &mut Ws, id: u64, cmd: &str, args: Value) -> Value {
+    send(ws, id, cmd, args).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(40);
+    loop {
+        match tokio::time::timeout_at(deadline, ws.next()).await {
+            Ok(Some(Ok(Message::Text(t)))) => {
+                let v: Value = serde_json::from_str(&t).unwrap();
+                if v["t"] == "reply" && v["v"]["id"] == id {
+                    return v["v"].clone();
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            other => panic!("no reply to {cmd}: {other:?}"),
+        }
+    }
+}
+
+/// The first state a socket gets.
+async fn first_state(ws: &mut Ws) -> Value {
+    let (first, _) = frames(ws, Duration::from_secs(2)).await;
+    first
+        .iter()
+        .filter_map(|t| serde_json::from_str::<Value>(t).ok())
+        .find(|v| v["t"] == "state")
+        .expect("the state")["v"]
+        .clone()
+}
+
+/// Every `name=value` the response sets.
+fn cookies_of(r: &reqwest::Response) -> Vec<String> {
+    r.headers()
+        .get_all(SET_COOKIE)
+        .iter()
+        .map(|v| v.to_str().unwrap().split(';').next().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_page_names_only_subscriptions_that_exist() {
+    let dir = folder();
+    let server = start(dir.path(), &[]);
+    let cookie = server.set_up().await;
+    let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
+    // A name of a file elsewhere, and an id of Kairo's form that is no subscription.
+    let outside = dir.path().join("outside");
+    let escape = format!("../../{}", outside.display());
+    let mut id = 10;
+    for target in [escape.as_str(), "../settings", "0123456789ab"] {
+        for (cmd, args) in [
+            ("activate", json!({ "id": target })),
+            ("delete_profile", json!({ "id": target })),
+            ("update_profile", json!({ "id": target })),
+            ("rename_profile", json!({ "id": target, "name": "x", "interval_hours": null, "url": null })),
+            ("dismiss_failure", json!({ "id": target })),
+        ] {
+            id += 1;
+            let r = call(&mut ws, id, cmd, args).await;
+            assert_eq!(r["err"], json!("There is no such subscription"), "{cmd} {target}: {r}");
+        }
+    }
+    assert!(!outside.exists() && !dir.path().join("outside.yaml").exists());
+    assert!(server.home.join("settings.json").is_file(), "nothing was deleted");
+}
+
+#[tokio::test]
+async fn tries_at_once_count_and_the_owners_browser_is_never_kept_out() {
+    let dir = folder();
+    let server = start(dir.path(), &[]);
+    // The owner's browser signed in before: it holds its device cookie.
+    let code = server.setup_code.clone().unwrap();
+    let r = server.post("/api/setup", json!({ "code": code, "password": PASSWORD }), None).await;
+    let device = cookies_of(&r).into_iter().find(|c| c.starts_with("kairo_device=")).expect("a device cookie");
+    // Twenty wrong tries at once from one address: no more than five are tried.
+    let tries = (0..20).map(|_| async {
+        reqwest::Client::new()
+            .post(server.url("/api/login"))
+            .header(ORIGIN, server.origin())
+            .json(&json!({ "password": "wrong guess" }))
+            .send()
+            .await
+            .unwrap()
+            .status()
+    });
+    let statuses = futures_util::future::join_all(tries).await;
+    let tried = statuses.iter().filter(|s| **s == StatusCode::UNAUTHORIZED).count();
+    let held = statuses.iter().filter(|s| **s == StatusCode::TOO_MANY_REQUESTS).count();
+    assert_eq!((tried, held), (5, 15), "{statuses:?}");
+    // That address waits, the right password too...
+    let r = server.post("/api/login", json!({ "password": PASSWORD }), None).await;
+    assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+    // ...but not the owner's browser, from the same address.
+    let r = server.post("/api/login", json!({ "password": PASSWORD }), Some(&device)).await;
+    assert_eq!(r.status(), StatusCode::OK, "the owner was kept out");
+}
+
+#[tokio::test]
+async fn a_page_can_not_read_or_map_this_machines_services() {
+    let (port, _) = http_server(|path, _| match path {
+        "/page.html" => Some(ok("text/html", b"<html><body>Internal dashboard: LOOPBACK-HTML-SECRET-777</body></html>".to_vec())),
+        "/notes.txt" => Some(ok("text/plain", b"LOOPBACK-TEXT-SECRET-888 is the key".to_vec())),
+        "/redirect" => Some(b"HTTP/1.1 302 Found\r\nLocation: /page.html\r\nContent-Length: 0\r\n\r\n".to_vec()),
+        "/away" => Some(b"HTTP/1.1 302 Found\r\nLocation: file:///etc/passwd\r\nContent-Length: 0\r\n\r\n".to_vec()),
+        "/nothing" => Some(b"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nnot found".to_vec()),
+        "/teapot" => Some(b"HTTP/1.1 418 I'm a teapot\r\nContent-Length: 0\r\n\r\n".to_vec()),
+        _ => None,
+    });
+    let closed = free_port();
+    let dir = folder();
+    let server = start(dir.path(), &[]);
+    let cookie = server.set_up().await;
+    let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
+    let mut errors = Vec::new();
+    for (i, url) in [
+        format!("http://127.0.0.1:{port}/page.html"),
+        format!("http://127.0.0.1:{port}/notes.txt"),
+        format!("http://localhost:{port}/redirect"),
+        format!("http://127.0.0.1:{port}/away"),
+        format!("http://127.0.0.1:{port}/nothing"),
+        format!("http://127.0.0.1:{port}/teapot"),
+        format!("http://127.0.0.1:{port}/eof"),
+        format!("http://127.0.0.1:{closed}/"),
+        format!("http://[::ffff:127.0.0.1]:{port}/page.html"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let r = call(&mut ws, 100 + i as u64, "add_remote", json!({ "url": url, "name": null })).await;
+        let err = r["err"].as_str().unwrap_or_else(|| panic!("{url} was added: {r}")).to_owned();
+        for leak in ["SECRET", "Internal dashboard", "404", "418", "teapot", "not found", "connect"] {
+            assert!(!err.contains(leak), "{url}: {err}");
+        }
+        errors.push(err);
+    }
+    errors.dedup();
+    assert_eq!(errors.len(), 1, "one answer, whatever was there: {errors:?}");
+}
+
+#[tokio::test]
+async fn a_page_can_not_point_the_delay_test_at_this_machine() {
+    let (port, hits) = http_server(|_, _| Some(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".to_vec()));
+    let dir = folder_with_core();
+    let server = start(dir.path(), &[]);
+    let cookie = server.set_up().await;
+    let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
+    let state = first_state(&mut ws).await;
+    let config = "proxies:\n  - {name: a, type: direct}\nproxy-groups:\n  - {name: G, type: select, proxies: [a]}\nrules:\n  - MATCH,G\n";
+    let r = call(&mut ws, 1, "add_yaml", json!({ "name": "t", "text": config })).await;
+    assert!(r.get("ok").is_some(), "{r}");
+    let r = call(&mut ws, 2, "connect", json!({ "on": true })).await;
+    assert!(r.get("ok").is_some(), "{r}");
+    // A page's own address for the test is not used...
+    let local = format!("http://127.0.0.1:{port}/generate_204");
+    call(&mut ws, 3, "test_node", json!({ "name": "a", "url": local })).await;
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "the core probed the page's address");
+    // ...nor can it be saved as the test address.
+    for url in [local.as_str(), "http://localhost/x", "http://10.0.0.1/", "http://[::1]/", "file:///etc/passwd", "http://169.254.169.254/latest/meta-data/"] {
+        let mut settings = state["settings"].clone();
+        settings["testUrl"] = json!(url);
+        let r = call(&mut ws, 4, "update_settings", json!({ "settings": settings })).await;
+        assert!(r.get("err").is_some(), "{url} was taken: {r}");
+    }
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(server.home.join("settings.json")).unwrap()).unwrap();
+    assert_ne!(saved["testUrl"], json!(local));
+    call(&mut ws, 5, "test_node", json!({ "name": "a", "url": null })).await;
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_page_can_not_choose_the_controller_secret() {
+    let dir = folder();
+    let server = start(dir.path(), &[]);
+    let cookie = server.set_up().await;
+    let mut ws = server.socket(Some(&cookie), Some(&server.origin())).await.unwrap();
+    let state = first_state(&mut ws).await;
+    let before: Value = serde_json::from_str(&std::fs::read_to_string(server.home.join("settings.json")).unwrap()).unwrap();
+    let mut settings = state["settings"].clone();
+    settings["secret"] = json!("PAGE-CHOSEN-SECRET-1");
+    settings["mixedPort"] = json!(free_port());
+    let r = call(&mut ws, 1, "update_settings", json!({ "settings": settings })).await;
+    assert!(r.get("ok").is_some(), "{r}");
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(server.home.join("settings.json")).unwrap()).unwrap();
+    assert_ne!(saved["secret"], json!("PAGE-CHOSEN-SECRET-1"));
+    assert_eq!(saved["secret"], before["secret"]);
+    // A new one is the server's to make.
+    let r = call(&mut ws, 2, "new_secret", Value::Null).await;
+    assert!(r.get("ok").is_some(), "{r}");
+    let after: Value = serde_json::from_str(&std::fs::read_to_string(server.home.join("settings.json")).unwrap()).unwrap();
+    assert_ne!(after["secret"], before["secret"]);
+}
+
+#[tokio::test]
+async fn an_address_that_can_not_be_had_yet_stops_nothing() {
+    // One address this machine does not have (bound anyway on Linux) and one
+    // port another program holds: the server, its other address and the core
+    // carry on, and it takes the held port once it is free.
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let held_port = held.local_addr().unwrap().port();
+    let not_here = format!("192.0.2.77:{}", free_port());
+    let dir = folder();
+    let server = start(dir.path(), &["--listen", &format!("127.0.0.1:{held_port}"), "--listen", &not_here]);
+    assert_eq!(server.session_state(None).await, "setup");
+    drop(held);
+    let mut reached = false;
+    for _ in 0..30 {
+        if let Ok(r) = reqwest::get(format!("http://127.0.0.1:{held_port}/api/session")).await
+            && r.status() == StatusCode::OK
+        {
+            reached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(reached, "the held port was taken once free");
+    assert!(server_alive(&server), "the server runs");
+    // On Linux the address it does not have is bound already (IP_FREEBIND).
+    let said = server.output.lock().unwrap().join("\n");
+    assert!(said.contains(&format!("Kairo is at http://{not_here}")), "{said}");
+}
+
+fn server_alive(server: &Server) -> bool {
+    std::os::unix::net::UnixStream::connect(server.home.join("web/control.sock")).is_ok()
+}
+
+#[tokio::test]
+async fn status_json_says_what_runs_and_whether_tun_is_really_up() {
+    let dir = folder();
+    let home = dir.path().join("home");
+    let mut settings: Value = json!({});
+    settings["mixedPort"] = json!(free_port());
+    settings["controllerPort"] = json!(free_port());
+    std::fs::write(home.join("settings.json"), settings.to_string()).unwrap();
+    let status = || {
+        let out = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
+            .args(["status", "--json"])
+            .env("KAIRO_HOME", &home)
+            .output()
+            .unwrap();
+        serde_json::from_slice::<Value>(&out.stdout).expect("JSON")
+    };
+    let off = status();
+    assert_eq!(off["running"], json!(false));
+    let server = start(dir.path(), &[]);
+    let on = status();
+    assert_eq!(on["running"], json!(true));
+    assert_eq!(on["setup_code"].as_str(), server.setup_code.as_deref());
+    // No core runs: TUN is not up, whatever the setting says (the TUN e2e
+    // test sees it up, and the setting on with the core stopped).
+    assert!(on["every_app_setting"].is_boolean());
+    assert_eq!(on["every_app"], json!(false));
 }
 
 #[tokio::test]
@@ -458,12 +852,32 @@ async fn the_page_is_sent_with_its_protections() {
     assert!(!scripts.contains("unsafe-inline") && !scripts.contains("'unsafe-eval'"), "{csp}");
     assert_eq!(h.get("x-frame-options").unwrap(), "DENY");
     assert_eq!(h.get("referrer-policy").unwrap(), "no-referrer");
-    // Files outside the page's folder are not served.
-    for path in ["/../settings.json", "/%2e%2e/settings.json", "/..%2fsettings.json", "/web/password"] {
-        let r = reqwest::get(server.url(path)).await.unwrap();
-        let body = r.text().await.unwrap();
-        assert!(!body.contains("mixedPort") && !body.contains("$argon2"), "{path}");
+    // Files outside the page's folder are not served: Kairo's settings sit
+    // at ../home/settings.json from it. Sent as raw request lines (a client
+    // library would tidy the dots away before they reach the server).
+    assert!(server.home.join("settings.json").is_file());
+    for path in [
+        "/../home/settings.json",
+        "/./../home/settings.json",
+        "/%2e%2e/home/settings.json",
+        "/..%2fhome%2fsettings.json",
+        "//../home/settings.json",
+    ] {
+        let answer = raw_get(server.port, path).await;
+        assert!(!answer.contains("mixedPort"), "{path} served Kairo's settings: {answer}");
+        assert!(answer.starts_with("HTTP/1.1 404") || answer.starts_with("HTTP/1.1 400"), "{path}: {answer}");
     }
+}
+
+/// `GET <path>` exactly as written, over a plain socket: the whole answer.
+async fn raw_get(port: u16, path: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    s.write_all(request.as_bytes()).await.unwrap();
+    let mut answer = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(5), s.read_to_end(&mut answer)).await;
+    String::from_utf8_lossy(&answer).into_owned()
 }
 
 #[tokio::test]
@@ -475,16 +889,21 @@ async fn the_page_is_never_served_from_kairos_own_folder() {
     std::fs::create_dir_all(home.join("web")).unwrap();
     std::fs::write(home.join("web/index.html"), "<!doctype html>").unwrap();
     for web in [home.join("web"), home.clone(), dir.path().to_path_buf()] {
-        let out = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
+        let child = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
             .args(["serve", "--listen", "127.0.0.1:0", "--web"])
             .arg(&web)
             .env("KAIRO_HOME", &home)
             .env("KAIRO_NO_SYSPROXY", "1")
             .env("KAIRO_NO_UPDATE", "1")
-            .output()
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
-        assert!(!out.status.success(), "started with --web {}", web.display());
-        assert!(String::from_utf8_lossy(&out.stderr).contains("overlap"));
+        // A server that starts runs until stopped: that is a failure here, not a hang.
+        let (status, stderr) = exit_within(child, Duration::from_secs(15))
+            .unwrap_or_else(|| panic!("it started and served --web {}", web.display()));
+        assert!(!status.success(), "started with --web {}", web.display());
+        assert!(stderr.contains("overlap"), "{stderr}");
     }
     // A proper one: nothing of the folder is served by its name.
     let server = start(dir.path(), &[]);

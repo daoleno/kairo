@@ -1,8 +1,10 @@
 [Unit]
 Description=Kairo (the proxy, and its page)
 Documentation=https://github.com/daoleno/kairo
-Wants=network-online.target
-After=network-online.target
+# No network-online.target: a user unit cannot order itself after it (it is
+# the system manager's). Nothing waits for the network: a --listen address
+# that is not up yet is bound anyway (Linux) or tried again every 10 s, and
+# the proxy runs meanwhile.
 
 [Service]
 # Other addresses: add --listen ADDR (and read SECURITY-NOTES.md first).

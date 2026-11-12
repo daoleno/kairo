@@ -66,17 +66,70 @@ pub struct Ctx {
     /// even when they never became a subscription (a failed add quotes its
     /// link in the error, to every page).
     pub sent_links: std::sync::Mutex<Vec<String>>,
+    /// The provider links of the configs on disk, read again when a file changes.
+    providers: std::sync::Mutex<ProviderLinks>,
+}
+
+/// The `proxy-providers`/`rule-providers` links of the running config, every
+/// subscription and every override, and the files they were read from (by
+/// size and time: read again only when one changed).
+#[derive(Default)]
+struct ProviderLinks {
+    stamps: Vec<(PathBuf, Option<std::time::SystemTime>, u64)>,
+    links: Vec<String>,
+}
+
+fn config_files(paths: &Paths) -> Vec<(PathBuf, Option<std::time::SystemTime>, u64)> {
+    let mut files = vec![paths.runtime_config()];
+    for dir in [paths.profiles_dir(), paths.overrides_dir()] {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            let mut found: Vec<PathBuf> = entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
+                .collect();
+            found.sort();
+            files.extend(found);
+        }
+    }
+    files
+        .into_iter()
+        .map(|p| {
+            let meta = std::fs::metadata(&p).ok();
+            let (time, len) = (meta.as_ref().and_then(|m| m.modified().ok()), meta.map(|m| m.len()).unwrap_or(0));
+            (p, time, len)
+        })
+        .collect()
 }
 
 impl Ctx {
     pub fn new(svc: Service, auth: Arc<auth::Auth>, opts: Options, csp: String) -> Ctx {
-        Ctx { svc, auth, opts, csp, sent_links: Default::default() }
+        Ctx { svc, auth, opts, csp, sent_links: Default::default(), providers: Default::default() }
     }
 
-    /// The secrets of the moment: the state's, and the links pages sent.
+    /// The secrets of the moment: the state's, the links pages sent, and the
+    /// provider links of the configs.
     pub fn secrets(&self, state: &kairo_core::State) -> redact::Secrets {
-        let sent = self.sent_links.lock().unwrap_or_else(|e| e.into_inner());
-        redact::Secrets::with_links(state, &sent)
+        let mut links = self.sent_links.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        links.extend(self.provider_links());
+        redact::Secrets::with_links(state, &links)
+    }
+
+    fn provider_links(&self) -> Vec<String> {
+        let mut cache = self.providers.lock().unwrap_or_else(|e| e.into_inner());
+        let stamps = config_files(self.svc.paths());
+        if stamps != cache.stamps {
+            let mut links = Vec::new();
+            for (path, _, _) in &stamps {
+                if let Ok(text) = std::fs::read_to_string(path) {
+                    links.extend(kairo_core::config::provider_urls(&text));
+                }
+            }
+            links.sort();
+            links.dedup();
+            *cache = ProviderLinks { stamps, links };
+        }
+        cache.links.clone()
     }
 
     /// Remembers a link a page sent (the last few hundred).
@@ -181,26 +234,49 @@ pub async fn run(opts: Options, svc: Service) -> anyhow::Result<()> {
     })?;
     let ctx = Arc::new(Ctx::new(svc, auth.clone(), opts.clone(), http::csp_for(&index)));
     if let Some(code) = auth.setup_code() {
-        log::warn!("no password yet: open the page and set one with the setup code {code}");
-        println!("Setup code: {code}");
+        // Not into the log, nor into a journal (stdout under systemd is one):
+        // a terminal sees it; `kairo-server status` shows it to its owner.
+        use std::io::IsTerminal;
+        log::warn!("no password yet: open the page and set one with the setup code (`kairo-server status` shows it)");
+        if std::io::stdout().is_terminal() {
+            println!("Setup code: {code}");
+        }
     }
     control::spawn(ctx.clone());
     let app = http::router(ctx.clone()).into_make_service_with_connect_info::<SocketAddr>();
     let mut servers = Vec::new();
-    for addr in &opts.listen {
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(|e| anyhow::anyhow!("cannot listen on {addr}: {e}"))?;
-        log::warn!("listening on http://{}", listener.local_addr()?);
-        println!("Kairo is at http://{}", display_addr(listener.local_addr()?));
-        if !addr.ip().is_loopback() && !opts.secure() {
-            println!(
-                "Plain HTTP on the network: the password and the session cross it readable. \
-                 Reach it through HTTPS (tailscale serve, or a proxy with --public-url) or an SSH tunnel."
-            );
-        }
-        let app = app.clone();
-        servers.push(tokio::spawn(async move { axum::serve(listener, app).await }));
+    for &addr in &opts.listen {
+        let (app, secure) = (app.clone(), opts.secure());
+        // One address that cannot be had (not up yet, taken) never stops the
+        // server, the other addresses or the core: it is tried again.
+        servers.push(tokio::spawn(async move {
+            let mut said = false;
+            let listener = loop {
+                match bind(addr) {
+                    Ok(l) => break l,
+                    Err(e) => {
+                        if !said {
+                            log::error!("cannot listen on {addr} ({e}): trying again every 10 s");
+                            println!("Cannot listen on {addr} yet ({e}): trying again every 10 s");
+                            said = true;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    }
+                }
+            };
+            let local = listener.local_addr().unwrap_or(addr);
+            log::warn!("listening on http://{local}");
+            println!("Kairo is at http://{}", display_addr(local));
+            if !addr.ip().is_loopback() && !secure {
+                println!(
+                    "Plain HTTP on the network: the password and the session cross it readable. \
+                     Reach it through HTTPS (tailscale serve, or a proxy with --public-url) or an SSH tunnel."
+                );
+            }
+            if let Err(e) = axum::serve(listener, app).await {
+                log::error!("the listener on {addr} stopped: {e}");
+            }
+        }));
     }
     let stop = async {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signals");
@@ -216,6 +292,22 @@ pub async fn run(opts: Options, svc: Service) -> anyhow::Result<()> {
         s.abort();
     }
     Ok(())
+}
+
+/// A listening socket on `addr`. On Linux an address this machine does not
+/// have yet is bound all the same (IP_FREEBIND): it answers once it comes up.
+fn bind(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_reuse_address(true)?;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if !addr.ip().is_unspecified() && !addr.ip().is_loopback() {
+        let _ = if addr.is_ipv4() { socket.set_freebind_v4(true) } else { socket.set_freebind_v6(true) };
+    }
+    socket.set_nonblocking(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    tokio::net::TcpListener::from_std(socket.into())
 }
 
 /// An address as a browser takes it (`localhost` for 127.0.0.1).

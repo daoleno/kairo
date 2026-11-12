@@ -12,7 +12,7 @@ Kairo for a machine with no screen: the proxy, and its UI as a web page.
 Usage:
   kairo-server [serve] [options]   Run Kairo and serve its page
   kairo-server password            Set a new password (signs every browser out)
-  kairo-server status              What runs, where, and the setup code if any
+  kairo-server status [--json]     What runs, where, and the setup code if any
   kairo-server every-app off       Turn Every app (TUN) off
   kairo-server help
 
@@ -54,7 +54,7 @@ pub fn main() {
             serve(home, rest)
         }
         Some("password") => password(home),
-        Some("status") => status(home),
+        Some("status") => status(home, args.get(1).map(String::as_str) == Some("--json")),
         Some("every-app") if args.get(1).map(String::as_str) == Some("off") => every_app_off(home),
         Some("help") | Some("--help") | Some("-h") => println!("{HELP}"),
         Some(other) => fail(format!("unknown command {other:?}; see kairo-server help")),
@@ -148,8 +148,22 @@ fn password(home: PathBuf) {
     }
 }
 
-fn status(home: PathBuf) {
-    match control::ask(&home, "status") {
+fn status(home: PathBuf, as_json: bool) {
+    let answer = control::ask(&home, "status");
+    if as_json {
+        // For scripts: the running server's answer, or what is known without one.
+        let s = answer.unwrap_or_else(|| {
+            let code = std::fs::read_to_string(kairo_server::web_state_dir(&home).join("setup-code")).ok();
+            serde_json::json!({
+                "running": false,
+                "home": home,
+                "setup_code": code.map(|c| c.trim().to_owned()),
+            })
+        });
+        println!("{s}");
+        return;
+    }
+    match answer {
         Some(s) => {
             let line = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").to_owned();
             println!("Kairo is running ({})", line("version"));

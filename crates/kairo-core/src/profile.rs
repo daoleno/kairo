@@ -215,6 +215,48 @@ pub enum ProfileError {
     Download(String),
     #[error("The server answered HTTP {0}")]
     Http(u16),
+    /// Anything that went wrong with an address on this machine or its
+    /// network: one answer, whatever it was (see [`download`]).
+    #[error("{PRIVATE_FAILED}")]
+    Private,
+}
+
+/// The one error a subscription on a private address gets.
+pub const PRIVATE_FAILED: &str = "No subscription could be read from that address";
+
+/// The largest subscription read.
+pub const MAX_SUBSCRIPTION: usize = 16 * 1024 * 1024;
+
+/// Redirects followed, each checked.
+#[cfg(feature = "engine")]
+const MAX_REDIRECTS: usize = 10;
+
+/// An address of the core's fake-IP range (198.18/15): with TUN on, every
+/// name this machine resolves gets one, which says nothing of where it goes.
+pub fn is_fake_address(ip: std::net::IpAddr) -> bool {
+    let v4 = match ip {
+        std::net::IpAddr::V4(v4) => Some(v4),
+        std::net::IpAddr::V6(v6) => v6.to_ipv4_mapped(),
+    };
+    v4.is_some_and(|v4| v4.octets()[0] == 198 && (18..20).contains(&v4.octets()[1]))
+}
+
+/// An address of this machine or its network: loopback, private, link-local,
+/// unique-local, carrier-grade NAT, unspecified. Not the fake-IP range
+/// ([`is_fake_address`]): [`addresses_of`] looks behind those.
+pub fn is_private_address(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            let fake = o[0] == 198 && (18..20).contains(&o[1]);
+            o[0] == 0 || (crate::bypass::is_local(ip) && !fake)
+        }
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => is_private_address(IpAddr::V4(v4)),
+            None => crate::bypass::is_local(ip),
+        },
+    }
 }
 
 /// Checks that `text` is a usable mihomo config and counts its parts. The core's
@@ -333,6 +375,67 @@ pub struct Download {
     pub name: Option<String>,
     pub interval_hours: Option<u32>,
     pub web_page: Option<String>,
+    /// It came from (or through) an address of this machine or its network:
+    /// whatever is wrong with it is told as [`ProfileError::Private`].
+    pub private: bool,
+}
+
+impl Download {
+    /// [`inspect`] its body: from a private address, nothing of what it
+    /// said shows in the error.
+    pub fn inspect(&self) -> Result<ConfigStats, ProfileError> {
+        inspect(&self.body).map_err(|e| if self.private { ProfileError::Private } else { e })
+    }
+}
+
+/// Where `url` points: the addresses to connect to, and whether it is this
+/// machine or its network (a name that does not resolve has no addresses).
+///
+/// A name answered from the fake-IP range (TUN's DNS) is looked up in the
+/// core's own DNS (`core`, when it runs), which gives the real addresses;
+/// the connection then still goes to the fake one, so the core routes it by
+/// name as before. Without a real answer it counts as this machine's.
+#[cfg(feature = "engine")]
+pub async fn addresses_of(
+    url: &url::Url,
+    core: Option<&crate::controller::Controller>,
+) -> (Vec<std::net::SocketAddr>, bool) {
+    let port = url.port_or_known_default().unwrap_or(80);
+    let (name, addrs): (Option<String>, Vec<std::net::SocketAddr>) = match url.host() {
+        Some(url::Host::Ipv4(ip)) => (None, vec![(ip, port).into()]),
+        Some(url::Host::Ipv6(ip)) => (None, vec![(ip, port).into()]),
+        Some(url::Host::Domain(d)) => {
+            let d = d.to_ascii_lowercase();
+            if d == "localhost" || d.ends_with(".localhost") {
+                return (Vec::new(), true);
+            }
+            let found = match tokio::net::lookup_host((d.as_str(), port)).await {
+                Ok(it) => it.collect(),
+                Err(_) => Vec::new(),
+            };
+            (Some(d), found)
+        }
+        None => return (Vec::new(), true),
+    };
+    if !addrs.iter().any(|a| is_fake_address(a.ip())) {
+        let private = addrs.iter().any(|a| is_private_address(a.ip()));
+        return (addrs, private);
+    }
+    let mut real = Vec::new();
+    if let (Some(core), Some(name)) = (core, name.as_deref()) {
+        for kind in ["A", "AAAA"] {
+            if let Ok(r) = core.dns_query(name, kind).await {
+                real.extend(
+                    r.answer
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|a| a.data.trim().parse::<std::net::IpAddr>().ok()),
+                );
+            }
+        }
+    }
+    let private = real.is_empty() || real.iter().any(|ip| is_private_address(*ip) || is_fake_address(*ip));
+    (addrs, private)
 }
 
 /// The User-Agent subscriptions see: providers serve mihomo configs to it.
@@ -341,52 +444,120 @@ pub fn user_agent() -> String {
 }
 
 /// Downloads a subscription, through `proxy` (an `http://host:port` URL) when given.
+///
+/// Every hop of a redirect is checked: http or https only, and whether it
+/// points at an address of this machine or its network (by the name's
+/// addresses, which the connection is then held to, and by the address
+/// actually reached). A subscription there is still taken, but anything
+/// wrong with it (no answer, a status, a page that is not a config) is the
+/// one [`ProfileError::Private`]: a page cannot read or map local services
+/// through this. At most [`MAX_SUBSCRIPTION`] bytes are read. `core`: the
+/// running core's controller, to see behind TUN's fake addresses.
 #[cfg(feature = "engine")]
-pub async fn download(url: &str, proxy: Option<&str>) -> Result<Download, ProfileError> {
-    let mut builder = reqwest::Client::builder()
-        .user_agent(user_agent())
-        .timeout(std::time::Duration::from_secs(30))
-        .connect_timeout(std::time::Duration::from_secs(10));
-    builder = match proxy {
-        Some(p) => builder
-            .proxy(reqwest::Proxy::all(p).map_err(|e| ProfileError::Download(e.to_string()))?),
-        None => builder.no_proxy(),
-    };
-    let client = builder
-        .build()
-        .map_err(|e| ProfileError::Download(e.to_string()))?;
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| ProfileError::Download(short_error(&e)))?;
-    if !response.status().is_success() {
-        return Err(ProfileError::Http(response.status().as_u16()));
+pub async fn download(
+    url: &str,
+    proxy: Option<&str>,
+    core: Option<&crate::controller::Controller>,
+) -> Result<Download, ProfileError> {
+    let mut current = url::Url::parse(url).map_err(|_| ProfileError::Download("not a valid URL".into()))?;
+    let mut private = false;
+    let fail = |private: bool, e: ProfileError| if private { ProfileError::Private } else { e };
+    for _ in 0..=MAX_REDIRECTS {
+        if !matches!(current.scheme(), "http" | "https") {
+            return Err(fail(private, ProfileError::Download("redirected to an address that is not http or https".into())));
+        }
+        let (addrs, here) = addresses_of(&current, core).await;
+        private |= here;
+        let mut builder = reqwest::Client::builder()
+            .user_agent(user_agent())
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none());
+        builder = match proxy {
+            Some(p) => builder
+                .proxy(reqwest::Proxy::all(p).map_err(|e| ProfileError::Download(e.to_string()))?),
+            None => {
+                // Connect to the addresses checked, not to a second answer
+                // (fake ones excepted: the core resolves those by name).
+                let b = builder.no_proxy();
+                match current.host() {
+                    Some(url::Host::Domain(d)) if !addrs.is_empty() && !addrs.iter().any(|a| is_fake_address(a.ip())) => {
+                        b.resolve_to_addrs(d, &addrs)
+                    }
+                    _ => b,
+                }
+            }
+        };
+        let client = builder.build().map_err(|e| ProfileError::Download(e.to_string()))?;
+        let response = client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|e| fail(private, ProfileError::Download(short_error(&e))))?;
+        if proxy.is_none() && response.remote_addr().is_some_and(|a| is_private_address(a.ip())) {
+            private = true;
+        }
+        if response.status().is_redirection() {
+            let next = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|l| current.join(l).ok());
+            match next {
+                Some(next) => {
+                    current = next;
+                    continue;
+                }
+                None => return Err(fail(private, ProfileError::Http(response.status().as_u16()))),
+            }
+        }
+        if !response.status().is_success() {
+            return Err(fail(private, ProfileError::Http(response.status().as_u16())));
+        }
+        if response.content_length().is_some_and(|n| n > MAX_SUBSCRIPTION as u64) {
+            return Err(fail(private, ProfileError::Download("the subscription is larger than 16 MB".into())));
+        }
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        let usage = header("subscription-userinfo").and_then(|h| Usage::parse(&h));
+        let name = header("content-disposition").and_then(|h| filename_of(&h));
+        let interval_hours = header("profile-update-interval")
+            .and_then(|h| h.trim().parse::<f64>().ok())
+            .map(|h| h.max(0.0).round() as u32);
+        let web_page = header("profile-web-page-url");
+        let mut response = response;
+        let mut bytes = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    if bytes.len() + chunk.len() > MAX_SUBSCRIPTION {
+                        return Err(fail(private, ProfileError::Download("the subscription is larger than 16 MB".into())));
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok(None) => break,
+                Err(e) => return Err(fail(private, ProfileError::Download(short_error(&e)))),
+            }
+        }
+        let body = match String::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+        };
+        return Ok(Download {
+            body,
+            usage,
+            name,
+            interval_hours,
+            web_page,
+            private,
+        });
     }
-    let header = |name: &str| {
-        response
-            .headers()
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned)
-    };
-    let usage = header("subscription-userinfo").and_then(|h| Usage::parse(&h));
-    let name = header("content-disposition").and_then(|h| filename_of(&h));
-    let interval_hours = header("profile-update-interval")
-        .and_then(|h| h.trim().parse::<f64>().ok())
-        .map(|h| h.max(0.0).round() as u32);
-    let web_page = header("profile-web-page-url");
-    let body = response
-        .text()
-        .await
-        .map_err(|e| ProfileError::Download(short_error(&e)))?;
-    Ok(Download {
-        body,
-        usage,
-        name,
-        interval_hours,
-        web_page,
-    })
+    Err(fail(private, ProfileError::Download("too many redirects".into())))
 }
 
 #[cfg(feature = "engine")]
@@ -472,20 +643,23 @@ pub fn now() -> i64 {
 
 /// Saves a profile's config text.
 pub fn write_config(paths: &Paths, id: &str, text: &str) -> std::io::Result<()> {
-    write_atomic(&paths.profile(id), text.as_bytes())
+    write_atomic(&paths.profile(id)?, text.as_bytes())
 }
 
 pub fn read_config(paths: &Paths, id: &str) -> std::io::Result<String> {
-    std::fs::read_to_string(paths.profile(id))
+    std::fs::read_to_string(paths.profile(id)?)
 }
 
 /// The user's override YAML for a profile (empty when there is none).
 pub fn read_override(paths: &Paths, id: &str) -> String {
-    std::fs::read_to_string(paths.override_file(id)).unwrap_or_default()
+    paths
+        .override_file(id)
+        .and_then(std::fs::read_to_string)
+        .unwrap_or_default()
 }
 
 pub fn write_override(paths: &Paths, id: &str, text: &str) -> std::io::Result<()> {
-    write_atomic(&paths.override_file(id), text.as_bytes())
+    write_atomic(&paths.override_file(id)?, text.as_bytes())
 }
 
 /// Reads a local file to import.

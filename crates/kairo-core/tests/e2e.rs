@@ -665,6 +665,7 @@ async fn tun_in_a_network_namespace() {
         "no route before TUN"
     );
 
+    assert!(!svc.tun_up().await, "TUN is not up before it is turned on");
     svc.set_tun(true).await.expect("TUN on");
     wait_for("the TUN device", Duration::from_secs(10), || {
         let out = std::process::Command::new("ip")
@@ -687,6 +688,18 @@ async fn tun_in_a_network_namespace() {
         .unwrap();
     assert_eq!(body, "kairo-ok");
     assert!(count.load(Ordering::SeqCst) > before, "the node carried it");
+    assert!(svc.tun_up().await, "TUN is really up (the core's own, and its device)");
+    // A subscription link whose name TUN's DNS answers with a fake address:
+    // where it really goes is the core's to say (here, this machine's
+    // loopback through the node), so nothing of what answered shows.
+    let behind_fake = svc
+        .add_remote(format!("http://tun-e2e.kairo.test:{origin_port}/hello"), None)
+        .await;
+    assert_eq!(
+        behind_fake,
+        Err(kairo_core::profile::PRIVATE_FAILED.to_owned()),
+        "a fake address is not taken for a public one"
+    );
     let conns = svc.connections();
     let body = {
         let client = client.clone();
@@ -720,7 +733,19 @@ async fn tun_in_a_network_namespace() {
         "a name, through the DNS hijack"
     );
 
+    // The setting stays on with the core stopped: TUN is not up then.
+    svc.stop_core().await;
+    assert!(svc.settings().tun && !svc.tun_up().await, "the setting is not the TUN");
+    svc.start_core().await.expect("the core again");
+    core_up("the core running again", || state.borrow().core.clone()).await;
+    wait_for("TUN up again", Duration::from_secs(10), || {
+        let out = std::process::Command::new("ip").args(["-br", "addr"]).output().ok()?;
+        String::from_utf8_lossy(&out.stdout).contains("198.18.0.1").then_some(())
+    })
+    .await;
+
     svc.set_tun(false).await.expect("TUN off");
+    assert!(!svc.tun_up().await, "TUN off");
     wait_for("the TUN device gone", Duration::from_secs(10), || {
         let out = std::process::Command::new("ip")
             .args(["-br", "addr"])

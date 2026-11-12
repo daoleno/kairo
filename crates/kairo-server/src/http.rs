@@ -71,29 +71,33 @@ pub fn host_allowed(ctx: &Ctx, authority: &str) -> bool {
     ctx.opts.hosts.iter().any(|h| h.eq_ignore_ascii_case(&host))
 }
 
-/// Whether `origin` (an `Origin` header) is this server's own page, reached
-/// as `host` (the `Host` header).
-pub fn same_origin(origin: &str, host: &str) -> bool {
+/// The scheme a page of this server has when reached as `host`: the public
+/// URL's when that is the name (a proxy in front speaks HTTPS), else this
+/// listener's own (plain HTTP).
+pub fn page_scheme<'a>(public_url: Option<&'a url::Url>, host: &str) -> &'a str {
+    match public_url {
+        Some(u) if u.host_str().is_some_and(|h| h.eq_ignore_ascii_case(&host_part(host))) => u.scheme(),
+        _ => "http",
+    }
+}
+
+/// Whether `origin` (an `Origin` header) is exactly this server's own page,
+/// reached as `host` (the `Host` header) over `scheme`: the scheme, the name
+/// and the port must all be the page's.
+pub fn same_origin(origin: &str, scheme: &str, host: &str) -> bool {
     let Ok(o) = url::Url::parse(origin) else {
         return false;
     };
-    if !matches!(o.scheme(), "http" | "https") {
+    let Ok(expected) = url::Url::parse(&format!("{scheme}://{}", host.trim())) else {
+        return false;
+    };
+    // Exactly an origin: no path, user or query smuggled in.
+    if o.path() != "/" || o.query().is_some() || !o.username().is_empty() || o.password().is_some() {
         return false;
     }
-    let Some(oh) = o.host_str() else { return false };
-    let oh = oh.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
-    let port = o.port_or_known_default();
-    let (hh, hp) = {
-        let h = host.trim().to_ascii_lowercase();
-        let name = host_part(&h);
-        let explicit = if h.starts_with('[') {
-            h.rsplit_once("]:").and_then(|(_, p)| p.parse::<u16>().ok())
-        } else {
-            h.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok())
-        };
-        (name, explicit.or(Some(if o.scheme() == "https" { 443 } else { 80 })))
-    };
-    oh == hh && port == hp
+    o.scheme() == expected.scheme()
+        && o.host_str().map(str::to_ascii_lowercase) == expected.host_str().map(str::to_ascii_lowercase)
+        && o.port_or_known_default() == expected.port_or_known_default()
 }
 
 async fn guard(State(ctx): State<Arc<Ctx>>, request: Request, next: Next) -> Response {
@@ -106,7 +110,8 @@ async fn guard(State(ctx): State<Arc<Ctx>>, request: Request, next: Next) -> Res
     let upgrade = headers.get(header::UPGRADE).is_some();
     if changes || upgrade {
         let origin = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()).unwrap_or_default();
-        if !same_origin(origin, &host) {
+        let scheme = page_scheme(ctx.opts.public_url.as_ref(), &host);
+        if !same_origin(origin, scheme, &host) {
             return problem(StatusCode::FORBIDDEN, "Only Kairo's own page may do that");
         }
     }
@@ -136,8 +141,17 @@ fn cookie_name(ctx: &Ctx) -> &'static str {
     if ctx.opts.secure() { "__Host-kairo_session" } else { "kairo_session" }
 }
 
+/// The device cookie: which browser signed in before (for sign-in tries
+/// only; it signs no one in).
+fn device_name(ctx: &Ctx) -> &'static str {
+    if ctx.opts.secure() { "__Host-kairo_device" } else { "kairo_device" }
+}
+
 fn token_of(ctx: &Ctx, headers: &HeaderMap) -> Option<String> {
-    let name = cookie_name(ctx);
+    cookie(headers, cookie_name(ctx))
+}
+
+fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all(header::COOKIE)
         .iter()
@@ -243,9 +257,18 @@ fn auth_error(e: AuthError) -> Response {
     problem(status, &e.message())
 }
 
-fn signed_in(ctx: &Ctx, token: &str) -> Response {
+fn signed_in(ctx: &Ctx, s: &crate::auth::SignedIn) -> Response {
     let mut r = axum::Json(json!({})).into_response();
-    r.headers_mut().insert(header::SET_COOKIE, set_cookie(ctx, token));
+    r.headers_mut().insert(header::SET_COOKIE, set_cookie(ctx, &s.token));
+    let secure = if ctx.opts.secure() { "; Secure" } else { "" };
+    if let Ok(v) = HeaderValue::from_str(&format!(
+        "{}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{secure}",
+        device_name(ctx),
+        s.device,
+        400 * 86_400
+    )) {
+        r.headers_mut().append(header::SET_COOKIE, v);
+    }
     r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     r
 }
@@ -256,10 +279,11 @@ async fn setup(
     headers: HeaderMap,
     body: axum::Json<SetupBody>,
 ) -> Response {
-    match ctx.auth.setup(&body.code, &body.password, peer.ip(), &agent(&headers)).await {
-        Ok(token) => {
+    let device = cookie(&headers, device_name(&ctx));
+    match ctx.auth.setup(&body.code, &body.password, peer.ip(), device.as_deref(), &agent(&headers)).await {
+        Ok(s) => {
             log::warn!("the password was set from {}", peer.ip());
-            signed_in(&ctx, &token)
+            signed_in(&ctx, &s)
         }
         Err(e) => auth_error(e),
     }
@@ -271,8 +295,9 @@ async fn login(
     headers: HeaderMap,
     body: axum::Json<LoginBody>,
 ) -> Response {
-    match ctx.auth.login(&body.password, peer.ip(), &agent(&headers)).await {
-        Ok(token) => signed_in(&ctx, &token),
+    let device = cookie(&headers, device_name(&ctx));
+    match ctx.auth.login(&body.password, peer.ip(), device.as_deref(), &agent(&headers)).await {
+        Ok(s) => signed_in(&ctx, &s),
         Err(e) => {
             if e == AuthError::Wrong {
                 log::warn!("a wrong password from {}", peer.ip());
@@ -447,15 +472,22 @@ mod tests {
 
     #[test]
     fn origins() {
-        assert!(same_origin("http://127.0.0.1:7979", "127.0.0.1:7979"));
-        assert!(same_origin("http://kairo.localhost:7979", "kairo.localhost:7979"));
-        assert!(same_origin("https://kairo.example.ts.net", "kairo.example.ts.net"));
-        assert!(same_origin("http://[::1]:7979", "[::1]:7979"));
-        assert!(!same_origin("http://evil.example:7979", "127.0.0.1:7979"));
-        assert!(!same_origin("http://127.0.0.1:8080", "127.0.0.1:7979"), "another port is another site");
-        assert!(!same_origin("https://127.0.0.1:7979", "127.0.0.1:80"));
-        assert!(!same_origin("null", "127.0.0.1:7979"));
-        assert!(!same_origin("", "127.0.0.1:7979"));
+        assert!(same_origin("http://127.0.0.1:7979", "http", "127.0.0.1:7979"));
+        assert!(same_origin("http://kairo.localhost:7979", "http", "kairo.localhost:7979"));
+        assert!(same_origin("https://kairo.example.ts.net", "https", "kairo.example.ts.net"));
+        assert!(same_origin("http://[::1]:7979", "http", "[::1]:7979"));
+        assert!(!same_origin("http://evil.example:7979", "http", "127.0.0.1:7979"));
+        assert!(!same_origin("http://127.0.0.1:8080", "http", "127.0.0.1:7979"), "another port is another site");
+        assert!(!same_origin("https://127.0.0.1:7979", "http", "127.0.0.1:7979"), "another scheme is another site");
+        assert!(!same_origin("https://127.0.0.1", "http", "127.0.0.1:443"));
+        assert!(!same_origin("http://kairo.example.ts.net", "https", "kairo.example.ts.net"));
+        assert!(!same_origin("null", "http", "127.0.0.1:7979"));
+        assert!(!same_origin("", "http", "127.0.0.1:7979"));
+        // Behind its public URL a page is HTTPS; reached directly, plain HTTP.
+        let public = url::Url::parse("https://kairo.example.ts.net").unwrap();
+        assert_eq!(page_scheme(Some(&public), "kairo.example.ts.net"), "https");
+        assert_eq!(page_scheme(Some(&public), "127.0.0.1:7979"), "http");
+        assert_eq!(page_scheme(None, "127.0.0.1:7979"), "http");
     }
 
     #[test]

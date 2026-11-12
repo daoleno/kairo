@@ -48,7 +48,7 @@ pub fn spawn(ctx: Arc<Ctx>) {
 
 async fn answer(ctx: &Ctx, line: &str) -> String {
     match line {
-        "status" => status(ctx).to_string(),
+        "status" => status(ctx).await.to_string(),
         "every-app off" => match ctx.svc.set_tun(false).await {
             Ok(()) => json!({ "ok": true }).to_string(),
             Err(e) => json!({ "error": e }).to_string(),
@@ -57,7 +57,8 @@ async fn answer(ctx: &Ctx, line: &str) -> String {
     }
 }
 
-pub fn status(ctx: &Ctx) -> serde_json::Value {
+pub async fn status(ctx: &Ctx) -> serde_json::Value {
+    let every_app = ctx.svc.tun_up().await;
     let s = ctx.svc.snapshot();
     json!({
         "running": true,
@@ -68,7 +69,9 @@ pub fn status(ctx: &Ctx) -> serde_json::Value {
         "password_set": !ctx.auth.needs_setup(),
         "setup_code": ctx.auth.setup_code(),
         "core": s.core.title(),
-        "every_app": s.settings.tun,
+        // TUN as it is (the core's own, and its device), not the setting.
+        "every_app": every_app,
+        "every_app_setting": s.settings.tun,
         "system_proxy": s.settings.system_proxy,
         "subscription": s.profiles.active.as_ref().and_then(|id| s.profiles.profiles.iter().find(|p| &p.id == id)).map(|p| p.name.clone()),
     })
