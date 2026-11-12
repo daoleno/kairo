@@ -118,7 +118,7 @@ pub enum Install {
     /// `/usr/bin/kairo` from the .deb.
     Deb,
     /// `<prefix>/bin/kairo-server`, its core in `lib/kairo` and its page in
-    /// `share/kairo/web`, writable by the user (the server's tarball). It is
+    /// `share/kairo-server/web`, writable by the user (the server's tarball). It is
     /// replaced in place and the server exits: its service starts the new one.
     Server { prefix: PathBuf },
     /// The Android app: the APK is handed to the system's installer, which asks
@@ -227,8 +227,8 @@ fn server_install(exe: &Path) -> Install {
         return Install::Other;
     };
     let complete = prefix.join("lib/kairo/mihomo").is_file()
-        && prefix.join("share/kairo/web/index.html").is_file();
-    let owned = [prefix.join("bin"), prefix.join("lib/kairo"), prefix.join("share/kairo")]
+        && prefix.join("share/kairo-server/web/index.html").is_file();
+    let owned = [prefix.join("bin"), prefix.join("lib/kairo"), prefix.join("share/kairo-server")]
         .iter()
         .all(|d| writable(d));
     if complete && owned {
@@ -975,7 +975,7 @@ fn install_server(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
     if !top.join("lib/kairo/mihomo").is_file() {
         return Err("The update has no core".into());
     }
-    if !top.join("share/kairo/web/index.html").is_file() {
+    if !top.join("share/kairo-server/web/index.html").is_file() {
         return Err("The update has no page".into());
     }
     let mut files = Vec::new();
@@ -993,12 +993,12 @@ fn install_server(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
     }
     // The page: copied beside the old one (the work folder may be on another
     // file system), then swapped by renames.
-    let web = prefix.join("share/kairo/web");
-    let next = prefix.join("share/kairo/.web-update");
-    let old = prefix.join("share/kairo/.web-old");
+    let web = prefix.join("share/kairo-server/web");
+    let next = prefix.join("share/kairo-server/.web-update");
+    let old = prefix.join("share/kairo-server/.web-old");
     let _ = std::fs::remove_dir_all(&next);
     let _ = std::fs::remove_dir_all(&old);
-    copy_dir(&top.join("share/kairo/web"), &next).map_err(|e| format!("The page: {e}"))?;
+    copy_dir(&top.join("share/kairo-server/web"), &next).map_err(|e| format!("The page: {e}"))?;
     if web.exists() {
         std::fs::rename(&web, &old).map_err(|e| format!("The page: {e}"))?;
     }
@@ -1681,8 +1681,8 @@ mod tests {
         for (f, body) in [
             ("bin/kairo-server", "old"),
             ("lib/kairo/mihomo", "old core"),
-            ("share/kairo/web/index.html", "old page"),
-            ("share/kairo/web/nsh.0123456789.js", "old script"),
+            ("share/kairo-server/web/index.html", "old page"),
+            ("share/kairo-server/web/nsh.0123456789.js", "old script"),
         ] {
             std::fs::create_dir_all(prefix.join(f).parent().unwrap()).unwrap();
             std::fs::write(prefix.join(f), body).unwrap();
@@ -1705,8 +1705,8 @@ mod tests {
         for (f, body) in [
             ("Kairo-server-0.4.0-linux-x86_64/bin/kairo-server", "new"),
             ("Kairo-server-0.4.0-linux-x86_64/lib/kairo/mihomo", "new core"),
-            ("Kairo-server-0.4.0-linux-x86_64/share/kairo/web/index.html", "new page"),
-            ("Kairo-server-0.4.0-linux-x86_64/share/kairo/web/nsh.abcdef0123.js", "new script"),
+            ("Kairo-server-0.4.0-linux-x86_64/share/kairo-server/web/index.html", "new page"),
+            ("Kairo-server-0.4.0-linux-x86_64/share/kairo-server/web/nsh.abcdef0123.js", "new script"),
         ] {
             let mut h = tar::Header::new_gnu();
             h.set_size(body.len() as u64);
@@ -1720,9 +1720,9 @@ mod tests {
         let read = |f: &str| std::fs::read_to_string(prefix.join(f)).unwrap();
         assert_eq!(read("bin/kairo-server"), "new");
         assert_eq!(read("lib/kairo/mihomo"), "new core");
-        assert_eq!(read("share/kairo/web/index.html"), "new page");
-        assert!(!prefix.join("share/kairo/web/nsh.0123456789.js").exists(), "the old page is gone");
-        assert!(!prefix.join("share/kairo/.web-old").exists());
+        assert_eq!(read("share/kairo-server/web/index.html"), "new page");
+        assert!(!prefix.join("share/kairo-server/web/nsh.0123456789.js").exists(), "the old page is gone");
+        assert!(!prefix.join("share/kairo-server/.web-old").exists());
         // A tarball without its page changes nothing.
         let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
         for f in ["K/bin/kairo-server", "K/lib/kairo/mihomo"] {

@@ -2,7 +2,7 @@
 # scripts/package-server.sh [page-dir]
 # dist/Kairo-server-<version>-linux-<arch>.tar.gz: kairo-server (the engine and
 # the page behind a password, no GTK), the pinned mihomo core in lib/kairo, the
-# page in share/kairo/web, a systemd user service, the licences and an install
+# page in share/kairo-server/web (never share/kairo: that is Kairo's data folder), a systemd user service, the licences and an install
 # script for ~/.local (or a prefix). The page is page-dir when given (the
 # output of `nsh package --target web`, a folder with index.html), else built.
 set -e
@@ -12,7 +12,7 @@ arch=$(uname -m)
 name="Kairo-server-$version-linux-$arch"
 out="dist/$name"
 rm -rf "$out" "dist/$name.tar.gz"
-mkdir -p "$out/bin" "$out/lib/kairo" "$out/share/kairo" "$out/share/doc/kairo"
+mkdir -p "$out/bin" "$out/lib/kairo" "$out/share/kairo-server" "$out/share/doc/kairo"
 
 page=$1
 if [ -z "$page" ]; then
@@ -20,7 +20,7 @@ if [ -z "$page" ]; then
   page=dist/web/Kairo
 fi
 test -s "$page/index.html" || { echo "no page in $page" >&2; exit 1; }
-cp -R "$page" "$out/share/kairo/web"
+cp -R "$page" "$out/share/kairo-server/web"
 
 cargo build --release -p kairo-server
 cp "${CARGO_TARGET_DIR:-target}/release/kairo-server" "$out/bin/kairo-server"
@@ -40,7 +40,7 @@ https://github.com/MetaCubeX/mihomo/tree/$MIHOMO_VERSION
 NOTICE
 cp LICENSE "$out/share/doc/kairo/LICENSE"
 cp crates/kairo-server/SECURITY-NOTES.md "$out/share/doc/kairo/SECURITY-NOTES.md"
-cp crates/kairo-server/kairo-server.service "$out/share/kairo/kairo-server.service"
+cp crates/kairo-server/kairo-server.service "$out/share/kairo-server/kairo-server.service"
 
 cat > "$out/install.sh" <<'EOF'
 #!/bin/sh
@@ -51,15 +51,15 @@ prefix=${1:-$HOME/.local}
 here=$(cd "$(dirname "$0")" && pwd)
 install -Dm755 "$here/bin/kairo-server" "$prefix/bin/kairo-server"
 install -Dm755 "$here/lib/kairo/mihomo" "$prefix/lib/kairo/mihomo"
-rm -rf "$prefix/share/kairo/web"
-mkdir -p "$prefix/share/kairo"
-cp -R "$here/share/kairo/web" "$prefix/share/kairo/web"
+rm -rf "$prefix/share/kairo-server/web"
+mkdir -p "$prefix/share/kairo-server"
+cp -R "$here/share/kairo-server/web" "$prefix/share/kairo-server/web"
 for f in LICENSE LICENSE.mihomo NOTICE SECURITY-NOTES.md; do
   install -Dm644 "$here/share/doc/kairo/$f" "$prefix/share/doc/kairo/$f"
 done
 units=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 mkdir -p "$units"
-sed "s|@BIN@|$prefix/bin/kairo-server|" "$here/share/kairo/kairo-server.service" > "$units/kairo-server.service"
+sed "s|@BIN@|$prefix/bin/kairo-server|" "$here/share/kairo-server/kairo-server.service" > "$units/kairo-server.service"
 systemctl --user daemon-reload 2>/dev/null || true
 cat <<DONE
 kairo-server installed in $prefix.
@@ -67,7 +67,7 @@ kairo-server installed in $prefix.
 Start it now and with this account:   systemctl --user enable --now kairo-server
 Start it at boot, before you log in:  loginctl enable-linger "$USER"
 The code that sets the password:      $prefix/bin/kairo-server status
-Then open http://localhost:7979 (on this machine). For other devices, read
+Then open http://kairo.localhost:7979 (on this machine). For other devices, read
 $prefix/share/doc/kairo/SECURITY-NOTES.md first (HTTPS).
 DONE
 EOF
@@ -78,7 +78,9 @@ prefix=${1:-$HOME/.local}
 systemctl --user disable --now kairo-server 2>/dev/null || true
 rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/kairo-server.service"
 systemctl --user daemon-reload 2>/dev/null || true
-rm -rf "$prefix/share/kairo" "$prefix/share/doc/kairo"
+rm -rf "$prefix/share/kairo-server"
+# The docs and the core stay when the desktop app (bin/kairo) uses them too.
+[ -e "$prefix/bin/kairo" ] || rm -rf "$prefix/share/doc/kairo"
 rm -f "$prefix/bin/kairo-server"
 # The core stays when the desktop app (bin/kairo) uses it too.
 [ -e "$prefix/bin/kairo" ] || rm -rf "$prefix/lib/kairo"

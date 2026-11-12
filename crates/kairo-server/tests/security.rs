@@ -32,11 +32,12 @@ impl Drop for Server {
     }
 }
 
-/// A Kairo folder with no subscription and no core, and geo data in place
-/// (so the engine fetches nothing).
+/// A scratch place: Kairo's folder in `home` (no subscription, no core, geo
+/// data in place so the engine fetches nothing) and the page beside it in
+/// `page`, as a package lays them out (never one inside the other).
 fn folder() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    let runtime = dir.path().join("runtime");
+    let runtime = dir.path().join("home/runtime");
     std::fs::create_dir_all(&runtime).unwrap();
     for name in ["geoip.metadb", "GeoSite.dat", "Country.mmdb", "GeoIP.dat"] {
         let f = std::fs::File::create(runtime.join(name)).unwrap();
@@ -48,12 +49,14 @@ fn folder() -> tempfile::TempDir {
     dir
 }
 
-fn start(home: &Path, extra: &[&str]) -> Server {
+/// Starts a server on the scratch place `dir` (see [`folder`]).
+fn start(dir: &Path, extra: &[&str]) -> Server {
+    let home = dir.join("home");
     let mut child = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
         .args(["serve", "--listen", "127.0.0.1:0", "--web"])
-        .arg(home.join("page"))
+        .arg(dir.join("page"))
         .args(extra)
-        .env("KAIRO_HOME", home)
+        .env("KAIRO_HOME", &home)
         .env("KAIRO_NO_SYSPROXY", "1")
         .env("KAIRO_NO_UPDATE", "1")
         .env("KAIRO_NO_ICON_FETCH", "1")
@@ -79,7 +82,7 @@ fn start(home: &Path, extra: &[&str]) -> Server {
         }
         if let Some(rest) = line.strip_prefix("Kairo is at http://") {
             let port = rest.rsplit(':').next().unwrap().trim().parse().unwrap();
-            return Server { child, port, home: home.to_owned(), setup_code };
+            return Server { child, port, home, setup_code };
         }
     }
 }
@@ -396,11 +399,10 @@ async fn a_revoked_browser_is_signed_out_at_once_and_a_restart_keeps_the_rest() 
     drop(ws);
 
     // A restart: the session stays, the revoked one stays revoked.
-    let home = server.home.clone();
     unsafe { libc::kill(server.child.id() as i32, libc::SIGTERM) };
     let _ = server.child.wait();
     std::mem::forget(server);
-    let server = start(&home, &[]);
+    let server = start(dir.path(), &[]);
     assert_eq!(server.session_state(Some(&mine)).await, "signed_in");
     assert_eq!(server.session_state(Some(&theirs)).await, "sign_in");
     assert!(server.socket(Some(&mine), Some(&server.origin())).await.is_ok());
@@ -434,7 +436,7 @@ async fn a_second_server_on_the_same_folder_will_not_start() {
     let out = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
         .args(["serve", "--listen", "127.0.0.1:0", "--web"])
         .arg(dir.path().join("page"))
-        .env("KAIRO_HOME", dir.path())
+        .env("KAIRO_HOME", dir.path().join("home"))
         .env("KAIRO_NO_SYSPROXY", "1")
         .output()
         .unwrap();
@@ -461,5 +463,34 @@ async fn the_page_is_sent_with_its_protections() {
         let r = reqwest::get(server.url(path)).await.unwrap();
         let body = r.text().await.unwrap();
         assert!(!body.contains("mixedPort") && !body.contains("$argon2"), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn the_page_is_never_served_from_kairos_own_folder() {
+    // A page folder inside Kairo's (or Kairo's inside it) would serve the
+    // setup code, the password's hash and the sessions as files.
+    let dir = folder();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(home.join("web")).unwrap();
+    std::fs::write(home.join("web/index.html"), "<!doctype html>").unwrap();
+    for web in [home.join("web"), home.clone(), dir.path().to_path_buf()] {
+        let out = Command::new(env!("CARGO_BIN_EXE_kairo-server"))
+            .args(["serve", "--listen", "127.0.0.1:0", "--web"])
+            .arg(&web)
+            .env("KAIRO_HOME", &home)
+            .env("KAIRO_NO_SYSPROXY", "1")
+            .env("KAIRO_NO_UPDATE", "1")
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "started with --web {}", web.display());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("overlap"));
+    }
+    // A proper one: nothing of the folder is served by its name.
+    let server = start(dir.path(), &[]);
+    server.set_up().await;
+    for path in ["/setup-code", "/password", "/sessions.json", "/web/password", "/settings.json", "/control.sock"] {
+        let r = reqwest::get(server.url(path)).await.unwrap();
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "{path}");
     }
 }

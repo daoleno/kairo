@@ -96,7 +96,7 @@ jobs:
       - name: kairo-server's package, and it starts and serves its page
         run: |
           scripts/package-server.sh web-page
-          tar -tzf dist/Kairo-server-*.tar.gz | grep -q '/share/kairo/web/index.html$'
+          tar -tzf dist/Kairo-server-*.tar.gz | grep -q '/share/kairo-server/web/index.html$'
           dir=$(ls -d dist/Kairo-server-*/)
           home=$(mktemp -d)
           KAIRO_HOME=$home KAIRO_NO_SYSPROXY=1 "$dir/bin/kairo-server" serve --listen 127.0.0.1:7979 > server.log 2>&1 &

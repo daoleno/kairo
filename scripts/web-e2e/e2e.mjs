@@ -11,7 +11,10 @@ import os from 'node:os';
 const [,, pkg, out] = process.argv;
 fs.mkdirSync(out, { recursive: true });
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-web-e2e-'));
-const home = path.join(work, 'home');
+// A scratch account: install.sh puts the server in its ~/.local as it would
+// for a person, and the server finds Kairo's folder where it always does.
+const account = path.join(work, 'account');
+const home = path.join(account, '.local/share/kairo');
 const hits = path.join(work, 'hits');
 const PORT = 18200;
 const TOKEN = 'e2e-secret-4f1c9a';
@@ -23,8 +26,9 @@ const results = [];
 const check = (ok, what) => { results.push([ok, what]); log(ok ? 'PASS' : 'FAIL', what); if (!ok) throw new Error(what); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const procs = [];
-const env = { ...process.env, KAIRO_HOME: home, KAIRO_NO_SYSPROXY: '1', KAIRO_NO_UPDATE: '1', KAIRO_NO_ICON_FETCH: '1', RUST_LOG: 'warn' };
-delete env.DBUS_SESSION_BUS_ADDRESS; // never this machine's desktop session
+const env = { ...process.env, HOME: account, KAIRO_NO_SYSPROXY: '1', KAIRO_NO_UPDATE: '1', KAIRO_NO_ICON_FETCH: '1', RUST_LOG: 'warn' };
+// Never this machine's desktop session or service manager, nor its folders.
+for (const k of ['DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'KAIRO_HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME']) delete env[k];
 
 function start(cmd, args, opts = {}) {
   const p = spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'], ...opts });
@@ -44,7 +48,7 @@ function curl(args) {
   try { return execFileSync('curl', ['-sS', '--max-time', '8', ...args], { encoding: 'utf8' }); } catch (e) { return null; }
 }
 async function startServer() {
-  const s = start(path.join(pkg, 'bin/kairo-server'), ['serve', '--listen', '127.0.0.1:7979']);
+  const s = start(path.join(account, '.local/bin/kairo-server'), ['serve', '--listen', '127.0.0.1:7979']);
   const lines = [];
   s.stdout.on('data', d => lines.push(String(d)));
   await waitLine(s, /Kairo is at/);
@@ -57,6 +61,11 @@ try {
   // the namespace has no internet for the default one).
   const nodes = start('python3', ['-I', path.join(path.dirname(new URL(import.meta.url).pathname), 'nodes.py'), String(PORT), hits]);
   await waitLine(nodes, /ready/);
+  fs.mkdirSync(account, { recursive: true });
+  execFileSync('sh', [path.join(pkg, 'install.sh')], { env, stdio: 'inherit' });
+  const unit = fs.readFileSync(path.join(account, '.config/systemd/user/kairo-server.service'), 'utf8');
+  check(unit.includes(`ExecStart=${account}/.local/bin/kairo-server serve`) && unit.includes('Restart=always'), 'install.sh: the server in ~/.local and its user service');
+  check(fs.existsSync(path.join(account, '.local/share/kairo-server/web/index.html')) && !fs.existsSync(home), 'the page beside Kairo\'s folder, not in it');
   fs.mkdirSync(home, { recursive: true });
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ testUrl: `http://127.0.0.1:${PORT + 3}/generate_204`, testTimeoutMs: 2000 }));
   server = await startServer();
@@ -147,6 +156,16 @@ try {
   await shot(pb, '08-phone-home');
   await pb.getByText('Exits', { exact: true }).last().click();
   await shot(pb, '09-phone-exits');
+  // An exit picked on the phone: the request leaves through that server.
+  await pb.getByText('Everything else', { exact: true }).first().click();
+  await sleep(800);
+  if (!(await pb.getByText('Seattle 01', { exact: true }).count())) await pb.getByText('United States', { exact: true }).last().click();
+  await sleep(600);
+  await pb.getByText('Seattle 01', { exact: true }).last().click();
+  await pb.getByText('Chosen · Seattle 01').first().waitFor({ timeout: 15000 });
+  await shot(pb, '09b-phone-exit-seattle');
+  const seattle = count('seattle');
+  check(via()?.includes('hello') && count('seattle') === seattle + 1, 'picked on the phone, the request leaves through seattle');
 
   // A signs B out from Settings › Signed-in browsers.
   await pa.getByText('Settings', { exact: true }).first().click();

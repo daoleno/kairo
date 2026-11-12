@@ -109,6 +109,13 @@ pub fn machine_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_default()
 }
 
+/// Whether one folder is the other or inside it (as they are on disk).
+pub fn overlaps(a: &Path, b: &Path) -> bool {
+    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let (a, b) = (real(a), real(b));
+    a.starts_with(&b) || b.starts_with(&a)
+}
+
 /// The auth folder of a Kairo folder.
 pub fn web_state_dir(home: &Path) -> PathBuf {
     home.join("web")
@@ -161,6 +168,13 @@ pub fn home_locked(home: &Path) -> bool {
 
 /// Runs the server until a signal stops it.
 pub async fn run(opts: Options, svc: Service) -> anyhow::Result<()> {
+    if overlaps(&opts.web, &opts.home) {
+        anyhow::bail!(
+            "the page's folder {} and Kairo's folder {} overlap: the password and sessions would be served as files",
+            opts.web.display(),
+            opts.home.display()
+        );
+    }
     let auth = Arc::new(auth::Auth::open(web_state_dir(&opts.home))?);
     let index = std::fs::read_to_string(opts.web.join("index.html")).map_err(|e| {
         anyhow::anyhow!("the page's files are not in {}: {e}", opts.web.display())

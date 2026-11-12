@@ -30,8 +30,9 @@ Kairo's folder: KAIRO_HOME, else the desktop app's.";
 fn web_default() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     let dir = exe.parent().map(PathBuf::from).unwrap_or_default();
-    // A package: <prefix>/bin/kairo-server and <prefix>/share/kairo/web.
-    let packaged = dir.join("../share/kairo/web");
+    // A package: <prefix>/bin/kairo-server and <prefix>/share/kairo-server/web
+    // (not share/kairo: that is Kairo's own folder, with the password in it).
+    let packaged = dir.join("../share/kairo-server/web");
     if packaged.join("index.html").is_file() {
         return packaged;
     }
