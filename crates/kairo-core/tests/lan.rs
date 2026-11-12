@@ -81,13 +81,52 @@ async fn run_core(dir: &Path, config: &str, mixed: u16) -> Core {
         .spawn()
         .unwrap();
     let core = Core(child);
-    for _ in 0..100 {
-        if tokio::net::TcpStream::connect(("127.0.0.1", mixed)).await.is_ok() {
+    // Started means handling connections, not only listening: mihomo opens
+    // its ports and TUN while it applies the config and handles connections
+    // only once all of it is applied (hub/executor ApplyConfig: OnSuspend ...
+    // updateListeners, updateTun ... OnRunning). Until then it closes each
+    // one unhandled (tunnel handleTCPConn), which a check that expects a
+    // refusal would take for one. So: a page on this machine, through its
+    // port, until its body comes back (a 502 is what an unhandled one gets).
+    let ready = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let ready_url = format!("http://{}/", ready.local_addr().unwrap());
+    let page = tokio::spawn(serve(ready, "CORE-READY"));
+    let port: SocketAddr = format!("127.0.0.1:{mixed}").parse().unwrap();
+    let t = std::time::Instant::now();
+    while t.elapsed() < Duration::from_secs(15) {
+        if through("127.0.0.1", port, &ready_url).await.as_deref() == Some("CORE-READY") {
+            page.abort();
             return core;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("the core did not start: {}", std::fs::read_to_string(dir.join("core.log")).unwrap_or_default());
+}
+
+/// Inbounds that skip the main rules: a listener with a proxy of its own,
+/// one with rules of its own (`rule:` names a list of `sub-rules`), a port
+/// tunnel with an exit of its own, to the loopback service on
+/// `secret_port`. Their ports and the override that opens them, chosen
+/// afresh for each core: a port chosen once can be taken, between two
+/// cores, by one of the test's own connections.
+fn side_inbounds(secret_port: u16) -> (u16, u16, u16, String) {
+    let (listener_port, sub_rules_port, tunnel_port) = (free_port(LAN), free_port(LAN), free_port(LAN));
+    let over = format!(
+        "listeners:\n  - {{name: lan-direct, type: http, port: {listener_port}, listen: 0.0.0.0, proxy: DIRECT}}\n  - {{name: lan-own, type: http, port: {sub_rules_port}, listen: 0.0.0.0, rule: own}}\nsub-rules:\n  own:\n    - MATCH,DIRECT\ntunnels:\n  - tcp,0.0.0.0:{tunnel_port},127.0.0.1:{secret_port},DIRECT\n"
+    );
+    (listener_port, sub_rules_port, tunnel_port, over)
+}
+
+/// The core's inbounds on `ports` are there (from this machine): a refusal
+/// through one that is not proves nothing.
+async fn listening(ports: &[u16], dir: &Path) {
+    for port in ports {
+        assert!(
+            tokio::net::TcpStream::connect(("127.0.0.1", *port)).await.is_ok(),
+            "the core's inbound on {port} is not there (its port taken?); the core:\n{}",
+            std::fs::read_to_string(dir.join("core.log")).unwrap_or_default()
+        );
+    }
 }
 
 /// GET `url` through the HTTP proxy at `proxy`, from `from`: the body if 200.
@@ -138,20 +177,13 @@ async fn other_devices_never_reach_this_machines_loopback() {
         format!("http://localhost:{secret_port}/"),
         format!("http://loop.test:{secret_port}/"),
     ];
-    let listener_port = free_port(LAN);
-    let sub_rules_port = free_port(LAN);
-    let tunnel_port = free_port(LAN);
-    // Inbounds that skip the main rules: a listener with a proxy of its own,
-    // one with rules of its own (`rule:` names a list of `sub-rules`), a port
-    // tunnel with an exit of its own.
-    let over = format!(
-        "listeners:\n  - {{name: lan-direct, type: http, port: {listener_port}, listen: 0.0.0.0, proxy: DIRECT}}\n  - {{name: lan-own, type: http, port: {sub_rules_port}, listen: 0.0.0.0, rule: own}}\nsub-rules:\n  own:\n    - MATCH,DIRECT\ntunnels:\n  - tcp,0.0.0.0:{tunnel_port},127.0.0.1:{secret_port},DIRECT\n"
-    );
     for (i, mode) in [Mode::Rule, Mode::Direct, Mode::Global].into_iter().enumerate() {
         let (mixed, controller) = (free_port(LAN), free_port("127.0.0.1"));
+        let (listener_port, sub_rules_port, tunnel_port, over) = side_inbounds(secret_port);
         let s = settings(true, mode, mixed, controller);
         let text = kairo_core::config::build(PROFILE, &over, &s).unwrap();
         let _core = run_core(&dir.path().join(format!("on-{i}")), &text, mixed).await;
+        listening(&[listener_port, sub_rules_port, tunnel_port], &dir.path().join(format!("on-{i}"))).await;
         let from_lan: SocketAddr = format!("{LAN}:{mixed}").parse().unwrap();
         let via_listener: SocketAddr = format!("{LAN}:{listener_port}").parse().unwrap();
         let via_sub_rules: SocketAddr = format!("{LAN}:{sub_rules_port}").parse().unwrap();
@@ -163,13 +195,25 @@ async fn other_devices_never_reach_this_machines_loopback() {
             let got = through(LAN, via_sub_rules, target).await;
             assert!(got.is_none(), "{mode:?}: another device reached {target} through a listener with its own rules: {got:?}");
         }
-        assert_eq!(through(LAN, via_sub_rules, &public_url).await.as_deref(), Some("PUBLIC-OK"));
+        let log = || std::fs::read_to_string(dir.path().join(format!("on-{i}/core.log"))).unwrap_or_default();
+        assert_eq!(
+            through(LAN, via_sub_rules, &public_url).await.as_deref(),
+            Some("PUBLIC-OK"),
+            "{mode:?}: another device proxies through a listener with its own rules; the core:\n{}",
+            log()
+        );
         assert_eq!(
             through(LAN, from_lan, &public_url).await.as_deref(),
             Some("PUBLIC-OK"),
-            "{mode:?}: another device proxies to the network as before"
+            "{mode:?}: another device proxies to the network as before; the core:\n{}",
+            log()
         );
-        assert_eq!(through(LAN, via_listener, &public_url).await.as_deref(), Some("PUBLIC-OK"));
+        assert_eq!(
+            through(LAN, via_listener, &public_url).await.as_deref(),
+            Some("PUBLIC-OK"),
+            "{mode:?}: another device proxies through a listener with its own proxy; the core:\n{}",
+            log()
+        );
         // A program on this machine: its own loopback, as always.
         let mine: SocketAddr = format!("127.0.0.1:{mixed}").parse().unwrap();
         assert_eq!(
@@ -187,7 +231,8 @@ async fn other_devices_never_reach_this_machines_loopback() {
 }
 
 /// A DNS server that answers every A question with 127.0.0.1 (a name of a
-/// developer's that leads to this machine), and others with nothing.
+/// developer's that leads to this machine), but `out.*` with 10.77.0.2 (a
+/// server out on the network), and others with nothing.
 async fn loopback_dns(sock: tokio::net::UdpSocket) {
     let mut buf = [0u8; 512];
     loop {
@@ -208,10 +253,38 @@ async fn loopback_dns(sock: tokio::net::UdpSocket) {
         out.extend_from_slice(&[0x81, 0x80, 0, 1, 0, a as u8, 0, 0, 0, 0]);
         out.extend_from_slice(&q[12..i + 5]);
         if a {
-            out.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 127, 0, 0, 1]);
+            let ip: [u8; 4] = if q[12..].starts_with(b"\x03out") { [10, 77, 0, 2] } else { [127, 0, 0, 1] };
+            out.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
+            out.extend_from_slice(&ip);
         }
         let _ = sock.send_to(&out, from).await;
     }
+}
+
+/// Answers every datagram with `PONG`.
+async fn udp_echo(sock: tokio::net::UdpSocket, heard: std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    let mut buf = [0u8; 512];
+    loop {
+        let Ok((_, from)) = sock.recv_from(&mut buf).await else { return };
+        heard.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = sock.send_to(b"PONG", from).await;
+    }
+}
+
+/// A datagram to `name:port`, the name resolved as any program here does
+/// (with TUN on: its DNS hijack, a fake address, into TUN). The answer, if any
+/// within 2 s.
+async fn udp_by_name(name: &str, port: u16) -> Option<String> {
+    let to = tokio::net::lookup_host((name, port)).await.ok()?.next()?;
+    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    let mut buf = [0u8; 64];
+    for _ in 0..3 {
+        sock.send_to(b"PING", to).await.ok()?;
+        if let Ok(Ok((n, _))) = tokio::time::timeout(Duration::from_millis(700), sock.recv_from(&mut buf)).await {
+            return Some(String::from_utf8_lossy(&buf[..n]).into_owned());
+        }
+    }
+    None
 }
 
 fn has_tun_address() -> bool {
@@ -219,6 +292,14 @@ fn has_tun_address() -> bool {
         .args(["-br", "addr"])
         .output()
         .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("198.18.0.1"))
+}
+
+/// Whether the namespace has a route to its nameserver (203.0.113.53, see
+/// scripts/tun-e2e.sh): only TUN's auto-route gives it one. The device and
+/// its address come up before the routes do; until then a lookup fails at
+/// once (network unreachable).
+fn has_tun_route() -> bool {
+    Command::new("ip").args(["route", "get", "203.0.113.53"]).output().is_ok_and(|o| o.status.success())
 }
 
 /// TUN and "Allow other devices" both on (this machine's own setup): a
@@ -242,6 +323,15 @@ async fn with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_st
     let dns = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let dns_port = dns.local_addr().unwrap().port();
     tokio::spawn(loopback_dns(dns));
+    // A UDP service on loopback.
+    let udp_local = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let udp_port = udp_local.local_addr().unwrap().port();
+    let udp_heard = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    tokio::spawn(udp_echo(udp_local, udp_heard.clone()));
+    // And one out on the network: UDP through TUN works, so a refusal is the guard's.
+    let udp_out = tokio::net::UdpSocket::bind((OUT_THERE, 0)).await.unwrap();
+    let udp_out_port = udp_out.local_addr().unwrap().port();
+    tokio::spawn(udp_echo(udp_out, Default::default()));
     let profile = format!(
         "{PROFILE}dns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 198.18.0.1/16\n  nameserver: [udp://127.0.0.1:{dns_port}]\n"
     );
@@ -255,13 +345,7 @@ async fn with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_st
         format!("http://loop.test:{secret_port}/"),
         dev_name.clone(),
     ];
-    let listener_port = free_port(LAN);
-    let sub_rules_port = free_port(LAN);
-    let tunnel_port = free_port(LAN);
-    let over = format!(
-        "listeners:\n  - {{name: lan-direct, type: http, port: {listener_port}, listen: 0.0.0.0, proxy: DIRECT}}\n  - {{name: lan-own, type: http, port: {sub_rules_port}, listen: 0.0.0.0, rule: own}}\nsub-rules:\n  own:\n    - MATCH,DIRECT\ntunnels:\n  - tcp,0.0.0.0:{tunnel_port},127.0.0.1:{secret_port},DIRECT\n"
-    );
-    let direct = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
+    let direct =reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
     let forwarding = || std::fs::read_to_string("/proc/sys/net/ipv4/ip_forward").unwrap_or_default().trim().to_owned();
     let forwarding_before = forwarding();
     let runs = ["mixed", "gvisor", "system"]
@@ -269,23 +353,50 @@ async fn with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_st
         .flat_map(|stack| [Mode::Rule, Mode::Direct, Mode::Global].map(|mode| (stack, mode)));
     for (i, (stack, mode)) in runs.enumerate() {
         let (mixed, controller) = (free_port(LAN), free_port("127.0.0.1"));
+        let (listener_port, sub_rules_port, tunnel_port, over) = side_inbounds(secret_port);
         let s = Settings { tun: true, tun_stack: stack.into(), ..settings(true, mode, mixed, controller) };
         let text = kairo_core::config::build(&profile, &over, &s).unwrap();
         assert!(text.contains("IN-TYPE,TUN"), "the exemption is there with TUN on");
-        let _core = run_core(&dir.path().join(format!("tun-{i}")), &text, mixed).await;
-        for _ in 0..100 {
-            if has_tun_address() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        // The previous core's device and routes are gone (it has exited; the
+        // kernel may take a moment more), so that what is seen next is this one's.
+        let t = std::time::Instant::now();
+        while (has_tun_address() || has_tun_route()) && t.elapsed() < Duration::from_secs(10) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(has_tun_address(), "{stack} {mode:?}: the TUN device is up");
+        assert!(!has_tun_address() && !has_tun_route(), "{stack} {mode:?}: the previous core's TUN is still there");
+        let _core = run_core(&dir.path().join(format!("tun-{i}")), &text, mixed).await;
+        listening(&[listener_port, sub_rules_port, tunnel_port], &dir.path().join(format!("tun-{i}"))).await;
+        // The core handles connections (see run_core): its TUN came up before.
+        assert!(has_tun_address() && has_tun_route(), "{stack} {mode:?}: the TUN device is up with its routes");
         assert_eq!(forwarding(), forwarding_before, "{stack}: the core does not turn IP forwarding on");
         eprintln!("{stack} {mode:?}: TUN up, ip_forward {}", forwarding());
         let mode = format!("{stack} {mode:?}");
-        // A program on this machine, captured by TUN, to its own name for loopback.
-        let got = async { direct.get(&dev_name).send().await.ok()?.text().await.ok() }.await;
+        // A program on this machine, captured by TUN, to its own name for
+        // loopback: one try (the core is up).
+        let got = match direct.get(&dev_name).send().await {
+            Ok(r) => r.text().await.ok(),
+            Err(e) => {
+                // What the core did with it, in its words (a refusal by the
+                // guard says "using REJECT").
+                let log = std::fs::read_to_string(dir.path().join(format!("tun-{i}/core.log"))).unwrap_or_default();
+                let said: Vec<&str> = log.lines().filter(|l| l.contains("dev.kairo.test")).collect();
+                eprintln!("{mode}: {e:?}; the core: {said:?}");
+                None
+            }
+        };
         assert_eq!(got.as_deref(), Some("LOOPBACK-SECRET"), "{mode:?}: a local program reached its loopback by name through TUN");
+        assert_eq!(
+            udp_by_name("out.kairo.test", udp_out_port).await.as_deref(),
+            Some("PONG"),
+            "{mode:?}: UDP through TUN to a server on the network"
+        );
+        // UDP from TUN's own range is never let through: the guard can not tell
+        // a local program's datagram from one this machine forwarded into TUN
+        // for a device on the network with a forged source (same inbound, same
+        // range). The price: local UDP to such a name through TUN is refused.
+        let got = udp_by_name("dev.kairo.test", udp_port).await;
+        assert_eq!(got, None, "{mode:?}: a datagram through TUN from TUN's range reached loopback");
+        assert_eq!(udp_heard.load(std::sync::atomic::Ordering::SeqCst), 0, "{mode:?}: the loopback UDP service heard it");
         // Another device, as before.
         let from_lan: SocketAddr = format!("{LAN}:{mixed}").parse().unwrap();
         let via_listener: SocketAddr = format!("{LAN}:{listener_port}").parse().unwrap();

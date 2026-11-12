@@ -49,6 +49,12 @@ cat > "$out/install.sh" <<'EOF'
 set -e
 prefix=${1:-$HOME/.local}
 here=$(cd "$(dirname "$0")" && pwd)
+# Another mihomo in the same bin (the machine's own) is left alone and never
+# used: Kairo's core is lib/kairo/mihomo, and the copy of it in Kairo's folder
+# is the one that runs (and keeps TUN's permission).
+if [ -e "$prefix/bin/mihomo" ]; then
+  echo "Note: $prefix/bin/mihomo is there too. kairo-server does not use it: its core is $prefix/lib/kairo/mihomo."
+fi
 install -Dm755 "$here/bin/kairo-server" "$prefix/bin/kairo-server"
 install -Dm755 "$here/lib/kairo/mihomo" "$prefix/lib/kairo/mihomo"
 rm -rf "$prefix/share/kairo-server/web"

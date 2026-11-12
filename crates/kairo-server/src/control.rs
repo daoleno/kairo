@@ -76,6 +76,21 @@ pub async fn status(ctx: &Ctx) -> serde_json::Value {
         "every_app": every_app,
         "every_app_setting": s.settings.tun,
         "system_proxy": s.settings.system_proxy,
+        "core_version": s.core_version,
+        // Whether the core in this folder may run TUN: "granted", "needed"
+        // (setcap again) or "unsupported".
+        "tun_permission": s.tun_privilege.map(|p| match p {
+            kairo_core::tun::Privilege::Granted => "granted",
+            kairo_core::tun::Privilege::Needed => "needed",
+            kairo_core::tun::Privilege::Unsupported => "unsupported",
+        }),
+        // The core in this folder was replaced at this start by the one
+        // Kairo ships (another version): null when it was left as it was.
+        "core_replaced": s.core_replaced.as_ref().map(|r| json!({
+            "from": r.from,
+            "to": r.to,
+            "tun_permission_needed": s.tun_privilege == Some(kairo_core::tun::Privilege::Needed),
+        })),
         "subscription": s.profiles.active.as_ref().and_then(|id| s.profiles.profiles.iter().find(|p| &p.id == id)).map(|p| p.name.clone()),
     })
 }

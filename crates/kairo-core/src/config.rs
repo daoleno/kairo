@@ -335,17 +335,19 @@ fn drop_tun_listeners(config: &mut Mapping) {
 /// resolved for it.
 pub const LOOPBACK_GUARD: &str = "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((SRC-IP-CIDR,::1/128))),(OR,((DOMAIN,localhost),(DOMAIN-SUFFIX,localhost),(IP-CIDR,127.0.0.0/8),(IP-CIDR,0.0.0.0/8),(IP-CIDR6,::1/128),(IP-CIDR6,::/128)))),REJECT";
 
-/// [`LOOPBACK_GUARD`] while TUN is on: a connection TUN captured from this
-/// machine is local too. It comes in through TUN (`IN-TYPE,TUN`) from TUN's
-/// own addresses, which only this machine has: with TUN up those addresses
-/// route into the TUN device, so a device on the network that forged one
-/// would never get a TCP handshake's answer, and a datagram it forged to the
-/// proxy's port comes in as SOCKS, not TUN. (A datagram this machine forwards
-/// into TUN for a device routing through it can still pass, one way: see
-/// SECURITY-NOTES item 10.)
+/// [`LOOPBACK_GUARD`] while TUN is on: a TCP connection TUN captured from
+/// this machine is local too. It comes in through TUN (`IN-TYPE,TUN`) from
+/// TUN's own addresses, which only this machine has: with TUN up those
+/// addresses route into the TUN device, so a device on the network that
+/// forged one would never get a TCP handshake's answer. UDP has no handshake:
+/// a datagram this machine forwards into TUN for a device routing through it
+/// (IP forwarding on, as Docker sets it) could carry a forged source in TUN's
+/// range, and nothing here tells it from a local program's. So UDP gets no
+/// exemption (`NETWORK,TCP`): local UDP to a name that resolves to loopback
+/// through TUN is refused too (SECURITY-NOTES item 10).
 pub fn loopback_guard_with_tun(tun_v4: &str, tun_v6: &str) -> String {
     format!(
-        "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((SRC-IP-CIDR,::1/128))),(NOT,((AND,((IN-TYPE,TUN),(OR,((SRC-IP-CIDR,{tun_v4}),(SRC-IP-CIDR,{tun_v6}))))))),(OR,((DOMAIN,localhost),(DOMAIN-SUFFIX,localhost),(IP-CIDR,127.0.0.0/8),(IP-CIDR,0.0.0.0/8),(IP-CIDR6,::1/128),(IP-CIDR6,::/128)))),REJECT"
+        "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((SRC-IP-CIDR,::1/128))),(NOT,((AND,((NETWORK,TCP),(IN-TYPE,TUN),(OR,((SRC-IP-CIDR,{tun_v4}),(SRC-IP-CIDR,{tun_v6}))))))),(OR,((DOMAIN,localhost),(DOMAIN-SUFFIX,localhost),(IP-CIDR,127.0.0.0/8),(IP-CIDR,0.0.0.0/8),(IP-CIDR6,::1/128),(IP-CIDR6,::/128)))),REJECT"
     )
 }
 
@@ -816,20 +818,18 @@ mod tests {
 
     #[test]
     fn a_yaml_whose_aliases_unfold_too_far_is_refused_without_unfolding_it() {
-        // One anchor of 2,000 items, aliased 5,000 times: under 50 KB of text,
-        // ten million nodes unfolded.
-        let mut text = String::from("big: &big [");
-        text.push_str(&vec!["x"; 2_000].join(","));
-        text.push_str("]\nmany:\n");
-        for _ in 0..5_000 {
-            text.push_str("  - *big\n");
-        }
+        // Three levels of a thousand: under 50 KB of text, a thousand million
+        // nodes unfolded, 200 times the limit. Counting to the limit takes a
+        // few seconds in a debug build on a slow machine (twice here); going
+        // through all of it would take hundreds of times that.
+        let items = |item: &str| vec![item; 1_000].join(",");
+        let text = format!("a: &a [{}]\nb: &b [{}]\nc: [{}]\n", items("x"), items("*a"), items("*b"));
         assert!(text.len() < 50_000);
         let started = std::time::Instant::now();
         let e = parse_mapping(&text).unwrap_err();
         assert!(e.contains("unfolds too far"), "{e}");
-        assert!(started.elapsed() < Duration::from_secs(10), "stopped at the limit");
         assert!(matches!(crate::profile::inspect(&text), Err(crate::profile::ProfileError::Yaml(e)) if e.contains("unfolds too far")));
+        assert!(started.elapsed() < Duration::from_secs(120), "stopped at the limit: {:?}", started.elapsed());
         // Aliases as configs use them pass.
         let normal = "base: &b {type: ss, port: 1}\nproxies:\n  - {<<: *b, name: a}\n  - {<<: *b, name: c}\n";
         assert!(parse_mapping(normal).is_ok());
@@ -983,6 +983,8 @@ rules:
             }) == Some(0)
         };
         assert!(balanced(LOOPBACK_GUARD) && balanced(&first), "{first}");
+        // TCP only: a datagram forwarded into TUN may carry a forged source in its range.
+        assert!(first.contains("(NOT,((AND,((NETWORK,TCP),(IN-TYPE,TUN),"), "{first}");
         // TUN's address follows the fake-IP range, as the core's does.
         let own_range = PROFILE.replacen("dns:\n  enable: true\n", "dns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 10.200.0.1/16\n", 1);
         assert_ne!(own_range, PROFILE);

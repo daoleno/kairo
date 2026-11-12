@@ -126,26 +126,26 @@ These notes say what it protects, how, and where each control is tested. Most co
       another device.
     - A listener's `rule:` runs a list of `sub-rules` in place of the rules, so each such list starts with the
       guard too.
-    - With TUN on as well, a local program's connection that TUN captured comes from TUN's own address (the
+    - With TUN on as well, a local program's TCP connection that TUN captured comes from TUN's own address (the
       fake-IP range's first address with a /30, 198.18.0.1/30 by default; `fdfe:dcba:9876::1/126`). It passes
-      the guard only when it is both: in through TUN (`IN-TYPE,TUN`) and from TUN's range. So a developer's
-      name that resolves to 127.0.0.1 works through TUN as it does without Kairo. With TUN off the generated
-      rules have no such exemption.
-    - Why a device on the network cannot use that exemption:
+      the guard only when it is all three: TCP (`NETWORK,TCP`), in through TUN (`IN-TYPE,TUN`), and from TUN's
+      range. So a developer's name that resolves to 127.0.0.1 works over TCP through TUN as it does without
+      Kairo. With TUN off the generated rules have no such exemption.
+    - **Accepted price:** local UDP to a name that resolves to loopback, sent through TUN, is refused (to
+      127.0.0.1 itself it never goes through TUN, and is not affected). Use 127.0.0.1, or a name the system
+      resolves without DNS (`/etc/hosts`), for local UDP.
+    - Why a device on the network cannot use the exemption:
       - TCP: with TUN up, TUN's range routes into the TUN device. A device that forges a source in it never gets
         the answer to its SYN, so no connection is made.
-      - UDP: a datagram forged to the proxy's port comes in as SOCKS5, not TUN, and the guard refuses it. A
-        forged datagram could come in through TUN only if this machine forwarded it there. That needs IP
-        forwarding on, a device that routes through this machine, and a reverse-path filter that is loose or
-        off. Neither Kairo nor the core turns forwarding on: the namespace test checks that it is unchanged
-        with TUN up. A machine may have it on anyway (Docker turns it on). Then such a device can send datagrams
-        one way to a UDP service on loopback, by a name that resolves there. The answers go back into TUN, never
-        to the device. Adding `NETWORK,TCP` to the exemption would close this, at the cost of local UDP to such
-        names through TUN.
+      - UDP gets no exemption at all. A datagram forged to the proxy's port comes in as SOCKS5, not TUN. One
+        this machine forwards into TUN for a device that routes through it (IP forwarding on, as Docker sets it)
+        could carry a forged source in TUN's range, and nothing tells it from a local program's datagram: so no
+        datagram from TUN's range reaches loopback either.
     - *Tests:* `other_devices_never_reach_this_machines_loopback` (`tests/lan.rs`: rule, Direct and All Traffic;
       a listener with its own proxy, one with its own rules; a port tunnel);
       `with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_still_do_not` (`tests/lan.rs`, TUN and
-      other devices on in a namespace: a local program reaches a name resolving to 127.0.0.1, and every path
+      other devices on in a namespace, every TUN stack: a local program reaches a name resolving to 127.0.0.1
+      over TCP; UDP through TUN reaches a server on the network but not that name on loopback; every path
       above is still refused to another device); `the_guard_lets_tuns_own_connections_through_only_while_tun_is_on`
       (`config.rs`).
 11. **A signed-in page reads or maps services on this machine or its network** through the server's own
