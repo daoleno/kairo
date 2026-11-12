@@ -155,6 +155,10 @@ pub struct Hello {
     pub offset: i64,
     /// The shell lines that send a terminal through Kairo there.
     pub terminal_env: String,
+    /// The command that gives the core there its TUN permission, for its
+    /// owner to run (a page can not ask for an administrator's password).
+    #[serde(default)]
+    pub tun_grant: Option<String>,
 }
 
 /// One message of the server.

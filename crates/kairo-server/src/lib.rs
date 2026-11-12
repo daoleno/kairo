@@ -10,6 +10,10 @@
 //! - The folder is locked: one Kairo (this, or the desktop app) at a time.
 //! - The CLI reaches a running server through a socket in the folder that
 //!   only its owner can open (`control`).
+//!
+//! It is Unix only for now: that socket, the signals and the file modes.
+
+#![cfg(unix)]
 
 pub mod auth;
 pub mod control;
@@ -58,6 +62,34 @@ pub struct Ctx {
     pub opts: Options,
     /// The page's content security policy.
     pub csp: String,
+    /// Subscription links pages sent, kept to scrub them from what goes out
+    /// even when they never became a subscription (a failed add quotes its
+    /// link in the error, to every page).
+    pub sent_links: std::sync::Mutex<Vec<String>>,
+}
+
+impl Ctx {
+    pub fn new(svc: Service, auth: Arc<auth::Auth>, opts: Options, csp: String) -> Ctx {
+        Ctx { svc, auth, opts, csp, sent_links: Default::default() }
+    }
+
+    /// The secrets of the moment: the state's, and the links pages sent.
+    pub fn secrets(&self, state: &kairo_core::State) -> redact::Secrets {
+        let sent = self.sent_links.lock().unwrap_or_else(|e| e.into_inner());
+        redact::Secrets::with_links(state, &sent)
+    }
+
+    /// Remembers a link a page sent (the last few hundred).
+    pub fn remember_link(&self, url: &str) {
+        let mut sent = self.sent_links.lock().unwrap_or_else(|e| e.into_inner());
+        let url = url.trim().to_owned();
+        if !url.is_empty() && !sent.contains(&url) {
+            if sent.len() >= 256 {
+                sent.remove(0);
+            }
+            sent.push(url);
+        }
+    }
 }
 
 /// The default port.
@@ -133,7 +165,7 @@ pub async fn run(opts: Options, svc: Service) -> anyhow::Result<()> {
     let index = std::fs::read_to_string(opts.web.join("index.html")).map_err(|e| {
         anyhow::anyhow!("the page's files are not in {}: {e}", opts.web.display())
     })?;
-    let ctx = Arc::new(Ctx { svc, auth: auth.clone(), opts: opts.clone(), csp: http::csp_for(&index) });
+    let ctx = Arc::new(Ctx::new(svc, auth.clone(), opts.clone(), http::csp_for(&index)));
     if let Some(code) = auth.setup_code() {
         log::warn!("no password yet: open the page and set one with the setup code {code}");
         println!("Setup code: {code}");
@@ -147,6 +179,12 @@ pub async fn run(opts: Options, svc: Service) -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("cannot listen on {addr}: {e}"))?;
         log::warn!("listening on http://{}", listener.local_addr()?);
         println!("Kairo is at http://{}", display_addr(listener.local_addr()?));
+        if !addr.ip().is_loopback() && !opts.secure() {
+            println!(
+                "Plain HTTP on the network: the password and the session cross it readable. \
+                 Reach it through HTTPS (tailscale serve, or a proxy with --public-url) or an SSH tunnel."
+            );
+        }
         let app = app.clone();
         servers.push(tokio::spawn(async move { axum::serve(listener, app).await }));
     }

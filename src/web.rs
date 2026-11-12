@@ -339,6 +339,12 @@ async fn get_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, Strin
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
+/// Signs this browser out: the server ends the session and clears the
+/// cookie; the link closes and the page asks to sign in.
+pub async fn sign_out() -> Result<(), String> {
+    post_json("/api/logout", &serde_json::json!({})).await.map(|_| ())
+}
+
 async fn post_json(path: &str, body: &serde_json::Value) -> Result<String, String> {
     let mut request = HttpRequest::new("POST", absolute(path));
     request.headers.push(("Content-Type".into(), "application/json".into()));

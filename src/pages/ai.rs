@@ -764,10 +764,7 @@ fn apply_fix(store: crate::store::Store, id: &'static str, fix: Fix) {
     match fix {
         Fix::UseAiExit => use_ai_exit(store, id),
         Fix::UseEveryApp => crate::pages::home::set_via(crate::pages::home::Via::Tun),
-        Fix::CopyForTerminal => {
-            set_clipboard(store.svc().terminal_env());
-            store.info("Copied");
-        }
+        Fix::CopyForTerminal => ui::copy_terminal_env(store),
     }
 }
 

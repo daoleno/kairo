@@ -5,6 +5,7 @@ use std::path::Path;
 
 use kairo_core::protocol::{Command, HIDDEN, IconInfo, IconKind};
 use kairo_core::Service;
+use kairo_core::tun::Privilege;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -40,8 +41,20 @@ pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value,
         }
         Command::SetSystemProxy { on } => json(svc.set_system_proxy(on).await),
         Command::SetTun { on } => json(svc.set_tun(on).await),
-        Command::GrantTun => json(svc.grant_tun().await),
-        Command::AddRemote { url, name } => json(svc.add_remote(url, name).await),
+        // Never pkexec from here: its dialog would open on this machine's
+        // screen, if anywhere. The owner runs the command; this checks again.
+        Command::GrantTun => match svc.recheck_tun() {
+            Privilege::Granted => done(),
+            Privilege::Unsupported => Err(format!("Every app (TUN) is not available on {}", crate::machine_name())),
+            Privilege::Needed => Err(match crate::link::tun_grant(&svc.core_path()) {
+                Some(cmd) => format!("Run this on {}, then try again: {cmd}", crate::machine_name()),
+                None => "The core has no TUN permission".into(),
+            }),
+        },
+        Command::AddRemote { url, name } => {
+            ctx.remember_link(&url);
+            json(svc.add_remote(url, name).await)
+        }
         Command::AddYaml { name, text } => add_yaml(svc, &name, text).await,
         Command::UpdateProfile { id } => json(svc.update_profile(id).await),
         Command::UpdateAllProfiles => json(svc.update_all_profiles().await),
@@ -55,6 +68,9 @@ pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value,
                 .find(|p| p.id == id)
                 .and_then(|p| p.url().map(str::to_owned));
             let url = keep_hidden_url(url, current.as_deref());
+            if let Some(u) = &url {
+                ctx.remember_link(u);
+            }
             svc.rename_profile(id, name, interval_hours, url);
             done()
         }

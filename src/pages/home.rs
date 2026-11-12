@@ -187,7 +187,14 @@ pub fn explain(e: &str) -> (String, Option<String>) {
     {
         return (
             "Kairo can't reach the provider.".into(),
-            Some(format!("Check that {} is online, then try again.", if cfg!(target_os = "android") { "this phone" } else { "this Mac or PC" })),
+            Some(format!(
+                "Check that {} is online, then try again.",
+                match crate::ui::machine() {
+                    Some(m) => m,
+                    None if cfg!(target_os = "android") => "this phone".into(),
+                    None => "this Mac or PC".into(),
+                }
+            )),
         );
     }
     if low.contains("base64 node list") {
@@ -525,6 +532,7 @@ fn choices() -> impl IntoElement {
         })
     };
     let phone = ui::phone();
+    let remote = store.svc().is_remote();
     view()
         .gap_2()
         .flex_shrink_0()
@@ -540,12 +548,17 @@ fn choices() -> impl IntoElement {
                 move |m| store.run(store.svc().set_mode(m)),
             ),
         ))
-        // On Android every app is in the VPN: nothing to choose.
+        // On Android every app is in the VPN: nothing to choose (a server's
+        // page, phone-sized or not, chooses for the server).
         .child(when(
-            move || !phone,
+            move || !phone || remote,
             move || {
+                // A server's page switches the server's apps.
                 labelled(
-                    "Apps",
+                    match ui::machine() {
+                        Some(m) => SharedString::from(format!("Apps on {m}")),
+                        None => "Apps".into(),
+                    },
                     ui::segmented(
                         vec![(Via::System, "System settings"), (Via::Tun, "Every app")],
                         via,
@@ -556,7 +569,7 @@ fn choices() -> impl IntoElement {
         ))
 }
 
-fn labelled(label: &'static str, control: impl IntoElement) -> impl IntoElement {
+fn labelled(label: impl IntoReactive<SharedString>, control: impl IntoElement) -> impl IntoElement {
     let phone = ui::phone();
     // On a phone the label and its control wrap rather than push the label off the edge.
     let row = view().flex_row().flex_wrap().items_center().gap_3();

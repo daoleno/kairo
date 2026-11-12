@@ -12,7 +12,7 @@ use tokio::sync::{Semaphore, mpsc};
 
 use crate::Ctx;
 use crate::auth::SessionKey;
-use crate::redact::{Secrets, encode};
+use crate::redact::encode;
 
 /// The close code a page reads as "signed out".
 pub const SIGNED_OUT: u16 = 4401;
@@ -28,6 +28,38 @@ pub fn hello(ctx: &Ctx) -> Hello {
         home: ctx.svc.paths().home.to_string_lossy().into_owned(),
         offset: kairo_core::time::local_offset_seconds(),
         terminal_env: ctx.svc.terminal_env(),
+        tun_grant: tun_grant(&ctx.svc.core_path()),
+    }
+}
+
+/// What the owner runs on this machine to let the core start TUN: the
+/// desktop app asks for it in a password dialog; a server has no one there.
+pub fn tun_grant(core: &std::path::Path) -> Option<String> {
+    let path = shell_quote(&core.to_string_lossy());
+    if cfg!(target_os = "linux") {
+        Some(format!("sudo setcap cap_net_admin,cap_net_bind_service=+ep {path}"))
+    } else if cfg!(target_os = "macos") {
+        Some(format!("sudo chown root:admin {path} && sudo chmod u+s,a+x {path}"))
+    } else {
+        None
+    }
+}
+
+/// `s` as one word for a shell.
+fn shell_quote(s: &str) -> String {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) {
+        s.to_owned()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_grant_command_quotes_the_path() {
+        assert_eq!(super::shell_quote("/home/a/.local/share/kairo/core/mihomo"), "/home/a/.local/share/kairo/core/mihomo");
+        assert_eq!(super::shell_quote("/srv/my core/it's"), "'/srv/my core/it'\\''s'");
     }
 }
 
@@ -48,7 +80,7 @@ pub async fn serve(ctx: Arc<Ctx>, key: SessionKey, socket: WebSocket) {
     let mut check = tokio::time::interval(Duration::from_secs(20));
     check.tick().await;
 
-    let mut secrets = Secrets::of(&state.borrow_and_update());
+    let mut secrets = ctx.secrets(&state.borrow_and_update());
     // What the page needs before its first page.
     let mut last_log = *log_seq.borrow_and_update();
     let first = vec![
@@ -77,9 +109,7 @@ pub async fn serve(ctx: Arc<Ctx>, key: SessionKey, socket: WebSocket) {
         let msg = tokio::select! {
             r = state.changed() => {
                 if r.is_err() { break }
-                let s = state.borrow_and_update().clone();
-                secrets = Secrets::of(&s);
-                ServerMsg::State(Box::new(s))
+                ServerMsg::State(Box::new(state.borrow_and_update().clone()))
             }
             r = live.changed() => {
                 if r.is_err() { break }
@@ -143,7 +173,7 @@ pub async fn serve(ctx: Arc<Ctx>, key: SessionKey, socket: WebSocket) {
                         tokio::spawn(async move {
                             let result = crate::dispatch::run(&ctx, &key, msg.cmd).await;
                             // Scrubbed with the secrets of after the command (a link just added).
-                            let secrets = Secrets::of(&ctx.svc.snapshot());
+                            let secrets = ctx.secrets(&ctx.svc.snapshot());
                             let _ = tx.send(encode(&ServerMsg::reply(msg.id, result), &secrets)).await;
                             drop(permit);
                         });
@@ -174,6 +204,8 @@ pub async fn serve(ctx: Arc<Ctx>, key: SessionKey, socket: WebSocket) {
                 continue;
             }
         };
+        // Fresh each time: a link another page just sent is a secret already.
+        secrets = ctx.secrets(&state.borrow());
         if sink.send(Message::Text(encode(&msg, &secrets).into())).await.is_err() {
             break;
         }

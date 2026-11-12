@@ -48,6 +48,7 @@ pub fn App() -> impl IntoElement {
 
 /// The window's content over `backend`: its theme, keys, menus and pages.
 pub fn main_view(backend: backend::Backend) -> impl IntoElement {
+    ui::set_machine(backend.machine());
     let store = Store::new(backend);
     provide_context(store);
 

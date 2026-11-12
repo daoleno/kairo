@@ -22,7 +22,16 @@ pub struct Secrets {
 
 impl Secrets {
     pub fn of(state: &State) -> Secrets {
+        Secrets::with_links(state, &[])
+    }
+
+    /// The state's secrets and those of `links` (sent by pages, perhaps
+    /// never a subscription).
+    pub fn with_links(state: &State, links: &[String]) -> Secrets {
         let mut pairs = Vec::new();
+        for url in links {
+            add_url(&mut pairs, url);
+        }
         for p in &state.profiles.profiles {
             if let Source::Remote { url, .. } = &p.source {
                 add_url(&mut pairs, url);
@@ -137,12 +146,17 @@ pub fn encode(msg: &ServerMsg, secrets: &Secrets) -> String {
 }
 
 /// Settings from the page: what it was not shown stays as it is here, and
-/// what a page may not change (the core binary the server runs) too.
+/// what a page may not change too: the program the server runs (any binary
+/// would do), and the desktop app's login item, minimizing and tray (the
+/// server starts with the machine; a login item would start the desktop app).
 pub fn keep_hidden_settings(mut next: Settings, current: &Settings) -> Settings {
     if next.secret == HIDDEN || next.secret.is_empty() {
         next.secret = current.secret.clone();
     }
     next.core_path = current.core_path.clone();
+    next.launch_at_login = current.launch_at_login;
+    next.start_minimized = current.start_minimized;
+    next.close_to_tray = current.close_to_tray;
     next
 }
 
@@ -250,10 +264,14 @@ mod tests {
         let mut back = page.settings.clone();
         back.mixed_port = 1234;
         back.core_path = Some("/bin/sh".into());
+        back.launch_at_login = !s.settings.launch_at_login;
+        back.allow_lan = !s.settings.allow_lan;
         let kept = keep_hidden_settings(back, &s.settings);
         assert_eq!(kept.secret, SECRET);
         assert_eq!(kept.mixed_port, 1234);
         assert_eq!(kept.core_path, s.settings.core_path, "a page cannot pick the binary");
+        assert_eq!(kept.launch_at_login, s.settings.launch_at_login, "nor add a login item");
+        assert_ne!(kept.allow_lan, s.settings.allow_lan, "the network switch is the person's");
         // The link it was shown, sent back as is, changes nothing.
         let shown = page.profiles.profiles[0].url().unwrap().to_owned();
         assert_eq!(keep_hidden_url(Some(shown), Some(LINK)), None);

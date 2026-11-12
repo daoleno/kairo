@@ -218,6 +218,16 @@ impl Backend {
         }
     }
 
+    /// The command that grants TUN where the service runs, when a page
+    /// can not ask for it (a server's).
+    pub fn tun_grant(&self) -> Option<String> {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backend::Local(_) => None,
+            Backend::Remote(r) => r.hello().tun_grant,
+        }
+    }
+
     pub fn terminal_env(&self) -> String {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
@@ -630,10 +640,14 @@ impl Backend {
         }
     }
 
+    /// Signs this browser out (and forgets its cookie).
     pub fn sign_out(&self) -> Fut<()> {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             Backend::Local(_) => Box::pin(std::future::ready(Ok(()))),
+            #[cfg(target_arch = "wasm32")]
+            Backend::Remote(_) => Box::pin(crate::web::sign_out()),
+            #[cfg(not(target_arch = "wasm32"))]
             Backend::Remote(r) => r.call(Command::SignOut),
         }
     }
@@ -763,6 +777,7 @@ impl Remote {
             home: String::new(),
             offset: 0,
             terminal_env: String::new(),
+            tun_grant: None,
         })
     }
 

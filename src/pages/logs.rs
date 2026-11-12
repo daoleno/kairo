@@ -71,8 +71,7 @@ pub fn page() -> impl IntoElement {
                 svc.user_home().as_deref(),
             ),
         });
-        set_clipboard(text);
-        store.info("Diagnostics copied");
+        ui::copy(store, text, "Diagnostics copied");
     };
 
     view()

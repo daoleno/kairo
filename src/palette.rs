@@ -108,10 +108,7 @@ fn commands(store: Store) -> Vec<Command> {
         "Copy Proxy Line for Terminal",
         "Connection",
         Icon::Link,
-        |s| {
-            set_clipboard(s.svc().terminal_env());
-            s.info("Copied");
-        },
+        crate::ui::copy_terminal_env,
     ));
     out.push(cmd(
         "Update Subscriptions",

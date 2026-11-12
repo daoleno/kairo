@@ -434,8 +434,7 @@ fn mirror_card() -> impl IntoElement {
                     .child(
                         view().flex_row().child(
                             ui::btn("Copy for terminal", Variant::Secondary).on_press(move || {
-                                set_clipboard(copy.clone());
-                                store.info("Copied");
+                                ui::copy(store, copy.clone(), "Copied");
                             }),
                         ),
                     )

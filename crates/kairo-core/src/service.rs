@@ -1275,6 +1275,14 @@ impl Service {
         })
     }
 
+    /// Reads the core's TUN permission again (granted from a shell, say) and
+    /// shows it.
+    pub fn recheck_tun(&self) -> Privilege {
+        let status = tun::status(&self.core_path());
+        self.modify(|s| s.tun_privilege = Some(status));
+        status
+    }
+
     /// Sets (or restores) the system proxy now, recording the outcome.
     fn apply_sysproxy(&self, on: bool) {
         let paths = self.0.paths.clone();

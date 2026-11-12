@@ -367,8 +367,14 @@ fn digested(path: &Path) -> bool {
 async fn file(State(ctx): State<Arc<Ctx>>, request: Request) -> Response {
     let path = request.uri().path();
     if path == "/" || path == "/index.html" {
-        let mut r = send_file(&ctx.opts.web.join("index.html"), request.headers(), "no-cache").await;
-        if let Ok(csp) = HeaderValue::from_str(&ctx.csp) {
+        let index = ctx.opts.web.join("index.html");
+        let mut r = send_file(&index, request.headers(), "no-cache").await;
+        // From the page as it is now (an update may have replaced it).
+        let csp = match tokio::fs::read_to_string(&index).await {
+            Ok(text) => csp_for(&text),
+            Err(_) => ctx.csp.clone(),
+        };
+        if let Ok(csp) = HeaderValue::from_str(&csp) {
             r.headers_mut().insert("content-security-policy", csp);
         }
         return r;
