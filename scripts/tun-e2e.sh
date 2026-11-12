@@ -34,6 +34,18 @@ for line in sys.stdin:
 KAIRO_TEST_NETNS=1 KAIRO_TEST_CORE="$KAIRO_TEST_CORE" unshare -rn sh -c \
   'ip link set lo up && ip addr add 10.77.0.1/32 dev lo && ip addr add 10.77.0.2/32 dev lo && ip addr add 203.0.113.5/32 dev lo && exec "$1" --test-threads=1 --nocapture' sh "$lan"
 
+# A granted core (a file capability, set by setcap inside the namespace) with
+# the shipped core's bytes, and a server that may not exec it (capsh drops
+# CAP_NET_ADMIN from its bounding set): a start leaves it as it is.
+copy=$(cargo test -p kairo-server --test core_copy --no-run --message-format=json 2>/dev/null \
+  | python3 -c 'import sys, json
+for line in sys.stdin:
+    m = json.loads(line)
+    if m.get("reason") == "compiler-artifact" and m.get("executable") and m["target"]["name"] == "core_copy":
+        print(m["executable"])')
+KAIRO_TEST_CAPS=1 KAIRO_TEST_CORE="$KAIRO_TEST_CORE" unshare -rn sh -c \
+  'ip link set lo up && exec "$1" a_granted_copy_that_this_process_cannot_run_keeps_its_permission --exact --nocapture' sh "$copy"
+
 # Both at once (this machine's own setup): TUN and "Allow other devices", in a
 # namespace of its own whose resolv.conf only TUN's DNS hijack answers.
 KAIRO_TEST_NETNS=1 KAIRO_TEST_TUN=1 KAIRO_TEST_CORE="$KAIRO_TEST_CORE" unshare -rnm sh -c \

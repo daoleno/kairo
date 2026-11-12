@@ -194,6 +194,16 @@ pub fn plain(p: PathBuf) -> PathBuf {
     stripped.unwrap_or(p)
 }
 
+/// The place a package of Kairo puts its core, for the executable `exe`, and
+/// no other: a `mihomo` that merely sits beside the executable is not Kairo's
+/// (in `~/.local/bin`, say, the machine's own, another version), and taking
+/// it for the bundled core would replace Kairo's copy, and its TUN grant,
+/// with it.
+///
+/// - Linux (the tarball, the .deb, the server package): `<prefix>/lib/kairo/mihomo`;
+/// - macOS: beside the executable inside `Kairo.app/Contents/MacOS`;
+/// - Windows: beside `Kairo.exe` in its own install folder;
+/// - a development build only: `target/mihomo` (`scripts/fetch-mihomo.sh`).
 pub fn bundled_core_for(exe: &Path) -> Option<PathBuf> {
     let dir = exe.parent()?;
     let name = if cfg!(windows) {
@@ -201,13 +211,16 @@ pub fn bundled_core_for(exe: &Path) -> Option<PathBuf> {
     } else {
         "mihomo"
     };
-    [
-        dir.join(name),
-        dir.join("../lib/kairo").join(name),
-        dir.join("../mihomo").join(name),
-    ]
-    .into_iter()
-    .find(|p| p.is_file())
+    let packaged = if cfg!(any(target_os = "macos", windows)) {
+        dir.join(name)
+    } else {
+        dir.join("../lib/kairo").join(name)
+    };
+    let development = cfg!(debug_assertions).then(|| dir.join("../mihomo").join(name));
+    [Some(packaged), development]
+        .into_iter()
+        .flatten()
+        .find(|p| p.is_file())
 }
 
 /// `id` when it is a profile id as Kairo makes them (12 lower-case hex digits).
@@ -301,6 +314,27 @@ mod plain_tests {
             plain(PathBuf::from("/usr/bin/kairo")),
             PathBuf::from("/usr/bin/kairo")
         );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod bundled_tests {
+    use super::*;
+
+    #[test]
+    fn a_mihomo_beside_the_executable_is_not_kairos() {
+        let dir = tempfile::tempdir().unwrap();
+        let prefix = dir.path().join("prefix");
+        std::fs::create_dir_all(prefix.join("bin")).unwrap();
+        let exe = prefix.join("bin/kairo-server");
+        std::fs::write(&exe, "").unwrap();
+        // The machine's own mihomo in the same bin (~/.local/bin/mihomo).
+        std::fs::write(prefix.join("bin/mihomo"), "").unwrap();
+        assert_eq!(bundled_core_for(&exe), None);
+        // The package's own.
+        std::fs::create_dir_all(prefix.join("lib/kairo")).unwrap();
+        std::fs::write(prefix.join("lib/kairo/mihomo"), "").unwrap();
+        assert_eq!(bundled_core_for(&exe), Some(prefix.join("bin/../lib/kairo/mihomo")));
     }
 }
 

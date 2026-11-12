@@ -95,6 +95,14 @@ pub enum AiAlert {
     ExitGone { was: String },
 }
 
+/// A core replaced by the one Kairo ships.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CoreReplaced {
+    /// The version the old one reported, when it ran.
+    pub from: Option<String>,
+    pub to: String,
+}
+
 /// Everything that changes rarely.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct State {
@@ -111,6 +119,10 @@ pub struct State {
     pub sysproxy_active: bool,
     pub sysproxy_supported: bool,
     pub tun_privilege: Option<Privilege>,
+    /// The core in Kairo's folder was replaced at this start (another core
+    /// came with an update). A replaced core has lost TUN's permission.
+    #[serde(default)]
+    pub core_replaced: Option<CoreReplaced>,
     pub task: Option<Task>,
     pub notice: Option<Notice>,
     /// A problem the core reported at start that it survives (a port in use).

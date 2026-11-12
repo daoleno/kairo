@@ -475,9 +475,11 @@ impl Service {
         let core = self.core_path();
         let version = core_bin::binary_version(&core).await;
         let privilege = tun::status(&core);
+        let replaced = seeded.as_ref().ok().and_then(|s| s.replaced.clone());
         self.modify(|s| {
             s.core_version = version.clone();
             s.tun_privilege = Some(privilege);
+            s.core_replaced = replaced;
         });
         // A new core (an app update) does not have TUN's grant yet: say so
         // rather than start a TUN that cannot come up.

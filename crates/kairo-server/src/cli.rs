@@ -198,6 +198,14 @@ fn status(home: PathBuf, as_json: bool) {
             println!("  Connection:  {}", line("core"));
             println!("  Every app:   {}", if s["every_app"].as_bool() == Some(true) { "on" } else { "off" });
             println!("  System proxy: {}", if s["system_proxy"].as_bool() == Some(true) { "on" } else { "off" });
+            if let Some(r) = s.get("core_replaced").filter(|r| !r.is_null()) {
+                let from = r["from"].as_str().unwrap_or("a core that did not run");
+                let to = r["to"].as_str().unwrap_or_default();
+                println!("  Core:        {from} was replaced by {to} at this start");
+                if s["tun_permission"].as_str() == Some("needed") {
+                    println!("               Every app needs its permission again: turn it on in the page for the command.");
+                }
+            }
             match s.get("setup_code").and_then(|v| v.as_str()) {
                 Some(code) => println!("  No password yet. Setup code: {code}"),
                 None => println!("  Password:    set"),

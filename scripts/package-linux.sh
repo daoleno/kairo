@@ -73,6 +73,10 @@ cat > "$out/install.sh" <<'EOF'
 set -e
 prefix=${1:-$HOME/.local}
 here=$(cd "$(dirname "$0")" && pwd)
+# Another mihomo in the same bin (the machine's own) is left alone and never used.
+if [ -e "$prefix/bin/mihomo" ]; then
+  echo "Note: $prefix/bin/mihomo is there too. Kairo does not use it: its core is $prefix/lib/kairo/mihomo."
+fi
 install -Dm755 "$here/bin/kairo" "$prefix/bin/kairo"
 install -Dm755 "$here/lib/kairo/mihomo" "$prefix/lib/kairo/mihomo"
 (cd "$here/share" && find . -type f) | while read -r f; do
