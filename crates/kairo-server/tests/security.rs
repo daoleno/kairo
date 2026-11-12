@@ -533,6 +533,14 @@ async fn a_config_can_not_read_this_machines_services_through_the_cores_own_fetc
     send(&mut ws, 4, "update_rule_provider", json!({ "name": "cls" })).await;
     let (more, _) = frames(&mut ws, Duration::from_secs(4)).await;
     all.extend(more);
+    // The core ends on its own: Kairo's notice quotes its last error line.
+    let core: i32 = std::fs::read_to_string(server.home.join("state/core.pid")).unwrap().trim().parse().unwrap();
+    unsafe {
+        libc::kill(core, libc::SIGKILL);
+    }
+    let (more, _) = frames(&mut ws, Duration::from_secs(4)).await;
+    assert!(more.iter().any(|t| t.contains("restarting")), "no notice of the core's end");
+    all.extend(more);
     // The core read the service and said so, line by line, in its own log on disk.
     let on_disk = std::fs::read_to_string(server.home.join("logs/core.log")).unwrap_or_default();
     assert!(on_disk.contains("PROVIDER-SECRET-4242") && on_disk.contains("LINE-ONE-SECRET-5151"), "the core's log keeps it all: {on_disk}");
@@ -544,7 +552,12 @@ async fn a_config_can_not_read_this_machines_services_through_the_cores_own_fetc
     }
     // But the page heard of it: which provider, what kind of error.
     let logs: Vec<&String> = all.iter().filter(|t| t.starts_with("{\"t\":\"logs\"")).collect();
-    for said in ["a line that is not a domain", "a line that is not a rule", "a line that is not an IP range", "pp"] {
+    for said in [
+        "The rule set dash skipped a line that is not a domain",
+        "The rule set cls skipped a line that is not a rule",
+        "The rule set cidr skipped a line that is not an IP range",
+        "pp",
+    ] {
         assert!(logs.iter().any(|t| t.contains(said)), "no log line saying {said:?}");
     }
     let reply = |id: u64| {

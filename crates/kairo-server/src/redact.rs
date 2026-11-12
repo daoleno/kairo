@@ -18,9 +18,17 @@ use serde_json::Value;
 pub struct Secrets {
     /// Each secret string and what stands in for it.
     pairs: Vec<(String, String)>,
+    /// The running config's rule sets (name, behavior), to say which one a
+    /// line of the core's is about ([`crate::fetched`]).
+    rule_sets: Vec<(String, String)>,
 }
 
 impl Secrets {
+    pub fn with_rule_sets(mut self, rule_sets: Vec<(String, String)>) -> Secrets {
+        self.rule_sets = rule_sets;
+        self
+    }
+
     pub fn of(state: &State) -> Secrets {
         Secrets::with_links(state, &[])
     }
@@ -45,7 +53,7 @@ impl Secrets {
         // Longest first: a link is replaced before a part of it.
         pairs.sort_by_key(|(s, _)| std::cmp::Reverse(s.len()));
         pairs.dedup();
-        Secrets { pairs }
+        Secrets { pairs, rule_sets: Vec::new() }
     }
 
     /// `text` with every secret replaced.
@@ -130,34 +138,39 @@ pub fn redact_state(state: &State) -> State {
     s
 }
 
-/// One message, ready to send: redacted and scrubbed, and the core's log
-/// lines without what it fetched for a provider ([`crate::fetched`]).
+/// One message, ready to send: redacted and scrubbed. The messages that carry
+/// the core's words (its log lines; the state's notices, warning and failure,
+/// which quote its last error line; replies) also lose what it fetched for a
+/// provider ([`crate::fetched`]).
 pub fn encode(msg: &ServerMsg, secrets: &Secrets) -> String {
     let redacted;
+    let carries_core_words = matches!(msg, ServerMsg::State(_) | ServerMsg::Logs { .. } | ServerMsg::Reply { .. });
     let msg = match msg {
         ServerMsg::State(s) => {
             redacted = ServerMsg::State(Box::new(redact_state(s)));
             &redacted
         }
-        ServerMsg::Logs { reset, lines, seq } if lines.iter().any(|l| crate::fetched::log_line(&l.payload).is_some()) => {
-            let lines = lines
-                .iter()
-                .map(|l| {
-                    let mut l = l.clone();
-                    if let Some(shown) = crate::fetched::log_line(&l.payload) {
-                        l.payload = shown;
-                    }
-                    l
-                })
-                .collect();
-            redacted = ServerMsg::Logs { reset: *reset, lines, seq: *seq };
-            &redacted
-        }
         other => other,
     };
     let mut value = serde_json::to_value(msg).unwrap_or(Value::Null);
+    if carries_core_words {
+        without_fetched(&mut value, &secrets.rule_sets);
+    }
     secrets.scrub_value(&mut value);
     value.to_string()
+}
+
+fn without_fetched(v: &mut Value, rule_sets: &[(String, String)]) {
+    match v {
+        Value::String(s) => {
+            if let Some(shown) = crate::fetched::in_text(s, rule_sets) {
+                *s = shown;
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|i| without_fetched(i, rule_sets)),
+        Value::Object(map) => map.values_mut().for_each(|i| without_fetched(i, rule_sets)),
+        _ => {}
+    }
 }
 
 /// Settings from the page: what it was not shown stays as it is here, and

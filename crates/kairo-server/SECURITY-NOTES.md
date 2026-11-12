@@ -135,9 +135,13 @@ These notes say what it protects, how, and where each control is tested. Most co
       - TCP: with TUN up, TUN's range routes into the TUN device. A device that forges a source in it never gets
         the answer to its SYN, so no connection is made.
       - UDP: a datagram forged to the proxy's port comes in as SOCKS5, not TUN, and the guard refuses it. A
-        forged datagram could come in through TUN only if this machine forwarded it there, which needs IP
-        forwarding on and the device routing through this machine. Kairo does not turn forwarding on. Even then
-        it would go one way: the answers go back into TUN.
+        forged datagram could come in through TUN only if this machine forwarded it there. That needs IP
+        forwarding on, a device that routes through this machine, and a reverse-path filter that is loose or
+        off. Neither Kairo nor the core turns forwarding on: the namespace test checks that it is unchanged
+        with TUN up. A machine may have it on anyway (Docker turns it on). Then such a device can send datagrams
+        one way to a UDP service on loopback, by a name that resolves there. The answers go back into TUN, never
+        to the device. Adding `NETWORK,TCP` to the exemption would close this, at the cost of local UDP to such
+        names through TUN.
     - *Tests:* `other_devices_never_reach_this_machines_loopback` (`tests/lan.rs`: rule, Direct and All Traffic;
       a listener with its own proxy, one with its own rules; a port tunnel);
       `with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_still_do_not` (`tests/lan.rs`, TUN and
@@ -216,8 +220,11 @@ These notes say what it protects, how, and where each control is tested. Most co
     - The core's log lines and the errors of updating a provider reach a page with the provider's name and the
       kind of error only (`fetched.rs`, where page-bound messages are built). The core's own log file,
       `logs/core.log`, keeps every word for the owner.
-    - The rule-set lines do not name their provider in mihomo, and providers load at the same time, so those
-      lines say only what kind of line was skipped.
+    - mihomo's rule-set lines name no provider, and providers load at the same time. Each kind of line comes
+      from one `behavior`, so the page is told the running config's rule set of that behavior: by name when
+      there is one, as "one of …" when there are several.
+    - The same goes for every string of the state (a notice or a failure quotes the core's last error line)
+      and every reply.
     - Whether something answers there still shows: see "The core's own fetches" under Not covered.
     - *Tests:* `a_config_can_not_read_this_machines_services_through_the_cores_own_fetches` (a real core: a
       local HTML page and a text served to domain, classical and IP-range rule sets and a proxy provider, and

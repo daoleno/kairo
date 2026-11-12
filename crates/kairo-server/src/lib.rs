@@ -95,6 +95,9 @@ pub struct Ctx {
 struct ProviderLinks {
     stamps: Vec<(PathBuf, Option<std::time::SystemTime>, u64)>,
     links: Vec<String>,
+    /// The running config's rule sets, by name and behavior: the core's lines
+    /// about a rule set's content name none (see `fetched`).
+    rule_sets: Vec<(String, String)>,
 }
 
 fn config_files(paths: &Paths) -> Vec<(PathBuf, Option<std::time::SystemTime>, u64)> {
@@ -129,25 +132,31 @@ impl Ctx {
     /// provider links of the configs.
     pub fn secrets(&self, state: &kairo_core::State) -> redact::Secrets {
         let mut links = self.sent_links.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        links.extend(self.provider_links());
-        redact::Secrets::with_links(state, &links)
+        let (provider_links, rule_sets) = self.providers();
+        links.extend(provider_links);
+        redact::Secrets::with_links(state, &links).with_rule_sets(rule_sets)
     }
 
-    fn provider_links(&self) -> Vec<String> {
+    fn providers(&self) -> (Vec<String>, Vec<(String, String)>) {
         let mut cache = self.providers.lock().unwrap_or_else(|e| e.into_inner());
         let stamps = config_files(self.svc.paths());
         if stamps != cache.stamps {
             let mut links = Vec::new();
+            let mut rule_sets = Vec::new();
+            let running = self.svc.paths().runtime_config();
             for (path, _, _) in &stamps {
                 if let Ok(text) = std::fs::read_to_string(path) {
                     links.extend(kairo_core::config::provider_urls(&text));
+                    if *path == running {
+                        rule_sets = kairo_core::config::rule_set_behaviors(&text);
+                    }
                 }
             }
             links.sort();
             links.dedup();
-            *cache = ProviderLinks { stamps, links };
+            *cache = ProviderLinks { stamps, links, rule_sets };
         }
-        cache.links.clone()
+        (cache.links.clone(), cache.rule_sets.clone())
     }
 
     /// Remembers a link a page sent (the last few hundred).

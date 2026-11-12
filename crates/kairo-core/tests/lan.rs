@@ -262,9 +262,14 @@ async fn with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_st
         "listeners:\n  - {{name: lan-direct, type: http, port: {listener_port}, listen: 0.0.0.0, proxy: DIRECT}}\n  - {{name: lan-own, type: http, port: {sub_rules_port}, listen: 0.0.0.0, rule: own}}\nsub-rules:\n  own:\n    - MATCH,DIRECT\ntunnels:\n  - tcp,0.0.0.0:{tunnel_port},127.0.0.1:{secret_port},DIRECT\n"
     );
     let direct = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
-    for (i, mode) in [Mode::Rule, Mode::Direct, Mode::Global].into_iter().enumerate() {
+    let forwarding = || std::fs::read_to_string("/proc/sys/net/ipv4/ip_forward").unwrap_or_default().trim().to_owned();
+    let forwarding_before = forwarding();
+    let runs = ["mixed", "gvisor", "system"]
+        .into_iter()
+        .flat_map(|stack| [Mode::Rule, Mode::Direct, Mode::Global].map(|mode| (stack, mode)));
+    for (i, (stack, mode)) in runs.enumerate() {
         let (mixed, controller) = (free_port(LAN), free_port("127.0.0.1"));
-        let s = Settings { tun: true, ..settings(true, mode, mixed, controller) };
+        let s = Settings { tun: true, tun_stack: stack.into(), ..settings(true, mode, mixed, controller) };
         let text = kairo_core::config::build(&profile, &over, &s).unwrap();
         assert!(text.contains("IN-TYPE,TUN"), "the exemption is there with TUN on");
         let _core = run_core(&dir.path().join(format!("tun-{i}")), &text, mixed).await;
@@ -274,7 +279,10 @@ async fn with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_st
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        assert!(has_tun_address(), "{mode:?}: the TUN device is up");
+        assert!(has_tun_address(), "{stack} {mode:?}: the TUN device is up");
+        assert_eq!(forwarding(), forwarding_before, "{stack}: the core does not turn IP forwarding on");
+        eprintln!("{stack} {mode:?}: TUN up, ip_forward {}", forwarding());
+        let mode = format!("{stack} {mode:?}");
         // A program on this machine, captured by TUN, to its own name for loopback.
         let got = async { direct.get(&dev_name).send().await.ok()?.text().await.ok() }.await;
         assert_eq!(got.as_deref(), Some("LOOPBACK-SECRET"), "{mode:?}: a local program reached its loopback by name through TUN");

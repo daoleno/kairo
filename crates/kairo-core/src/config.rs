@@ -63,6 +63,22 @@ pub fn provider_urls(text: &str) -> Vec<String> {
     urls
 }
 
+/// The `rule-providers` of a config: each one's name and `behavior`
+/// (`domain`, `ipcidr`, `classical`), lowercase.
+pub fn rule_set_behaviors(text: &str) -> Vec<(String, String)> {
+    let Ok(config) = parse_mapping(text) else { return Vec::new() };
+    let Some(Value::Mapping(providers)) = config.get("rule-providers") else { return Vec::new() };
+    let mut out: Vec<(String, String)> = providers
+        .iter()
+        .filter_map(|(name, p)| {
+            let behavior = p.as_mapping()?.get("behavior")?.as_str()?.to_ascii_lowercase();
+            Some((name.as_str()?.to_owned(), behavior))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 /// Merges `patch` into `base`: mappings merge key by key, anything else replaces.
 /// The `prepend-*` / `append-*` keys add to the named list instead.
 pub fn merge(base: &mut Mapping, patch: Mapping) {
@@ -324,7 +340,9 @@ pub const LOOPBACK_GUARD: &str = "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((
 /// own addresses, which only this machine has: with TUN up those addresses
 /// route into the TUN device, so a device on the network that forged one
 /// would never get a TCP handshake's answer, and a datagram it forged to the
-/// proxy's port comes in as SOCKS, not TUN.
+/// proxy's port comes in as SOCKS, not TUN. (A datagram this machine forwards
+/// into TUN for a device routing through it can still pass, one way: see
+/// SECURITY-NOTES item 10.)
 pub fn loopback_guard_with_tun(tun_v4: &str, tun_v6: &str) -> String {
     format!(
         "AND,((NOT,((SRC-IP-CIDR,127.0.0.0/8))),(NOT,((SRC-IP-CIDR,::1/128))),(NOT,((AND,((IN-TYPE,TUN),(OR,((SRC-IP-CIDR,{tun_v4}),(SRC-IP-CIDR,{tun_v6}))))))),(OR,((DOMAIN,localhost),(DOMAIN-SUFFIX,localhost),(IP-CIDR,127.0.0.0/8),(IP-CIDR,0.0.0.0/8),(IP-CIDR6,::1/128),(IP-CIDR6,::/128)))),REJECT"
