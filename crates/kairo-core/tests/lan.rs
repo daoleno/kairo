@@ -48,6 +48,17 @@ struct Core(Child);
 
 impl Drop for Core {
     fn drop(&mut self) {
+        // TERM first: with TUN on, the core takes its routes down on the way out.
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(self.0.id() as i32, libc::SIGTERM);
+        }
+        for _ in 0..50 {
+            if let Ok(Some(_)) = self.0.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
@@ -172,6 +183,123 @@ async fn other_devices_never_reach_this_machines_loopback() {
             tokio::net::TcpStream::connect((LAN, tunnel_port)).await.is_err(),
             "{mode:?}: the port tunnel answered another device"
         );
+    }
+}
+
+/// A DNS server that answers every A question with 127.0.0.1 (a name of a
+/// developer's that leads to this machine), and others with nothing.
+async fn loopback_dns(sock: tokio::net::UdpSocket) {
+    let mut buf = [0u8; 512];
+    loop {
+        let Ok((n, from)) = sock.recv_from(&mut buf).await else { return };
+        let q = &buf[..n];
+        if n < 12 {
+            continue;
+        }
+        let mut i = 12;
+        while i < n && q[i] != 0 {
+            i += 1 + q[i] as usize;
+        }
+        if i + 5 > n {
+            continue;
+        }
+        let a = u16::from_be_bytes([q[i + 1], q[i + 2]]) == 1;
+        let mut out = q[..2].to_vec();
+        out.extend_from_slice(&[0x81, 0x80, 0, 1, 0, a as u8, 0, 0, 0, 0]);
+        out.extend_from_slice(&q[12..i + 5]);
+        if a {
+            out.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 127, 0, 0, 1]);
+        }
+        let _ = sock.send_to(&out, from).await;
+    }
+}
+
+fn has_tun_address() -> bool {
+    Command::new("ip")
+        .args(["-br", "addr"])
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("198.18.0.1"))
+}
+
+/// TUN and "Allow other devices" both on (this machine's own setup): a
+/// program here that TUN captures reaches a name that resolves to loopback,
+/// and another device still reaches no loopback, on every path above.
+///
+/// Run by `scripts/tun-e2e.sh` in a namespace whose resolv.conf names a server
+/// only TUN's DNS hijack answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_still_do_not() {
+    if std::env::var_os("KAIRO_TEST_NETNS").is_none() || std::env::var_os("KAIRO_TEST_TUN").is_none() {
+        eprintln!("skipped: set KAIRO_TEST_NETNS=1 KAIRO_TEST_TUN=1 and run under `unshare -rnm` (scripts/tun-e2e.sh)");
+        return;
+    }
+    let local = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let secret_port = local.local_addr().unwrap().port();
+    tokio::spawn(serve(local, "LOOPBACK-SECRET"));
+    let public = TcpListener::bind((OUT_THERE, 0)).await.expect("10.77.0.2 on lo (see the header)");
+    let public_url = format!("http://{}/", public.local_addr().unwrap());
+    tokio::spawn(serve(public, "PUBLIC-OK"));
+    let dns = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let dns_port = dns.local_addr().unwrap().port();
+    tokio::spawn(loopback_dns(dns));
+    let profile = format!(
+        "{PROFILE}dns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 198.18.0.1/16\n  nameserver: [udp://127.0.0.1:{dns_port}]\n"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let dev_name = format!("http://dev.kairo.test:{secret_port}/");
+    let refused_targets = [
+        format!("http://127.0.0.1:{secret_port}/"),
+        format!("http://127.0.0.2:{secret_port}/"),
+        format!("http://0.0.0.0:{secret_port}/"),
+        format!("http://localhost:{secret_port}/"),
+        format!("http://loop.test:{secret_port}/"),
+        dev_name.clone(),
+    ];
+    let listener_port = free_port(LAN);
+    let sub_rules_port = free_port(LAN);
+    let tunnel_port = free_port(LAN);
+    let over = format!(
+        "listeners:\n  - {{name: lan-direct, type: http, port: {listener_port}, listen: 0.0.0.0, proxy: DIRECT}}\n  - {{name: lan-own, type: http, port: {sub_rules_port}, listen: 0.0.0.0, rule: own}}\nsub-rules:\n  own:\n    - MATCH,DIRECT\ntunnels:\n  - tcp,0.0.0.0:{tunnel_port},127.0.0.1:{secret_port},DIRECT\n"
+    );
+    let direct = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
+    let forwarding = || std::fs::read_to_string("/proc/sys/net/ipv4/ip_forward").unwrap_or_default().trim().to_owned();
+    let forwarding_before = forwarding();
+    let runs = ["mixed", "gvisor", "system"]
+        .into_iter()
+        .flat_map(|stack| [Mode::Rule, Mode::Direct, Mode::Global].map(|mode| (stack, mode)));
+    for (i, (stack, mode)) in runs.enumerate() {
+        let (mixed, controller) = (free_port(LAN), free_port("127.0.0.1"));
+        let s = Settings { tun: true, tun_stack: stack.into(), ..settings(true, mode, mixed, controller) };
+        let text = kairo_core::config::build(&profile, &over, &s).unwrap();
+        assert!(text.contains("IN-TYPE,TUN"), "the exemption is there with TUN on");
+        let _core = run_core(&dir.path().join(format!("tun-{i}")), &text, mixed).await;
+        for _ in 0..100 {
+            if has_tun_address() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(has_tun_address(), "{stack} {mode:?}: the TUN device is up");
+        assert_eq!(forwarding(), forwarding_before, "{stack}: the core does not turn IP forwarding on");
+        eprintln!("{stack} {mode:?}: TUN up, ip_forward {}", forwarding());
+        let mode = format!("{stack} {mode:?}");
+        // A program on this machine, captured by TUN, to its own name for loopback.
+        let got = async { direct.get(&dev_name).send().await.ok()?.text().await.ok() }.await;
+        assert_eq!(got.as_deref(), Some("LOOPBACK-SECRET"), "{mode:?}: a local program reached its loopback by name through TUN");
+        // Another device, as before.
+        let from_lan: SocketAddr = format!("{LAN}:{mixed}").parse().unwrap();
+        let via_listener: SocketAddr = format!("{LAN}:{listener_port}").parse().unwrap();
+        let via_sub_rules: SocketAddr = format!("{LAN}:{sub_rules_port}").parse().unwrap();
+        for target in &refused_targets {
+            let got = through(LAN, from_lan, target).await;
+            assert!(got.is_none(), "{mode:?}: another device reached {target}: {got:?}");
+            let got = through(LAN, via_listener, target).await;
+            assert!(got.is_none(), "{mode:?}: another device reached {target} through a listener with its own proxy: {got:?}");
+            let got = through(LAN, via_sub_rules, target).await;
+            assert!(got.is_none(), "{mode:?}: another device reached {target} through a listener with its own rules: {got:?}");
+        }
+        assert_eq!(through(LAN, from_lan, &public_url).await.as_deref(), Some("PUBLIC-OK"), "{mode:?}: another device proxies on");
+        assert!(tokio::net::TcpStream::connect((LAN, tunnel_port)).await.is_err(), "{mode:?}: the port tunnel answered another device");
     }
 }
 

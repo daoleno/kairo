@@ -33,3 +33,8 @@ for line in sys.stdin:
         print(m["executable"])')
 KAIRO_TEST_NETNS=1 KAIRO_TEST_CORE="$KAIRO_TEST_CORE" unshare -rn sh -c \
   'ip link set lo up && ip addr add 10.77.0.1/32 dev lo && ip addr add 10.77.0.2/32 dev lo && ip addr add 203.0.113.5/32 dev lo && exec "$1" --test-threads=1 --nocapture' sh "$lan"
+
+# Both at once (this machine's own setup): TUN and "Allow other devices", in a
+# namespace of its own whose resolv.conf only TUN's DNS hijack answers.
+KAIRO_TEST_NETNS=1 KAIRO_TEST_TUN=1 KAIRO_TEST_CORE="$KAIRO_TEST_CORE" unshare -rnm sh -c \
+  'mount --bind "$1" /etc/resolv.conf && ip link set lo up && ip addr add 10.77.0.1/32 dev lo && ip addr add 10.77.0.2/32 dev lo && exec "$2" with_tun_on_this_machines_names_reach_its_loopback_and_other_devices_still_do_not --exact --nocapture' sh "$resolv" "$lan"

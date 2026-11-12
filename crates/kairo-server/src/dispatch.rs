@@ -120,13 +120,18 @@ pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value,
         // own would have the core probe this machine's or the network's ports.
         Command::TestNode { name, url: _ } => json(svc.test_node(name, None).await),
         Command::TestGroup { group } => json(svc.test_group(group).await),
-        Command::UpdateProvider { name } => json(svc.update_provider(name).await),
+        // Their errors quote what the core fetched: the kind of error only.
+        Command::UpdateProvider { name } => {
+            json(svc.update_provider(name.clone()).await.map_err(|e| crate::fetched::update_error(&name, &e)))
+        }
         Command::HealthcheckProvider { name } => json(svc.healthcheck_provider(name).await),
         Command::CloseConnection { id } => json(svc.close_connection(id).await),
         Command::CloseAllConnections => json(svc.close_all_connections().await),
         Command::Rules => json(svc.rules().await),
         Command::RuleProviders => json(svc.rule_providers().await),
-        Command::UpdateRuleProvider { name } => json(svc.update_rule_provider(name).await),
+        Command::UpdateRuleProvider { name } => json(
+            svc.update_rule_provider(name.clone()).await.map_err(|e| crate::fetched::update_error(&name, &e)),
+        ),
         Command::DnsQuery { name, kind } => json(svc.dns_query(name, kind).await),
         Command::FlushFakeip => json(svc.flush_fakeip().await),
         Command::UpdateGeo => json(svc.update_geo().await),
