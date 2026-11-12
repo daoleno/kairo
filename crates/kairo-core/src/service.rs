@@ -438,6 +438,9 @@ impl Service {
     // --- Boot ---------------------------------------------------------------------
 
     async fn boot(self) {
+        // Files an older Kairo left readable by others become the owner's.
+        #[cfg(unix)]
+        crate::paths::make_private(&self.0.paths);
         let geo = self.clone();
         tokio::spawn(async move { geo.prefetch_geo().await });
         // The bundled core, copied in place (first run, or after an app update).
@@ -1829,13 +1832,20 @@ impl Service {
             svc.save_profiles();
             let _ = std::fs::remove_file(svc.0.paths.profile(&id));
             let _ = std::fs::remove_file(svc.0.paths.override_file(&id));
-            if was_active {
-                let next = svc.0.state.borrow().profiles.active.clone();
-                match next {
-                    Some(_) if svc.running() => svc.write_config(true).await?,
-                    None => svc.stop_core().await,
-                    _ => {}
-                }
+            // The last one gone: no exit pinned to its servers stays behind.
+            if svc.0.state.borrow().profiles.profiles.is_empty() {
+                svc.modify(|s| {
+                    s.settings.ai.exit = None;
+                    s.settings.ai.follow = true;
+                    s.settings.downloads.exit = None;
+                    s.settings.downloads.fastest = true;
+                });
+                svc.save_settings();
+            }
+            // With none left the core keeps running and sends everything
+            // direct, as on the first start: what points at its port works on.
+            if was_active && svc.running() {
+                svc.write_config(true).await?;
             }
             Ok(())
         })

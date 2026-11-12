@@ -197,6 +197,47 @@ fn port_of(addr: &str) -> Option<u16> {
     addr.rsplit(':').next()?.trim().parse().ok()
 }
 
+/// "Allow other devices on the network" off holds for the profile's own
+/// listeners too: its DNS server (`dns.listen`, often `0.0.0.0:1053`) and
+/// extra `listeners` answer on this machine only.
+fn keep_listeners_local(config: &mut Mapping) {
+    if let Some(Value::Mapping(dns)) = config.get_mut("dns")
+        && let Some(Value::String(listen)) = dns.get_mut("listen")
+    {
+        *listen = on_loopback(listen);
+    }
+    if let Some(Value::Sequence(ls)) = config.get_mut("listeners") {
+        for l in ls.iter_mut().filter_map(Value::as_mapping_mut) {
+            let listen = l.get("listen").and_then(Value::as_str).unwrap_or("0.0.0.0");
+            if !is_loopback_host(listen) {
+                l.insert("listen".into(), "127.0.0.1".into());
+            }
+        }
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let h = host.trim().trim_start_matches('[').trim_end_matches(']');
+    h == "localhost" || h.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// "0.0.0.0:1053", ":1053" or "[::]:53" on this machine only; a loopback
+/// address stays as it is.
+fn on_loopback(addr: &str) -> String {
+    let host = match addr.rfind(':') {
+        Some(i) => &addr[..i],
+        None => return addr.to_owned(),
+    };
+    if is_loopback_host(host) {
+        addr.to_owned()
+    } else {
+        match port_of(addr) {
+            Some(port) => format!("127.0.0.1:{port}"),
+            None => addr.to_owned(),
+        }
+    }
+}
+
 fn with_port(addr: &str, port: u16) -> String {
     match addr.rfind(':') {
         Some(i) => format!("{}:{port}", &addr[..i]),
@@ -389,6 +430,8 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
     set(config, "allow-lan", s.allow_lan);
     if s.allow_lan {
         set(config, "bind-address", "*");
+    } else {
+        keep_listeners_local(config);
     }
     set(config, "ipv6", s.ipv6);
     set(config, "mode", core_mode(s));
@@ -543,6 +586,26 @@ pub fn explain(output: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn without_the_network_the_profiles_own_listeners_answer_this_machine_only() {
+        let text = "dns:\n  enable: true\n  listen: 0.0.0.0:1053\nlisteners:\n  - {name: a, type: mixed, port: 7777}\n  - {name: b, type: socks, port: 7778, listen: '::1'}\n  - {name: c, type: http, port: 7779, listen: 192.168.1.2}\n";
+        let mut config = parse_mapping(text).unwrap();
+        apply_settings(&mut config, &Settings::default());
+        let dns = config.get("dns").unwrap().as_mapping().unwrap();
+        assert_eq!(dns.get("listen").unwrap().as_str(), Some("127.0.0.1:1053"));
+        let ls = config.get("listeners").unwrap().as_sequence().unwrap();
+        let listen: Vec<_> = ls.iter().map(|l| l.get("listen").unwrap().as_str().unwrap()).collect();
+        assert_eq!(listen, ["127.0.0.1", "::1", "127.0.0.1"]);
+        assert_eq!(on_loopback(":53"), "127.0.0.1:53");
+        assert_eq!(on_loopback("[::]:53"), "127.0.0.1:53");
+        assert_eq!(on_loopback("127.0.0.1:7874"), "127.0.0.1:7874");
+        // On the network, as the profile says.
+        let mut config = parse_mapping(text).unwrap();
+        apply_settings(&mut config, &Settings { allow_lan: true, ..Settings::default() });
+        let dns = config.get("dns").unwrap().as_mapping().unwrap();
+        assert_eq!(dns.get("listen").unwrap().as_str(), Some("0.0.0.0:1053"));
+    }
 
     const PROFILE: &str = r#"
 port: 7890
