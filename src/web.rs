@@ -236,12 +236,30 @@ fn password_field(value: Signal<String>, placeholder: &'static str, new: bool) -
 /// `kairo-server status` prints it), only its characters kept, and the
 /// keyboard told it is no word: capitals, no correction, no suggestions.
 fn code_field(code: Signal<String>) -> nsh_base::Input {
-    ui::shaped_field(code, "Setup code", setup_code::grouped)
+    spawn(async { no_autocorrect(CODE_PLACEHOLDER) });
+    ui::shaped_field(code, CODE_PLACEHOLDER, setup_code::grouped)
         .auto_capitalize(AutoCapitalize::Characters)
         .auto_correct(false)
         .auto_fill(AutoFill::Off)
+        .on_focus(|| no_autocorrect(CODE_PLACEHOLDER))
         .h(px(36.0))
         .auto_focus(true)
+}
+
+const CODE_PLACEHOLDER: &str = "Setup code";
+
+/// Sets `autocorrect="off"` on the field shown with `placeholder`. Chrome
+/// tells Android's keyboard not to correct (and Gboard then offers no
+/// suggestions, whose tap commits a word and a space) only for that
+/// attribute; NSH's web runtime turns `auto_correct(false)` into
+/// `spellcheck=false` alone (an upstream gap).
+fn no_autocorrect(placeholder: &str) {
+    let field = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.query_selector(&format!("input[placeholder='{placeholder}']")).ok().flatten());
+    if let Some(field) = field {
+        let _ = field.set_attribute("autocorrect", "off");
+    }
 }
 
 fn problem_line(problem: Signal<Option<String>>) -> impl IntoElement {

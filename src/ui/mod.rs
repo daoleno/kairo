@@ -518,7 +518,19 @@ pub fn field(value: Signal<String>, placeholder: &'static str) -> Input {
 pub fn shaped_field(value: Signal<String>, placeholder: &'static str, shape: fn(&str) -> String) -> Input {
     input()
         .value(move || value.get())
-        .on_change(move |t: &str| value.set(shape(t)))
+        .on_change(move |t: &str| {
+            let shaped = shape(t);
+            if shaped == t || value.get_untracked() != shaped {
+                value.set(shaped);
+                return;
+            }
+            // The shape leaves the value as it was (a space typed after a
+            // whole code): writing it again runs nothing, and the field would
+            // keep what was typed. So what was typed goes in, and the shape
+            // after this change, which then reaches the field.
+            value.set(t.to_owned());
+            spawn(async move { value.set(shape(&value.get_untracked())) });
+        })
         .placeholder(placeholder)
         .placeholder_color(|| color(theme().muted_foreground))
         .caret_color(|| color(theme().primary))

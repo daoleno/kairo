@@ -125,6 +125,9 @@ try {
   await codeField.fill('');
   await codeField.pressSequentially(sloppy.slice(0, -2) + 'I ' + sloppy.slice(-2), { delay: 20 });
   check((await codeField.inputValue()) === code, `typed sloppily, the code field shows ${code} (${await codeField.inputValue()})`);
+  // More after a whole code (a space, a stray I, a 13th character) does not stay in the field.
+  await codeField.pressSequentially(' I7', { delay: 20 });
+  check((await codeField.inputValue()) === code, `typed past its end, the code field still shows ${code} (${await codeField.inputValue()})`);
   await pa.getByPlaceholder('New password', { exact: true }).fill(PASSWORD);
   await pa.getByPlaceholder('New password again').fill(PASSWORD);
   await pa.getByText('Set Password', { exact: true }).click();
