@@ -27,6 +27,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use argon2::Argon2;
 use base64::Engine;
 use kairo_core::protocol::SessionInfo;
+use kairo_core::setup_code;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -36,6 +37,8 @@ use tokio::sync::{Semaphore, broadcast};
 pub const SESSION_DAYS: i64 = 30;
 pub const MIN_PASSWORD: usize = 8;
 const MAX_PASSWORD: usize = 1024;
+/// The most a typed setup code may be (it is 14 characters; room for spaces).
+const MAX_CODE_TYPED: usize = 256;
 
 /// A signed-in browser: the SHA-256 of its token, in hex.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -53,8 +56,10 @@ struct Record {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AuthError {
-    /// The password (or code) is wrong.
-    Wrong,
+    /// The password is wrong (sign-in).
+    WrongPassword,
+    /// The setup code is wrong (setting the first password).
+    WrongCode,
     /// Too many tries: wait this long.
     Wait(Duration),
     /// A password exists already (setup is over).
@@ -68,11 +73,12 @@ pub enum AuthError {
 impl AuthError {
     pub fn message(&self) -> String {
         match self {
-            AuthError::Wrong => "Wrong password".into(),
+            AuthError::WrongPassword => "Wrong password".into(),
+            AuthError::WrongCode => "Wrong code: compare it with what kairo-server status shows".into(),
             AuthError::Wait(d) => format!("Too many tries. Try again in {} s", d.as_secs().max(1)),
             AuthError::AlreadySet => "A password is set already: sign in".into(),
             AuthError::NotSet => "No password yet: set one first".into(),
-            AuthError::TooShort => format!("Use at least {MIN_PASSWORD} characters"),
+            AuthError::TooShort => format!("The new password needs at least {MIN_PASSWORD} characters"),
             AuthError::Io(e) => e.clone(),
         }
     }
@@ -164,18 +170,14 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(tmp, path)
 }
 
-/// A setup code: twelve letters and digits nobody misreads, in threes.
+/// A setup code: twelve letters and digits nobody misreads, in fours
+/// ([`setup_code`]).
 fn new_code() -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut rng = rand::rng();
-    let chars: Vec<char> = (0..12)
-        .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
+    let chars: String = (0..setup_code::LENGTH)
+        .map(|_| setup_code::ALPHABET[rng.random_range(0..setup_code::ALPHABET.len())] as char)
         .collect();
-    chars
-        .chunks(4)
-        .map(|c| c.iter().collect::<String>())
-        .collect::<Vec<_>>()
-        .join("-")
+    setup_code::grouped(&chars)
 }
 
 fn new_token() -> String {
@@ -205,7 +207,7 @@ fn check_new_password(password: &str) -> Result<(), AuthError> {
         return Err(AuthError::TooShort);
     }
     if password.len() > MAX_PASSWORD {
-        return Err(AuthError::Io("That password is too long".into()));
+        return Err(AuthError::Io("The new password is too long".into()));
     }
     Ok(())
 }
@@ -439,9 +441,15 @@ impl Auth {
             }
             inner.setup_code.clone()
         };
-        let given = code.trim().to_ascii_uppercase().replace(' ', "");
-        if !expected.is_some_and(|c| constant_eq(c.as_bytes(), given.as_bytes())) {
-            return Err(AuthError::Wrong);
+        // By the code's characters alone, as the page reads it: a space, a
+        // dash of another kind or a stray I is not a wrong code. One try is
+        // still one code of 12 characters of 32 (60 bits).
+        if code.len() > MAX_CODE_TYPED {
+            return Err(AuthError::WrongCode);
+        }
+        let given = setup_code::normalize(code);
+        if !expected.is_some_and(|c| constant_eq(setup_code::normalize(&c).as_bytes(), given.as_bytes())) {
+            return Err(AuthError::WrongCode);
         }
         let _permit = self.verify.acquire().await.map_err(|e| AuthError::Io(e.to_string()))?;
         let p = password.to_owned();
@@ -484,7 +492,7 @@ impl Auth {
             inner.password.clone().ok_or(AuthError::NotSet)?
         };
         if password.len() > MAX_PASSWORD {
-            return Err(AuthError::Wrong);
+            return Err(AuthError::WrongPassword);
         }
         let _permit = self.verify.acquire().await.map_err(|e| AuthError::Io(e.to_string()))?;
         let p = password.to_owned();
@@ -492,7 +500,7 @@ impl Auth {
             .await
             .unwrap_or(false);
         if !ok {
-            return Err(AuthError::Wrong);
+            return Err(AuthError::WrongPassword);
         }
         let mut inner = self.lock();
         self.start_session(&mut inner, agent, &ip.to_string())
@@ -676,7 +684,7 @@ pub enum Outcome {
 fn outcome<T>(r: &Result<T, AuthError>) -> Outcome {
     match r {
         Ok(_) => Outcome::Right,
-        Err(AuthError::Wrong) => Outcome::Wrong,
+        Err(AuthError::WrongPassword | AuthError::WrongCode) => Outcome::Wrong,
         Err(_) => Outcome::Neither,
     }
 }
@@ -950,13 +958,20 @@ mod tests {
             "status can show it"
         );
         let me = ip(1);
-        assert_eq!(auth.setup("WRONG-CODE-0000", "long enough", me, None, "t").await, Err(AuthError::Wrong));
+        assert_eq!(auth.setup("WRONG-CODE-0000", "long enough", me, None, "t").await, Err(AuthError::WrongCode));
         assert_eq!(auth.setup(&code, "short", me, None, "t").await, Err(AuthError::TooShort));
-        let first = auth.setup(&code.to_lowercase(), "long enough", me, None, "t").await.unwrap().token;
+        // A code with one character changed is wrong, however it is typed.
+        let mut other: Vec<char> = code.chars().collect();
+        other[0] = if other[0] == 'A' { 'B' } else { 'A' };
+        let other: String = other.into_iter().collect();
+        assert_eq!(auth.setup(&other.to_lowercase(), "long enough", me, None, "t").await, Err(AuthError::WrongCode));
+        // As a phone may type it: lower case, a space for each dash, a stray I.
+        let typed = format!("{} I", code.to_lowercase().replace('-', " "));
+        let first = auth.setup(&typed, "long enough", me, None, "t").await.unwrap().token;
         assert!(!auth.code_file().exists(), "the code is gone once used");
         assert_eq!(auth.setup(&code, "another one", me, None, "t").await, Err(AuthError::AlreadySet));
         let a = auth.check(&first).expect("signed in");
-        assert_eq!(auth.login("wrong password", me, None, "t").await.map(|s| s.token), Err(AuthError::Wrong));
+        assert_eq!(auth.login("wrong password", me, None, "t").await.map(|s| s.token), Err(AuthError::WrongPassword));
         let second = auth.login("long enough", me, None, "phone").await.unwrap().token;
         let b = auth.check(&second).unwrap();
         assert_ne!(a, b);
@@ -977,7 +992,7 @@ mod tests {
         // The CLI's new password ends every session, seen by a running server.
         again.reset_password("a new password").unwrap();
         assert!(auth.check(&first).is_none(), "the other process sees the change");
-        assert_eq!(auth.login("long enough", ip(9), None, "t").await.map(|s| s.token), Err(AuthError::Wrong));
+        assert_eq!(auth.login("long enough", ip(9), None, "t").await.map(|s| s.token), Err(AuthError::WrongPassword));
         assert!(auth.login("a new password", ip(9), None, "t").await.is_ok());
     }
 

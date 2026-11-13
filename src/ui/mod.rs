@@ -510,9 +510,15 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
 
 /// A single-line text field bound to `value`.
 pub fn field(value: Signal<String>, placeholder: &'static str) -> Input {
+    shaped_field(value, placeholder, str::to_owned)
+}
+
+/// A single-line text field bound to `value` that keeps what is typed in
+/// the shape `shape` gives it (shown so as the person types).
+pub fn shaped_field(value: Signal<String>, placeholder: &'static str, shape: fn(&str) -> String) -> Input {
     input()
         .value(move || value.get())
-        .on_change(move |t: &str| value.set(t.to_owned()))
+        .on_change(move |t: &str| value.set(shape(t)))
         .placeholder(placeholder)
         .placeholder_color(|| color(theme().muted_foreground))
         .caret_color(|| color(theme().primary))

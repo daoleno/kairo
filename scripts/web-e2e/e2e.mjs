@@ -92,7 +92,39 @@ try {
   await pa.goto(BASE);
   await pa.getByText(/code Kairo printed/).waitFor({ timeout: 60000 });
   await shot(pa, '01-desktop-setup');
-  await pa.getByPlaceholder('Setup code').fill(code);
+  // Each problem names the field that has it.
+  const codeField = pa.getByPlaceholder('Setup code');
+  const said = async (text, what) => {
+    await pa.getByText('Set Password', { exact: true }).click();
+    try {
+      await pa.getByText(text).waitFor({ timeout: 10000 });
+      check(true, what);
+    } catch {
+      check(false, `${what} (the page said something else)`);
+    }
+  };
+  const fillAll = async (c, p, again) => {
+    await codeField.fill(c);
+    await pa.getByPlaceholder('New password', { exact: true }).fill(p);
+    await pa.getByPlaceholder('New password again').fill(again);
+  };
+  await fillAll(code.slice(0, 9), PASSWORD, PASSWORD);
+  await said(/The setup code has 12 letters and digits; this has 8/, 'a code too short: the code field is named');
+  const wrong = (code[0] === 'A' ? 'B' : 'A') + code.slice(1);
+  await fillAll(wrong, PASSWORD, PASSWORD);
+  await said(/^Wrong code/, 'a wrong code says "Wrong code", not "Wrong password"');
+  await fillAll(code, 'short', 'short');
+  await said(/The new password needs at least 8 characters/, 'a short password: the password is named');
+  await fillAll(code, PASSWORD, PASSWORD + 'x');
+  await said(/The two new passwords differ/, 'two passwords that differ: they are named');
+  // As a phone may type it: lower case, a space for each dash, and a stray
+  // "I " before the last two characters (the owner's phone sent
+  // "5SVU-K4B3-G3I HA"). Key by key: the field shows the code in fours as
+  // kairo-server status prints it, and it sets the password.
+  const sloppy = code.toLowerCase().replace(/-/g, ' ');
+  await codeField.fill('');
+  await codeField.pressSequentially(sloppy.slice(0, -2) + 'I ' + sloppy.slice(-2), { delay: 20 });
+  check((await codeField.inputValue()) === code, `typed sloppily, the code field shows ${code} (${await codeField.inputValue()})`);
   await pa.getByPlaceholder('New password', { exact: true }).fill(PASSWORD);
   await pa.getByPlaceholder('New password again').fill(PASSWORD);
   await pa.getByText('Set Password', { exact: true }).click();

@@ -27,6 +27,10 @@ These notes say what it protects, how, and where each control is tested. Most co
    - There is no default password. The first one is set with a one-time setup code. `kairo-server status` shows
      it, and a server started in a terminal prints it. It is never written to the log, nor to stdout when that is
      not a terminal (under systemd, stdout is the journal).
+   - The code is 12 characters of 32 (no I, O, 0 or 1): 60 bits. It is compared by those characters alone
+     (`kairo_core::setup_code::normalize`): case, spaces, dashes and characters outside the 32 are dropped, so a
+     phone's stray space or letter is not a wrong code. One try is still one code of 60 bits, under the limits
+     below. A wrong code is answered "Wrong code", a wrong password "Wrong password".
    - Sign-in tries are limited (`auth.rs`, `Limiter`):
      - Each trier gets 5 free wrong tries, then waits 30 s, doubling up to 15 min (about 100 tries a day).
      - A trier is an address (IPv6 by its /64), or a browser that signed in before (its `kairo_device` cookie).

@@ -18,6 +18,7 @@ pub mod profile;
 pub mod protocol;
 pub mod routes;
 pub mod settings;
+pub mod setup_code;
 pub mod stats;
 pub mod time;
 pub mod tun;
