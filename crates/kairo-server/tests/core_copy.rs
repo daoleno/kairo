@@ -14,12 +14,40 @@
 
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::Value;
 
 const MARKER: &std::ffi::CStr = c"user.kairo_marker";
+
+/// Writes of files that are run, kept apart from forks. The tests run in
+/// threads of one process. A child forked while one of them has a file open
+/// for writing holds that open until it execs, and an exec of the file in
+/// that window fails with "Text file busy" (ETXTBSY: CI saw the server's own
+/// copy refuse to start). So a write of anything that is run takes this
+/// lock alone, and every spawn shares it: no file that is run is open for
+/// writing while this process forks (as Go's `syscall.ForkLock`).
+static FORK: RwLock<()> = RwLock::new(());
+
+/// Writes a file that will be run: no fork happens while it is open.
+fn writing<T>(write: impl FnOnce() -> T) -> T {
+    let _alone = FORK.write().unwrap_or_else(PoisonError::into_inner);
+    write()
+}
+
+/// Every child of these tests starts here. `spawn` returns once the child
+/// has exec'd, so the descriptors it was forked with are closed by then.
+fn spawn(cmd: &mut Command) -> std::io::Result<Child> {
+    let _shared = FORK.read().unwrap_or_else(PoisonError::into_inner);
+    cmd.spawn()
+}
+
+/// [`Command::output`], started through [`spawn`].
+fn output(cmd: &mut Command) -> std::io::Result<Output> {
+    spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))?.wait_with_output()
+}
 
 /// A scratch install: the server and its core in `prefix`, Kairo's folder in
 /// `home` (geo data in place, nothing started by itself), a page in `page`.
@@ -33,7 +61,7 @@ impl Place {
         let p = Place { dir };
         std::fs::create_dir_all(p.path("prefix/bin")).unwrap();
         std::fs::create_dir_all(p.path("prefix/lib/kairo")).unwrap();
-        std::fs::copy(env!("CARGO_BIN_EXE_kairo-server"), p.server()).unwrap();
+        writing(|| std::fs::copy(env!("CARGO_BIN_EXE_kairo-server"), p.server())).unwrap();
         write_exe(&p.shipped(), shipped_core);
         let runtime = p.path("home/runtime");
         std::fs::create_dir_all(&runtime).unwrap();
@@ -72,25 +100,21 @@ impl Place {
             }
             None => Command::new(self.server()),
         };
-        let mut child = cmd
-            .args(["serve", "--listen", "127.0.0.1:0", "--web"])
-            .arg(self.path("page"))
-            .env("KAIRO_HOME", self.path("home"))
-            .env("KAIRO_NO_SYSPROXY", "1")
-            .env("KAIRO_NO_UPDATE", "1")
-            .env("KAIRO_NO_ICON_FETCH", "1")
-            .env("RUST_LOG", "kairo_core=info")
-            .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("kairo-server runs");
+        let mut child = spawn(
+            cmd.args(["serve", "--listen", "127.0.0.1:0", "--web"])
+                .arg(self.path("page"))
+                .env("KAIRO_HOME", self.path("home"))
+                .env("KAIRO_NO_SYSPROXY", "1")
+                .env("KAIRO_NO_UPDATE", "1")
+                .env("KAIRO_NO_ICON_FETCH", "1")
+                .env("RUST_LOG", "kairo_core=info")
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit()),
+        )
+        .expect("kairo-server runs");
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            let out = Command::new(self.server())
-                .args(["status", "--json"])
-                .env("KAIRO_HOME", self.path("home"))
-                .output()
-                .unwrap();
+            let out = output(Command::new(self.server()).args(["status", "--json"]).env("KAIRO_HOME", self.path("home"))).unwrap();
             let s: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
             // `tun_permission` is set by the same step that looked at the core.
             if s["running"] == true && !s["tun_permission"].is_null() {
@@ -121,7 +145,7 @@ fn stop(mut child: Child) {
 }
 
 fn write_exe(path: &Path, bytes: &[u8]) {
-    std::fs::write(path, bytes).unwrap();
+    writing(|| std::fs::write(path, bytes)).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
@@ -270,10 +294,8 @@ fn a_granted_copy_that_this_process_cannot_run_keeps_its_permission() {
     let core = std::fs::read(std::env::var("KAIRO_TEST_CORE").expect("KAIRO_TEST_CORE: the mihomo core")).unwrap();
     let place = Place::new(&core);
     write_exe(&place.copy(), &core);
-    let st = Command::new("setcap")
-        .args(["cap_net_admin,cap_net_bind_service=+ep"])
-        .arg(place.copy())
-        .status()
+    let st = spawn(Command::new("setcap").args(["cap_net_admin,cap_net_bind_service=+ep"]).arg(place.copy()))
+        .and_then(|mut c| c.wait())
         .expect("setcap (libcap2-bin)");
     assert!(st.success(), "setcap");
     older_copy_times_and_marker(&place);
@@ -290,6 +312,7 @@ fn a_granted_copy_that_this_process_cannot_run_keeps_its_permission() {
 /// [`older_copy`]'s times and marker on a copy already written.
 fn older_copy_times_and_marker(place: &Place) {
     let hour_ago = SystemTime::now() - Duration::from_secs(3600);
-    std::fs::File::options().write(true).open(place.copy()).unwrap().set_modified(hour_ago).unwrap();
+    // Opened for writing (to set its time): the copy is run, so not across a fork.
+    writing(|| std::fs::File::options().write(true).open(place.copy())?.set_modified(hour_ago)).unwrap();
     set_marker(&place.copy());
 }
