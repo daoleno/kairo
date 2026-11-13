@@ -255,6 +255,30 @@ async fn first_run_needs_the_setup_code_and_no_password_is_set_by_default() {
     assert_eq!(r.status(), StatusCode::CONFLICT);
 }
 
+/// The setup code is read by its characters alone, as a phone may type it,
+/// and a wrong one says it is the code that is wrong.
+#[tokio::test]
+async fn a_setup_code_typed_sloppily_works_and_a_wrong_one_says_code() {
+    let dir = folder();
+    let server = start(dir.path(), &[]);
+    let code = server.setup_code.clone().unwrap();
+    // One character off: the code is named, not the password.
+    let wrong = format!("{}{}", if code.starts_with('A') { 'B' } else { 'A' }, &code[1..]);
+    let r = server.post("/api/setup", json!({ "code": wrong, "password": PASSWORD }), None).await;
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    let error = r.json::<Value>().await.unwrap()["error"].as_str().unwrap_or_default().to_owned();
+    assert!(error.starts_with("Wrong code"), "{error}");
+    assert!(!error.contains("password"), "{error}");
+    assert_eq!(server.session_state(None).await, "setup");
+    // As the owner's phone sent it (a stray "I " before the last two), in
+    // lower case with a space for each dash.
+    let sloppy = code.to_lowercase().replace('-', " ");
+    let (head, tail) = sloppy.split_at(sloppy.len() - 2);
+    let r = server.post("/api/setup", json!({ "code": format!("{head}I {tail}"), "password": PASSWORD }), None).await;
+    assert_eq!(r.status(), StatusCode::OK, "{:?}", r.text().await);
+    assert_eq!(server.session_state(None).await, "sign_in");
+}
+
 #[tokio::test]
 async fn the_session_cookie_is_http_only_strict_and_this_hosts_alone() {
     let dir = folder();

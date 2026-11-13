@@ -249,7 +249,7 @@ struct LoginBody {
 
 fn auth_error(e: AuthError) -> Response {
     let status = match e {
-        AuthError::Wrong => StatusCode::UNAUTHORIZED,
+        AuthError::WrongPassword | AuthError::WrongCode => StatusCode::UNAUTHORIZED,
         AuthError::Wait(_) => StatusCode::TOO_MANY_REQUESTS,
         AuthError::AlreadySet | AuthError::NotSet => StatusCode::CONFLICT,
         AuthError::TooShort => StatusCode::BAD_REQUEST,
@@ -300,7 +300,7 @@ async fn login(
     match ctx.auth.login(&body.password, peer.ip(), device.as_deref(), &agent(&headers)).await {
         Ok(s) => signed_in(&ctx, &s),
         Err(e) => {
-            if e == AuthError::Wrong {
+            if e == AuthError::WrongPassword {
                 log::warn!("a wrong password from {}", peer.ip());
             }
             auth_error(e)

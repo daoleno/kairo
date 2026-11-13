@@ -12,7 +12,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use nsh_base::theme;
-use nsh_core::AutoFill;
+use kairo_core::setup_code;
+use nsh_core::{AutoCapitalize, AutoFill};
 use nsh_core::platform::{HttpBody, HttpRequest};
 use nsh_core::prelude::*;
 use serde::Deserialize;
@@ -231,6 +232,36 @@ fn password_field(value: Signal<String>, placeholder: &'static str, new: bool) -
         .h(px(36.0))
 }
 
+/// The setup code: shown in fours as it is typed (`5SVU-K4B3-G3HA`, as
+/// `kairo-server status` prints it), only its characters kept, and the
+/// keyboard told it is no word: capitals, no correction, no suggestions.
+fn code_field(code: Signal<String>) -> nsh_base::Input {
+    spawn(async { no_autocorrect(CODE_PLACEHOLDER) });
+    ui::shaped_field(code, CODE_PLACEHOLDER, setup_code::grouped)
+        .auto_capitalize(AutoCapitalize::Characters)
+        .auto_correct(false)
+        .auto_fill(AutoFill::Off)
+        .on_focus(|| no_autocorrect(CODE_PLACEHOLDER))
+        .h(px(36.0))
+        .auto_focus(true)
+}
+
+const CODE_PLACEHOLDER: &str = "Setup code";
+
+/// Sets `autocorrect="off"` on the field shown with `placeholder`. Chrome
+/// tells Android's keyboard not to correct (and Gboard then offers no
+/// suggestions, whose tap commits a word and a space) only for that
+/// attribute; NSH's web runtime turns `auto_correct(false)` into
+/// `spellcheck=false` alone (an upstream gap).
+fn no_autocorrect(placeholder: &str) {
+    let field = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.query_selector(&format!("input[placeholder='{placeholder}']")).ok().flatten());
+    if let Some(field) = field {
+        let _ = field.set_attribute("autocorrect", "off");
+    }
+}
+
 fn problem_line(problem: Signal<Option<String>>) -> impl IntoElement {
     dynamic(move || match problem.get() {
         Some(p) => text(p)
@@ -252,17 +283,26 @@ fn setup(machine: Signal<String>, door: Signal<Door>) -> impl IntoElement {
             return;
         }
         let (c, p, a) = (code.get_untracked(), password.get_untracked(), again.get_untracked());
+        // Each problem names its field, top to bottom.
+        let typed = setup_code::normalize(&c).chars().count();
+        if typed != setup_code::LENGTH {
+            problem.set(Some(format!(
+                "The setup code has {} letters and digits; this has {typed}",
+                setup_code::LENGTH
+            )));
+            return;
+        }
         if p.chars().count() < 8 {
-            problem.set(Some("Use at least 8 characters".into()));
+            problem.set(Some("The new password needs at least 8 characters".into()));
             return;
         }
         if p != a {
-            problem.set(Some("The passwords differ".into()));
+            problem.set(Some("The two new passwords differ".into()));
             return;
         }
         busy.set(true);
         spawn(async move {
-            let body = serde_json::json!({ "code": c.trim(), "password": p });
+            let body = serde_json::json!({ "code": setup_code::grouped(&c), "password": p });
             let r = post_json("/api/setup", &body).await;
             // The door changes last: this view (and its signals) goes with it.
             busy.set(false);
@@ -279,7 +319,7 @@ fn setup(machine: Signal<String>, door: Signal<Door>) -> impl IntoElement {
                     .text_size(px(size::small()))
                     .text_color(move || theme().muted_foreground),
             )
-            .child(ui::field(code, "Setup code").h(px(36.0)).auto_focus(true))
+            .child(code_field(code))
             .child(password_field(password, "New password", true))
             .child(password_field(again, "New password again", true).on_submit(move |_: &str| submit()))
             .child(problem_line(problem))
