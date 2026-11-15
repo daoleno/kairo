@@ -849,6 +849,11 @@ fn picker(kind: Kind) -> impl IntoElement {
     let sub = move || store.state.with(|s| k::on_subscription(s, kind));
     let fastest = move || store.state.with(|s| k::on_fastest(s, kind));
     let follows = move || store.state.with(|s| k::follows_location(s, kind));
+    // What the servers' rows show, each memoized: the rows are made again only when
+    // one of these changes, not at every change of the state (a press on a row made
+    // again in the meantime is lost).
+    let now_m = computed(current);
+    let manual_m = computed(move || !fastest() && !sub() && !follows());
     effect(move || {
         store.state.with(|_| ());
         store.proxies.with(|_| ());
@@ -933,49 +938,14 @@ fn picker(kind: Kind) -> impl IntoElement {
                 )
             },
         ))
-        .child(dynamic(move || {
-            let countries = list.get();
-            let now = current();
-            let expand_all = all.get();
-            let open_now = open.get();
-            let manual = !fastest() && !sub() && !follows();
-            untracked(move || {
-                view()
-                    .children(countries.into_iter().map(move |c| {
-                        let is_open = expand_all || open_now == Some(c.region);
-                        let region = c.region;
-                        let health = c.health();
-                        let count = c.servers.len();
-                        let holds_now = manual && now.as_deref().is_some_and(|n| c.servers.iter().any(|s| s.name == n));
-                        let servers = c.servers.clone();
-                        let now = now.clone();
-                        view()
-                            .child(row_button(
-                                move || holds_now && !is_open,
-                                move || open.set(if is_open && !expand_all { None } else { Some(region) }),
-                                ui::flag(c.flag.clone(), size::large()),
-                                ui::body(places::region_title(region)).font_weight(FontWeight::MEDIUM),
-                                ui::muted(format!("{count}")),
-                                Some(is_open),
-                                Some(move || health),
-                            ))
-                            .child(when(
-                                move || is_open,
-                                move || {
-                                    let servers = servers.clone();
-                                    let now = now.clone();
-                                    view().pb_1().children(servers.into_iter().map(move |s| {
-                                        let chosen = manual && now.as_deref() == Some(s.name.as_str());
-                                        let name = s.name.clone();
-                                        server_row(s, chosen).on_press(move || k::pick(kind, name.clone()))
-                                    }))
-                                },
-                            ))
-                            .into_element()
-                    }))
-                    .into_element()
-            })
-        }))
+        // Each country, and each server of an open one, is made once and kept (by its
+        // region, by its name) while readings come and go: a press on a row is never
+        // lost to a row made again under it.
+        .child(each(
+            move || list.get(),
+            |c: &Country| c.region,
+            move |c, _| country_rows(kind, c, now_m, manual_m, all, open),
+        ))
         .child(ui::divider())
         .child(
             nsh_base::button()
@@ -999,7 +969,7 @@ fn row_button(
     lead: AnyElement,
     title: Text,
     note: Text,
-    chevron: Option<bool>,
+    chevron: Option<Box<dyn Fn() -> bool>>,
     health: Option<impl Fn() -> Health + Copy + 'static>,
 ) -> impl IntoElement {
     nsh_base::button()
@@ -1027,24 +997,59 @@ fn row_button(
                 )
         }))
         .child(chevron.map(|open| {
-            icon(
-                if open {
-                    Icon::ChevronDown
-                } else {
-                    Icon::ChevronRight
-                },
-                12.0,
-            )
-            .text_color(move || theme().muted_foreground)
+            dynamic(move || {
+                let glyph = if open() { Icon::ChevronDown } else { Icon::ChevronRight };
+                untracked(move || icon(glyph, 12.0).text_color(move || theme().muted_foreground))
+            })
+        }))
+}
+
+/// A country's row and, while it is open, its servers.
+fn country_rows(
+    kind: Kind,
+    c: ReadSignal<Country>,
+    now: Memo<Option<String>>,
+    manual: Memo<bool>,
+    all: Signal<bool>,
+    open: Signal<Option<&'static str>>,
+) -> impl IntoElement {
+    let region = c.with_untracked(|c| c.region);
+    let is_open = move || all.get() || open.get() == Some(region);
+    let holds_now = move || {
+        manual.get() && now.with(|n| n.as_deref().is_some_and(|n| c.with(|c| c.servers.iter().any(|s| s.name == n))))
+    };
+    view()
+        .child(row_button(
+            move || holds_now() && !is_open(),
+            move || open.set(if is_open() && !all.get_untracked() { None } else { Some(region) }),
+            ui::flag(c.with_untracked(|c| c.flag.clone()), size::large()),
+            ui::body(places::region_title(region)).font_weight(FontWeight::MEDIUM),
+            ui::muted(move || -> SharedString { c.with(|c| c.servers.len()).to_string().into() }),
+            Some(Box::new(is_open)),
+            Some(move || c.with(|c| c.health())),
+        ))
+        .child(when(is_open, move || {
+            view().pb_1().child(each(
+                move || c.with(|c| c.servers.clone()),
+                |s: &Place| s.name.clone(),
+                move |s, _| server_row(kind, s, now, manual),
+            ))
         }))
 }
 
 /// A server: its name, how it speaks, and its delay (the one place ms show).
-fn server_row(p: Place, chosen: bool) -> nsh_base::ButtonElement {
-    let tone = ui::delay_tone(p.delay);
+fn server_row(kind: Kind, p: ReadSignal<Place>, now: Memo<Option<String>>, manual: Memo<bool>) -> nsh_base::ButtonElement {
+    let name = p.with_untracked(|p| p.name.clone());
+    let chosen = {
+        let name = name.clone();
+        computed(move || manual.get() && now.with(|n| n.as_deref() == Some(name.as_str())))
+    };
+    let delay = move || p.with(|p| p.delay);
+    let pick = name.clone();
     nsh_base::button()
-        .selected(chosen)
-        .accessibility_label(p.name.clone())
+        .selected(move || chosen.get())
+        .accessibility_label(name)
+        .on_press(move || k::pick(kind, pick.clone()))
         .flex_row()
         .items_center()
         .gap_3()
@@ -1053,19 +1058,19 @@ fn server_row(p: Place, chosen: bool) -> nsh_base::ButtonElement {
         .pr_4()
         .cursor_pointer()
         .hover(|s| s.bg(move || theme().accent))
-        .style_when(move || chosen, |s| s.bg(ui::selection))
+        .style_when(move || chosen.get(), |s| s.bg(ui::selection))
         .child(
             view()
                 .w(px(16.0))
-                .child(chosen.then(|| icon(Icon::Check, 14.0).text_color(move || theme().primary))),
+                .child(when(move || chosen.get(), move || icon(Icon::Check, 14.0).text_color(move || theme().primary))),
         )
-        .child(ui::body(p.title.clone()).number_of_lines(1))
+        .child(ui::body(move || -> SharedString { p.with(|p| p.title.clone()).into() }).number_of_lines(1))
         .child(view().flex_1())
         .child(
-            text(ui::delay_text(p.delay))
+            text(move || ui::delay_text(delay()))
                 .text_size(px(size::small()))
                 .tabular_nums()
-                .text_color(move || tone),
+                .text_color(move || ui::delay_tone(delay())),
         )
 }
 
