@@ -157,7 +157,8 @@ struct Literal {
 
 /// The string literals of `source` outside comments and `#[cfg(test)]` items.
 fn literals(file: &str, source: &str) -> Vec<Literal> {
-    let src: Vec<char> = source.chars().collect();
+    // A checkout with CRLF line ends (Windows) reads as one with LF.
+    let src: Vec<char> = source.replace("\r\n", "\n").chars().collect();
     let mut out = Vec::new();
     let mut i = 0;
     let mut line = 1;
@@ -552,6 +553,8 @@ fn the_scanner_reads_rust() {
         fn h() { let y = "After the tests"; }
     "##;
     let found: Vec<String> = literals("x.rs", src).into_iter().map(|l| l.text).collect();
+    let crlf: Vec<String> = literals("x.rs", &src.replace('\n', "\r\n")).into_iter().map(|l| l.text).collect();
+    assert_eq!(found, crlf, "a CRLF checkout reads the same");
     assert_eq!(
         found,
         ["page.home", "Hello there", "Raw \"quoted\" text", "Not shown", "line continued", "After the tests"]
