@@ -342,6 +342,8 @@ fn init_logging() {
 }
 
 fn main() {
+    // Kairo itself: its real home is its own (a test runner's never is).
+    kairo_core::paths::claim_real_home();
     init_logging();
     #[cfg(any(unix, windows))]
     if guardian::is_guardian() {

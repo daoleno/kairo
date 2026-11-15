@@ -113,6 +113,18 @@ fn joined<T>(r: Result<Result<T, String>, tokio::task::JoinError>) -> Result<T, 
     r.unwrap_or_else(|e| Err(crate::tr!("engine.service.internal_error", error = e)))
 }
 
+/// In a process that is not Kairo itself (a test runner, see `paths::isolated`)
+/// and not sandboxed by its own means: settings with no system proxy and no TUN,
+/// whatever was saved or asked for, so it never reroutes the machine away from
+/// the Kairo in use.
+fn isolate(mut s: Settings) -> Settings {
+    if !crate::paths::may_touch_system() {
+        s.system_proxy = false;
+        s.tun = false;
+    }
+    s
+}
+
 impl Service {
     /// The process' service, started on first use at the default location.
     pub fn global() -> Service {
@@ -126,8 +138,10 @@ impl Service {
         GLOBAL.get().cloned()
     }
 
-    /// Starts a service at `paths` on its own runtime thread.
+    /// Starts a service at `paths` on its own runtime thread. A process that is
+    /// not Kairo itself is refused the real home (`paths::check_home`).
     pub fn start(paths: Paths) -> Service {
+        crate::paths::check_home(&paths.home);
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("kairo-service".into())
@@ -150,7 +164,7 @@ impl Service {
             log::error!("cannot create {}: {e}", paths.home.display());
         }
         sysproxy::recover(&paths);
-        let settings = Settings::load(&paths);
+        let settings = isolate(Settings::load(&paths));
         let profiles = ProfileIndex::load(&paths);
         let (core_tx, core_rx) = mpsc::unbounded_channel();
         let icons = crate::icons::Icons::new(paths.icons_dir());
@@ -1188,7 +1202,7 @@ impl Service {
     ) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            let mut next = next;
+            let mut next = isolate(next);
             next.validate()?;
             // App choices are checked again whoever hands them over.
             next.apps = crate::kinds::sanitize(std::mem::take(&mut next.apps));
@@ -2359,3 +2373,19 @@ impl Service {
 
 pub use crate::time::{clock, local_offset_seconds};
 pub use crate::unix;
+
+#[cfg(test)]
+mod isolation_tests {
+    use super::*;
+
+    #[test]
+    fn a_test_process_never_gets_the_system_proxy_or_tun() {
+        // A test binary never claims the real home: it is isolated, as a test runner is.
+        assert!(crate::paths::isolated() && !crate::paths::may_touch_system());
+        let asked = Settings { system_proxy: true, tun: true, ..Settings::default() };
+        let got = isolate(asked);
+        assert!(!got.system_proxy && !got.tun);
+        // The rest stays as asked.
+        assert_eq!(got.mixed_port, Settings::default().mixed_port);
+    }
+}

@@ -97,6 +97,9 @@ pub fn has_net_admin(core: &Path) -> bool {
 /// Asks the user (polkit / the macOS admin prompt / UAC) to let the core run TUN.
 #[cfg_attr(windows, allow(unreachable_code))]
 pub fn grant(core: &Path) -> Result<(), String> {
+    if !crate::paths::may_touch_system() {
+        return Err("TUN is never granted to a process that is not Kairo itself (a test runner)".into());
+    }
     #[cfg(windows)]
     {
         let _ = core;

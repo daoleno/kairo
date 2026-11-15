@@ -17,8 +17,150 @@
 //! `<home>` is `KAIRO_HOME` when set (tests, isolated runs), else the platform's
 //! application data directory: `$XDG_DATA_HOME/kairo` (`~/.local/share/kairo`) on
 //! Linux, `~/Library/Application Support/Kairo` on macOS, `%APPDATA%\Kairo` on Windows.
+//!
+//! Only Kairo's own programs may use that real home: the app (`kairo`) and
+//! `kairo-server` say so first thing ([`claim_real_home`]), and Android's app is
+//! one by construction. Any other process that runs Kairo (`nsh test`'s headless
+//! runner, a test binary) is *isolated*: with no `KAIRO_HOME` its home is a scratch
+//! directory of its own, a `KAIRO_HOME` that is the real home stops it with a
+//! panic, and it never sets the system proxy or turns TUN on ([`isolated`]). So a
+//! test can never stop, rewrite or reroute the Kairo the person is using. A test
+//! that has put the machine out of reach by its own means (a network namespace,
+//! stand-ins on PATH) may still exercise the proxy and TUN ([`sandboxed_by_test`]);
+//! the home guard stays on for it.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// This process is one of Kairo's own programs (see [`claim_real_home`]).
+static LAUNCHER: AtomicBool = AtomicBool::new(false);
+
+/// Says this process is Kairo itself (the app, `kairo-server`): the real home is
+/// its to use. Called first thing in `main`, before anything reads a path.
+pub fn claim_real_home() {
+    LAUNCHER.store(true, Ordering::SeqCst);
+}
+
+/// Whether this process is anything but Kairo itself (a test runner, a test
+/// binary): a home of its own, no system proxy, no TUN.
+pub fn isolated() -> bool {
+    !(LAUNCHER.load(Ordering::SeqCst) || cfg!(target_os = "android"))
+}
+
+/// A test sandboxed by its own means (see [`sandboxed_by_test`]).
+static SANDBOXED: AtomicBool = AtomicBool::new(false);
+
+/// For a test that has put the machine out of reach itself: its own network
+/// namespace (`scripts/tun-e2e.sh`), or stand-ins on PATH and a HOME of its own
+/// for the desktop's proxy settings. Lets it set a system proxy and turn TUN on
+/// as Kairo does. The home stays guarded: still never the real one.
+pub fn sandboxed_by_test() {
+    SANDBOXED.store(true, Ordering::SeqCst);
+}
+
+/// Whether this process may set the system proxy and turn TUN on: Kairo itself,
+/// or a test that is sandboxed by its own means.
+pub fn may_touch_system() -> bool {
+    !isolated() || SANDBOXED.load(Ordering::SeqCst)
+}
+
+/// What the home is decided from: the environment, as [`HomeEnv::current`] reads it.
+#[derive(Debug, Clone, Default)]
+pub struct HomeEnv {
+    pub kairo_home: Option<PathBuf>,
+    pub home: Option<PathBuf>,
+    pub userprofile: Option<PathBuf>,
+    pub appdata: Option<PathBuf>,
+    pub xdg_data_home: Option<PathBuf>,
+    /// Where an isolated process's home goes (`std::env::temp_dir`).
+    pub temp: PathBuf,
+    pub pid: u32,
+}
+
+impl HomeEnv {
+    pub fn current() -> HomeEnv {
+        let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+        HomeEnv {
+            kairo_home: var("KAIRO_HOME"),
+            home: var("HOME"),
+            userprofile: var("USERPROFILE"),
+            appdata: var("APPDATA"),
+            xdg_data_home: var("XDG_DATA_HOME"),
+            temp: std::env::temp_dir(),
+            pid: std::process::id(),
+        }
+    }
+
+    /// The platform's application data directory: the real home.
+    pub fn real_home(&self) -> PathBuf {
+        let user_home = self
+            .home
+            .clone()
+            .or_else(|| self.userprofile.clone())
+            .unwrap_or_else(|| PathBuf::from("."));
+        if cfg!(target_os = "macos") {
+            user_home.join("Library/Application Support/Kairo")
+        } else if cfg!(target_os = "windows") {
+            self.appdata.clone().unwrap_or(user_home).join("Kairo")
+        } else {
+            self.xdg_data_home
+                .clone()
+                .filter(|p| p.is_absolute())
+                .unwrap_or_else(|| user_home.join(".local/share"))
+                .join("kairo")
+        }
+    }
+}
+
+/// The home a process uses: `KAIRO_HOME`, else the real home for Kairo itself
+/// (`launcher`) and a scratch directory of its own for anything else. An
+/// isolated process given the real home is refused, in words that say why.
+pub fn resolve_home(env: &HomeEnv, launcher: bool) -> Result<PathBuf, String> {
+    match &env.kairo_home {
+        Some(home) if !launcher && same_dir(home, &env.real_home()) => Err(refusal(home)),
+        Some(home) => Ok(home.clone()),
+        None if launcher => Ok(env.real_home()),
+        None => Ok(env.temp.join(format!("kairo-isolated-{}", env.pid))),
+    }
+}
+
+/// Stops an isolated process that is about to use the real home (a service
+/// started at a path of its own making): see the module docs.
+pub fn check_home(home: &Path) {
+    let env = HomeEnv::current();
+    if isolated() && same_dir(home, &env.real_home()) {
+        panic!("{}", refusal(home));
+    }
+}
+
+fn refusal(home: &Path) -> String {
+    format!(
+        "refusing Kairo's real home {} in a process that is not Kairo (a test runner or test): \
+         it would stop and rewrite the Kairo in use. Set KAIRO_HOME to a scratch directory, \
+         or leave it unset for one of this process's own",
+        home.display()
+    )
+}
+
+/// The same directory, through symbolic links and `..` when it exists.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let norm = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| lexical(p));
+    norm(a) == norm(b)
+}
+
+fn lexical(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
 
 #[derive(Debug, Clone)]
 pub struct Paths {
@@ -35,33 +177,19 @@ impl Paths {
         }
     }
 
-    /// The default location (see the module docs).
+    /// The default location (see the module docs): never the real home in a
+    /// process that is not Kairo itself.
     pub fn default_home() -> PathBuf {
-        if let Some(home) = std::env::var_os("KAIRO_HOME") {
-            return PathBuf::from(home);
-        }
         // Android: the app's own files directory (the Java side tells us).
         #[cfg(target_os = "android")]
-        if let Some(files) = crate::android::files_dir() {
+        if std::env::var_os("KAIRO_HOME").is_none()
+            && let Some(files) = crate::android::files_dir()
+        {
             return files;
         }
-        let user_home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."));
-        if cfg!(target_os = "macos") {
-            user_home.join("Library/Application Support/Kairo")
-        } else if cfg!(target_os = "windows") {
-            std::env::var_os("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or(user_home)
-                .join("Kairo")
-        } else {
-            std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-                .unwrap_or_else(|| user_home.join(".local/share"))
-                .join("kairo")
+        match resolve_home(&HomeEnv::current(), !isolated()) {
+            Ok(home) => home,
+            Err(why) => panic!("{why}"),
         }
     }
 
@@ -384,5 +512,75 @@ mod private_tests {
         assert_eq!(mode(&old), 0o600);
         assert_eq!(mode(&paths.home), 0o700);
         assert_eq!(mode(&core), 0o755, "the core is left as it is");
+    }
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    /// A person's machine: a home directory, no KAIRO_HOME, a temp directory.
+    fn machine() -> HomeEnv {
+        HomeEnv {
+            home: Some(PathBuf::from("/home/someone")),
+            userprofile: Some(PathBuf::from("C:\\Users\\someone")),
+            appdata: Some(PathBuf::from("C:\\Users\\someone\\AppData\\Roaming")),
+            temp: PathBuf::from("/tmp"),
+            pid: 4242,
+            ..HomeEnv::default()
+        }
+    }
+
+    #[test]
+    fn kairo_itself_uses_the_real_home() {
+        let env = machine();
+        let home = resolve_home(&env, true).unwrap();
+        assert_eq!(home, env.real_home());
+        if cfg!(target_os = "linux") {
+            assert_eq!(home, PathBuf::from("/home/someone/.local/share/kairo"));
+        }
+    }
+
+    #[test]
+    fn a_test_runner_gets_a_home_of_its_own_never_the_real_one() {
+        let env = machine();
+        let home = resolve_home(&env, false).unwrap();
+        assert_eq!(home, PathBuf::from("/tmp/kairo-isolated-4242"));
+        assert_ne!(home, env.real_home());
+        assert!(!home.starts_with("/home/someone"), "{home:?}");
+        // Another run, another home.
+        let other = resolve_home(&HomeEnv { pid: 4243, ..machine() }, false).unwrap();
+        assert_ne!(home, other);
+    }
+
+    #[test]
+    fn a_test_runner_given_the_real_home_is_refused_in_words() {
+        let real = machine().real_home();
+        for given in [real.clone(), real.join("."), real.join("x").join("..")] {
+            let env = HomeEnv { kairo_home: Some(given.clone()), ..machine() };
+            let err = resolve_home(&env, false).unwrap_err();
+            assert!(err.contains("refusing Kairo's real home") && err.contains("KAIRO_HOME"), "{given:?}: {err}");
+        }
+        // Kairo itself may be pointed there (an explicit KAIRO_HOME is the person's choice).
+        let env = HomeEnv { kairo_home: Some(real.clone()), ..machine() };
+        assert_eq!(resolve_home(&env, true).unwrap(), real);
+    }
+
+    #[test]
+    fn a_scratch_kairo_home_is_used_as_given() {
+        let env = HomeEnv { kairo_home: Some(PathBuf::from("/tmp/kairo-ui-test.abc")), ..machine() };
+        assert_eq!(resolve_home(&env, false).unwrap(), PathBuf::from("/tmp/kairo-ui-test.abc"));
+        assert_eq!(resolve_home(&env, true).unwrap(), PathBuf::from("/tmp/kairo-ui-test.abc"));
+    }
+
+    #[test]
+    fn xdg_data_home_moves_the_real_home_and_the_refusal_with_it() {
+        if !cfg!(target_os = "linux") {
+            return;
+        }
+        let env = HomeEnv { xdg_data_home: Some(PathBuf::from("/data/someone")), ..machine() };
+        assert_eq!(env.real_home(), PathBuf::from("/data/someone/kairo"));
+        let given = HomeEnv { kairo_home: Some(PathBuf::from("/data/someone/kairo")), ..env };
+        assert!(resolve_home(&given, false).is_err());
     }
 }

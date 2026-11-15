@@ -222,3 +222,5 @@ crates/kairo-core/src/kinds.rs	GitHub Releases	an app's own name in the catalog,
 crates/kairo-core/src/kinds.rs	Go modules	an app's own name in the catalog, the same in every language
 crates/kairo-core/src/kinds.rs	VS Code Marketplace	an app's own name in the catalog, the same in every language
 src/pages/kinds.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (no program menu for it)
+crates/kairo-core/src/paths.rs	refusing Kairo's real home {} in a process that is not Kairo (a test runner or test): it would stop and rewrite the Kairo in use. Set KAIRO_HOME to a scratch directory, or leave it unset for one of this process's own	paths: the panic that stops a test runner given the real home, for the developer running tests (never shown in Kairo)
+crates/kairo-core/src/tun.rs	TUN is never granted to a process that is not Kairo itself (a test runner)	tun::grant: refused in a test process, for the developer running tests (never shown in Kairo)

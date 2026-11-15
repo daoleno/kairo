@@ -49,6 +49,8 @@ fn fail(text: impl std::fmt::Display) -> ! {
 }
 
 pub fn main() {
+    // kairo-server is Kairo: its real home is its own (a test runner's never is).
+    kairo_core::paths::claim_real_home();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let home = std::env::var_os("KAIRO_HOME").map(PathBuf::from).unwrap_or_else(default_home);

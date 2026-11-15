@@ -595,6 +595,8 @@ async fn tun_in_a_network_namespace() {
         eprintln!("skipped: set KAIRO_TEST_TUN=1 and run under `unshare -rn`");
         return;
     }
+    // In a network namespace of its own: TUN here cannot reroute the machine.
+    kairo_core::paths::sandboxed_by_test();
     unsafe {
         std::env::set_var("KAIRO_NO_SYSPROXY", "1");
         std::env::set_var("KAIRO_NO_UPDATE", "1");

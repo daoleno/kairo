@@ -296,8 +296,9 @@ pub struct Backends {
 }
 
 pub fn backends() -> Backends {
-    // Tests and sandboxed runs: never touch the machine's proxy.
-    if std::env::var_os("KAIRO_NO_SYSPROXY").is_some() {
+    // Tests and sandboxed runs, and any process that is not Kairo itself (a test
+    // runner) unless it has stand-ins of its own: never touch the machine's proxy.
+    if std::env::var_os("KAIRO_NO_SYSPROXY").is_some() || !crate::paths::may_touch_system() {
         return Backends {
             gnome: false,
             kde: None,

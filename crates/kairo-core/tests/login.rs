@@ -198,6 +198,9 @@ async fn the_login_check_leaves_a_starting_kairo_connected() {
         std::env::remove_var("KAIRO_NO_SYSPROXY");
         std::env::set_var("KAIRO_NO_UPDATE", "1");
     }
+    // PATH holds only the stand-ins and HOME is the temporary folder: the
+    // machine's proxy is out of reach, so this test may set one.
+    kairo_core::paths::sandboxed_by_test();
     assert_eq!(
         sysproxy::backends(),
         Backends {
