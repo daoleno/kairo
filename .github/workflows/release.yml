@@ -89,6 +89,8 @@ jobs:
           test -s /usr/share/doc/kairo/LICENSE.mihomo
           grep -q "MetaCubeX/mihomo/tree/$MIHOMO_VERSION" /usr/share/doc/kairo/copyright
           tar -tzf dist/Kairo-*.tar.gz | grep -q '/lib/kairo/mihomo$'
+      - name: In a clean Ubuntu 24.04, the .deb alone and the .tar.gz with the README's libraries find every library, and Kairo starts
+        run: scripts/check-linux-packages.sh dist
       - uses: actions/download-artifact@v4
         with:
           name: web-page
