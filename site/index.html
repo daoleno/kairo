@@ -264,6 +264,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
           <a class="btn primary" data-asset="_arm64.deb" href="https://github.com/daoleno/kairo/releases/latest">.deb</a>
           <a class="btn" data-asset="linux-aarch64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">.tar.gz</a>
         </div>
+        <p>No screen: <a data-asset="server:linux-x86_64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">kairo-server x86_64</a> · <a data-asset="server:linux-aarch64.tar.gz" href="https://github.com/daoleno/kairo/releases/latest">arm64</a>, a page in the browser</p>
       </div>
       <div class="dl">
         <h3>Android</h3>
@@ -331,7 +332,13 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
     .then(function (release) {
       var assets = release.assets || [];
       function find(suffix) {
-        for (var i = 0; i < assets.length; i++) if (assets[i].name.slice(-suffix.length) === suffix) return assets[i].browser_download_url;
+        // kairo-server's archives end like the app's: "server:<suffix>" picks them, a plain suffix never does.
+        var server = suffix.indexOf("server:") === 0;
+        if (server) suffix = suffix.slice(7);
+        for (var i = 0; i < assets.length; i++) {
+          var name = assets[i].name;
+          if (name.slice(-suffix.length) === suffix && (name.indexOf("Kairo-server-") === 0) === server) return assets[i].browser_download_url;
+        }
         return null;
       }
       document.querySelectorAll("[data-asset]").forEach(function (a) {

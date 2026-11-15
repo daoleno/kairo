@@ -63,8 +63,8 @@ Four pages in a sidebar: **Home**, **Apps**, **Activity** and **Subscriptions**,
   The core alone gets the one-time privilege TUN needs (`cap_net_admin` through `pkexec setcap` on Linux,
   setuid through the administrator prompt on macOS). Kairo itself never runs privileged. See
   [TUN and privileges](#tun-and-privileges).
-- **Settings.** General: appearance, launch at login, start minimized, keep running in the tray, how apps
-  follow, AI. **Advanced**: the port, other devices on the network, IPv6, the bypass list, the controller and
+- **Settings.** General: language (System, English, 简体中文), appearance, launch at login, start minimized,
+  keep running in the tray, how apps follow. **Advanced**: the port, other devices on the network, IPv6, the bypass list, the controller and
   secret, the core, the delay test, and **Inspect**: the subscription's groups, the running rules
   (read-only), Diagnostics (the core's log and a report to copy) and DNS (ask the core's resolver; flush
   the fake-IP cache).
