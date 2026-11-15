@@ -46,7 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: nsh and wasm-bindgen (the version Cargo.lock pins)
         run: |
-          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.4.0 sh
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           cargo install wasm-bindgen-cli --version "$(cargo metadata --format-version 1 | python3 -c 'import sys,json; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="wasm-bindgen"))')" --locked
       - name: The page
@@ -191,7 +191,7 @@ jobs:
           go-version: stable
       - name: nsh (the command that builds the app's native part)
         run: |
-          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.4.0 sh
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: The APK, signed with the release key (kept in the repository's secrets)
         env:
