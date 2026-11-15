@@ -44,6 +44,17 @@ fn letter_of(name: &str) -> String {
         .unwrap_or_else(|| "·".into())
 }
 
+/// The mark on a square with no picture: a service's own one or two letters ("Cu"), else the first
+/// letter of what it is given. A whole name ("MiniMax") never goes in: it would wrap in the square.
+fn mark(letters: &str) -> String {
+    let n = letters.chars().count();
+    if (1..=2).contains(&n) && letters.chars().all(char::is_alphanumeric) {
+        letters.to_owned()
+    } else {
+        letter_of(letters)
+    }
+}
+
 fn resolve(subject: &Subject) -> Shown {
     let svc = store().svc();
     match subject {
@@ -146,7 +157,7 @@ fn draw(shown: Shown, side: f32, broken: Signal<bool>) -> View {
             .justify_center()
             .bg(ui::subtle)
             .child(
-                text(l)
+                text(mark(&l))
                     .text_size(px(size::small()))
                     .font_weight(FontWeight::SEMIBOLD),
             ),
@@ -164,4 +175,28 @@ fn file_picture(path: &std::path::Path, side: f32, broken: Signal<bool>) -> AnyE
         .flex_shrink_0()
         .on_error(move |_: &str| broken.set(true))
         .into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mark;
+
+    #[test]
+    fn a_square_with_no_picture_holds_one_or_two_letters_never_a_name() {
+        // The AI apps with no logo of their own gave their whole name.
+        assert_eq!(mark("MiniMax"), "M");
+        assert_eq!(mark("Yuanbao"), "Y");
+        assert_eq!(mark("Ernie"), "E");
+        assert_eq!(mark("zhipu"), "Z");
+        // A service's own letters stay.
+        assert_eq!(mark("Cu"), "Cu");
+        assert_eq!(mark("C"), "C");
+        // A name in Chinese, or one that starts with a sign.
+        assert_eq!(mark("通义千问"), "通");
+        assert_eq!(mark("@scope"), "S");
+        assert_eq!(mark(""), "·");
+        for name in ["MiniMax", "Yuanbao", "Ernie", "Zhipu", "通义千问", "example.com"] {
+            assert!(mark(name).chars().count() <= 2, "{name}");
+        }
+    }
 }
