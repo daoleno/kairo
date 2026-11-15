@@ -252,6 +252,21 @@ fn current_page(store: crate::store::Store) -> impl IntoElement {
 /// gesture bar and the keyboard.
 fn phone_shell() -> impl IntoElement {
     let store = store();
+    // The system's Back goes where the page's own Back goes (Settings to Home, an
+    // Inspect view to where it was opened from) and closes an app's sheet; on a
+    // tab it leaves Kairo, as it did.
+    on_back_press(move || {
+        if store.app_sheet.get_untracked().is_some() {
+            store.app_sheet.set(None);
+            return true;
+        }
+        match store.page.get_untracked() {
+            Page::Settings => store.page.set(Page::Overview),
+            p if p.inspect() => crate::pages::settings::go_back(store),
+            _ => return false,
+        }
+        true
+    });
     let tabs = [
         Page::Overview,
         Page::Apps,

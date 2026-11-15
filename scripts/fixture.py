@@ -12,13 +12,14 @@ also keeps sending requests through Kairo's mixed port so the live views move.
 Subscription URL: http://127.0.0.1:<port>/sub
 A provider's notice instead of a config: http://127.0.0.1:<port>/notice
 /down-on and /down-off: while on, /sub answers 502 (for tests)
+/notice-on and /notice-off: while on, /sub answers with a provider's long notice
 """
 
 import argparse
 import asyncio
 import random
 
-STATE = {"down": False}
+STATE = {"down": False, "notice": False}
 REGIONS = [
     ("Tokyo", 6), ("Osaka", 3), ("Hong Kong", 8), ("Taipei", 4), ("Singapore", 8),
     ("Seoul", 4), ("Los Angeles", 6), ("San Jose", 4), ("Seattle", 3), ("New York", 4),
@@ -121,6 +122,12 @@ def subscription(proxy_ports, dead_port, origin):
     return "\n".join(lines) + "\n"
 
 
+NOTICE_LONG = (
+    "请登录系统网站后台，或在系统网站后台的订阅(SS/Trojan)页面开启订阅获取。"
+    "每次开启后，订阅可获取有效时间为：10 分钟"
+)
+
+
 async def origin_handler(reader, writer, sub):
     try:
         head = await reader.readuntil(b"\r\n\r\n")
@@ -132,6 +139,11 @@ async def origin_handler(reader, writer, sub):
         writer.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
     elif path.endswith("/sub") and STATE["down"]:
         writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    elif path.endswith("/sub") and STATE["notice"]:
+        # A provider's long notice where the config was (a subscription that worked, then
+        # needs fetching enabled again): what a phone's failure card must show in full.
+        body = NOTICE_LONG.encode()
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n" + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
     elif path.endswith("/sub"):
         body = sub().encode()
         writer.write(
@@ -145,6 +157,9 @@ async def origin_handler(reader, writer, sub):
     elif path.endswith("/down-on") or path.endswith("/down-off"):
         # A switch for tests: while it is on, /sub answers like a provider whose server is having trouble.
         STATE["down"] = path.endswith("/down-on")
+        writer.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    elif path.endswith("/notice-on") or path.endswith("/notice-off"):
+        STATE["notice"] = path.endswith("/notice-on")
         writer.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
     elif path.endswith("/notice"):
         # A provider that answers with a message instead of a config (fetching

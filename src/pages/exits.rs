@@ -115,15 +115,32 @@ pub fn card(
         .hover(|s| s.bg(move || theme().accent))
         .style_when(selected, |s| s.outline(px(2.0)).outline_color(move || theme().primary))
         .focus(|s| s.outline(px(3.0)).outline_color(move || theme().ring))
+        // The kind's name, then its health: beside it while both fit, under it
+        // when not (a narrow card); the name is never cut to make room.
         .child(
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
-                .gap_2()
-                .child(ui::muted(kind.title()).font_weight(FontWeight::MEDIUM).flex_1().number_of_lines(1))
-                .child(when(move || kind == Kind::Ai, move || ui::badge(t!("exits.badge.stable"))))
-                .child(ui::dot(move || health().tone()))
-                .child(ui::muted(move || -> SharedString { health().word().into() }).text_size(px(size::small()))),
+                .gap_x_2()
+                .gap_y_0p5()
+                .child(
+                    ui::muted(kind.title())
+                        .font_weight(FontWeight::MEDIUM)
+                        .flex_grow(1.0)
+                        .flex_shrink(1.0)
+                        .number_of_lines(2),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .flex_shrink_0()
+                        .child(when(move || kind == Kind::Ai, move || ui::badge(t!("exits.badge.stable"))))
+                        .child(ui::dot(move || health().tone()))
+                        .child(ui::muted(move || -> SharedString { health().word().into() }).text_size(px(size::small()))),
+                ),
         )
         .child(
             view()
@@ -145,7 +162,7 @@ pub fn card(
                     })
                     .text_size(px(size::large()))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .number_of_lines(1)
+                    .number_of_lines(2)
                     .flex_1(),
                 ),
         )
@@ -158,15 +175,27 @@ pub fn card(
                 format!("{} · {apps}", k::subtitle(kind)).into()
             })
             .text_size(px(size::small()))
-            .number_of_lines(if ui::phone() { 2 } else { 1 }),
+            .number_of_lines(3),
         )
+}
+
+/// The least width of a kind's card in the grid above the kind (points).
+const CARD_MIN: f32 = 150.0;
+/// The room between the cards (points; `gap_2p5`).
+const CARD_GAP: f32 = 10.0;
+
+/// The columns of kind cards in `width` points, when they are above the kind
+/// (a phone, a narrow window): two, three where three cards keep their least
+/// width. Both divide the six kinds into full rows.
+pub fn columns(width: f32) -> u16 {
+    if width >= 3.0 * CARD_MIN + 2.0 * CARD_GAP { 3 } else { 2 }
 }
 
 // --- The page --------------------------------------------------------------------------
 
 /// The content's width (beside the sidebar) below which Apps puts its cards
 /// above the kind: the rail's 270 and a list that keeps its exit menus.
-const STACK_BELOW: f32 = 820.0;
+pub const STACK_BELOW: f32 = 820.0;
 
 thread_local! {
     /// The kind shown (None: All apps).
@@ -213,40 +242,42 @@ pub fn page() -> impl IntoElement {
                 .self_center()
                 .gap_4();
             let page = if phone { page } else { page.flex_row().items_start() };
-            page.child({
-                let cards = view().flex_shrink_0().gap_2p5();
-                let cards = if phone { cards.w_full().flex_row().flex_wrap() } else { cards.w(px(270.0)) };
-                // In rows, three cards a row.
-                let slot = move |e: AnyElement| -> AnyElement {
-                    if phone { view().w(percentage(0.32)).child(e).into_element() } else { e }
-                };
-                cards
-                    .child(slot(
-                        nsh_base::button()
-                            .accessibility_label(t!("apps.all"))
-                            .selected(move || which.get().is_none())
-                            .on_press(move || which.set(None))
-                            .flex_row()
-                            .items_center()
-                            .px_4()
-                            .h(px(ui::touch_h(44.0)))
-                            .rounded(px(18.0))
-                            .cursor_pointer()
-                            .bg(move || theme().muted)
-                            .hover(|s| s.bg(move || theme().accent))
-                            .style_when(move || which.get().is_none(), |s| {
-                                s.outline(px(2.0)).outline_color(move || theme().primary)
+            page.child(if phone {
+                // Above the kind: All Apps on its own, then the kinds in equal columns
+                // across the width.
+                let width = signal(0.0f32);
+                view()
+                    .w_full()
+                    .gap_3()
+                    .child(view().flex_row().flex_wrap().gap_2().child(all_apps(which, move || count(None), true)))
+                    .child(
+                        view()
+                            .w_full()
+                            .grid()
+                            .grid_cols(move || columns(width.get()))
+                            .gap_2p5()
+                            .on_layout(move |b: &Bounds<Points>| {
+                                if (b.size.width.0 - width.get_untracked()).abs() > 0.5 {
+                                    width.set(b.size.width.0);
+                                }
                             })
-                            .child(ui::body(t!("apps.all")).font_weight(FontWeight::SEMIBOLD).flex_1())
-                            .child(ui::muted(move || -> SharedString { count(None).to_string().into() }))
-                            .into_element(),
-                    ))
+                            .children(Kind::ALL.into_iter().map(move |kind| {
+                                card(kind, move || count(Some(kind)), move || which.get() == Some(kind), move || which.set(Some(kind)))
+                                    .into_element()
+                            })),
+                    )
+                    .into_element()
+            } else {
+                view()
+                    .flex_shrink_0()
+                    .w(px(270.0))
+                    .gap_2p5()
+                    .child(all_apps(which, move || count(None), false))
                     .children(Kind::ALL.into_iter().map(move |kind| {
-                        slot(
-                            card(kind, move || count(Some(kind)), move || which.get() == Some(kind), move || which.set(Some(kind)))
-                                .into_element(),
-                        )
+                        card(kind, move || count(Some(kind)), move || which.get() == Some(kind), move || which.set(Some(kind)))
+                            .into_element()
                     }))
+                    .into_element()
             })
             .child(view().flex_1().min_w(px(0.0)).gap_4().child(dynamic(move || {
                 let sel = which.get();
@@ -264,6 +295,35 @@ pub fn page() -> impl IntoElement {
         }))
         .child(k::sheet_host())
         .text_color(move || theme().foreground)
+}
+
+/// All Apps, a filter over the kinds: the rail's first row, or a chip above
+/// the kinds' cards (`chip`).
+fn all_apps(which: Signal<Option<Kind>>, count: impl Fn() -> usize + 'static, chip: bool) -> AnyElement {
+    nsh_base::button()
+        .accessibility_label(t!("apps.all"))
+        .selected(move || which.get().is_none())
+        .on_press(move || which.set(None))
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .px_4()
+        .h(px(ui::touch_h(if chip { 36.0 } else { 44.0 })))
+        .rounded(px(if chip { 999.0 } else { 18.0 }))
+        .cursor_pointer()
+        .bg(move || theme().muted)
+        .hover(|s| s.bg(move || theme().accent))
+        .style_when(move || which.get().is_none(), |s| {
+            s.outline(px(2.0)).outline_color(move || theme().primary)
+        })
+        .child(
+            ui::body(t!("apps.all"))
+                .font_weight(FontWeight::SEMIBOLD)
+                .number_of_lines(1)
+                .when(!chip, |t| t.flex_1()),
+        )
+        .child(ui::muted(move || -> SharedString { count().to_string().into() }))
+        .into_element()
 }
 
 /// A kind: its picker, what goes with it, and its apps.
@@ -463,7 +523,7 @@ fn subscription_row() -> impl IntoElement {
                             view()
                                 .flex_1()
                                 .min_w(px(0.0))
-                                .child(ui::body(move || -> SharedString { summary().into() }).number_of_lines(1)),
+                                .child(ui::body(move || -> SharedString { summary().into() }).number_of_lines(2)),
                         )
                         .child(ui::capsule(t!("apps.subscription.groups"), false).h(px(30.0)).px_4().on_press(move || store.page.set(Page::Proxies)))
                         .into_element(),
@@ -555,7 +615,7 @@ fn add_card(adding: Signal<bool>) -> impl IntoElement {
                 .role(AccessibilityRole::Header),
         )
         .child(ui::segmented(
-            vec![(false, "A program"), (true, "A site")],
+            vec![(false, t!("apps.add.program")), (true, t!("apps.add.site"))],
             move || site.get(),
             move |v| site.set(v),
         ))
@@ -1012,6 +1072,21 @@ fn server_row(p: Place, chosen: bool) -> nsh_base::ButtonElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kind_cards_are_two_columns_on_a_phone_three_where_they_fit() {
+        // Phones (the width inside 16-point margins): two equal columns.
+        for phone in [328.0, 360.0, 380.0, 392.0] {
+            assert_eq!(columns(phone), 2, "{phone}");
+        }
+        // A wider window below the rail's width, a phone on its side: three.
+        assert_eq!(columns(3.0 * CARD_MIN + 2.0 * CARD_GAP), 3);
+        assert_eq!(columns(700.0), 3);
+        // Unmeasured yet: two, not none.
+        assert_eq!(columns(0.0), 2);
+        // Both counts fill their rows with the six kinds.
+        assert!([2, 3].iter().all(|c| Kind::ALL.len() % c == 0));
+    }
 
     #[test]
     fn delays_read_as_words() {

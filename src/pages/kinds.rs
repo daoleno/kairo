@@ -549,13 +549,16 @@ pub fn exit_button(r: &AppRow) -> AnyElement {
     .into_element()
 }
 
-/// A row of an app: its logo and name, the check's line, and its exit.
+/// A row of an app: its logo and name, the check's line, and its exit. Where
+/// the list is narrow (a phone, a narrow window: Apps' cards above it) the
+/// check's line goes under the name, at the width left of the exit, so it is
+/// read whole.
 pub fn app_row(r: AppRow) -> AnyElement {
     let store = store();
     let id = r.id.clone();
     let tone = r.tone;
-    let phone = ui::phone();
-    nsh_base::button()
+    let narrow = ui::phone() || untracked(|| window().width.0) < crate::pages::exits::STACK_BELOW;
+    let row = nsh_base::button()
         .accessibility_label(r.name.clone())
         .on_press(move || store.app_sheet.set(Some(id.clone())))
         .flex_row()
@@ -563,26 +566,40 @@ pub fn app_row(r: AppRow) -> AnyElement {
         .gap_3()
         .px_4()
         .min_h(px(ui::touch_h(44.0)))
-        .py_1()
         .cursor_pointer()
         .hover(|s| s.bg(move || theme().accent))
-        .when(phone, |v| v.flex_wrap().gap_y_1())
-        .child(r.logo(24.0))
-        .child(ui::body(r.name.clone()).number_of_lines(1).w(px(if phone { 120.0 } else { 160.0 })).flex_shrink(1.0).min_w(px(72.0)))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .flex_1()
-                .min_w(px(0.0))
-                .child(ui::dot(move || tone_color(tone)))
-                .child(ui::muted(r.status.clone()).number_of_lines(1).flex_1()),
-        )
-        .child(r.fix.clone().map(|f| {
-            let fix = f.clone();
-            ui::capsule(f.title(), true).h(px(26.0)).px_3().on_press(move || fix.apply(store))
-        }))
+        .child(r.logo(24.0));
+    let status = view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .min_w(px(0.0))
+        .child(ui::dot(move || tone_color(tone)))
+        .child(ui::muted(r.status.clone()).number_of_lines(if narrow { 2 } else { 1 }).flex_1());
+    let fix = r.fix.clone().map(|f| {
+        let fix = f.clone();
+        ui::capsule(f.title(), true).h(px(26.0)).px_3().on_press(move || fix.apply(store))
+    });
+    if narrow {
+        return row
+            .py_2()
+            .child(
+                view()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .gap_0p5()
+                    .items_start()
+                    .child(ui::body(r.name.clone()).number_of_lines(2))
+                    .child(status.w_full())
+                    .child(fix.map(|f| f.mt_1())),
+            )
+            .child(view().flex_shrink_0().child(exit_button(&r)))
+            .into_element();
+    }
+    row.py_1()
+        .child(ui::body(r.name.clone()).number_of_lines(1).w(px(160.0)).flex_shrink(1.0).min_w(px(72.0)))
+        .child(status.flex_1())
+        .child(fix)
         .child(exit_button(&r))
         .into_element()
 }

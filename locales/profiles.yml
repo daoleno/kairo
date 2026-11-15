@@ -190,10 +190,20 @@ profiles.http.server_error:
 profiles.provider_says:
   en: "Your provider says: “%{code} %{reason}”"
   zh: "服务商提示：「%{code} %{reason}」"
-# After the subscription's name: "Backup couldn't update · …. Using the saved copy."
-profiles.banner:
-  en: "couldn't update · %{headline}. Using the saved copy."
-  zh: "无法更新 · %{headline}。正在使用已保存的副本。"
+# A failed update's card: its first line, then the provider's message.
+profiles.banner.title:
+  en: "%{name} couldn't update"
+  zh: "%{name} 无法更新"
+profiles.banner.message:
+  en: "%{headline}. Using the saved copy."
+  zh: "%{headline}。正在使用已保存的副本。"
+# Under a long message cut at three lines.
+profiles.banner.more:
+  en: Show All
+  zh: 展开
+profiles.banner.less:
+  en: Show Less
+  zh: 收起
 profiles.banner.retry:
   en: Retry
   zh: 重试

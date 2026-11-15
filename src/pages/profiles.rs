@@ -298,11 +298,11 @@ pub fn plain_error(err: &str, url: Option<&str>) -> (String, Option<String>) {
     crate::pages::home::explain(&e)
 }
 
-/// The rest of the banner after the subscription's name:
-/// "couldn't update · Your provider says: “503 Service Unavailable”. Using the saved copy."
+/// A failed update's message, under the card's title:
+/// "Your provider says: “503 Service Unavailable”. Using the saved copy."
 pub fn banner_text(headline: &str) -> String {
     tr!(
-        "profiles.banner",
+        "profiles.banner.message",
         headline = headline.trim().trim_end_matches(['.', '。'])
     )
 }
@@ -456,8 +456,14 @@ pub fn page() -> impl IntoElement {
 
 // --- Provider errors -----------------------------------------------------------------
 
-/// "Backup couldn't update · Your provider says: “503 Service Unavailable”.
-/// Using the saved copy." with Retry.
+/// The lines of a provider's message before it is cut, with a way to see it all.
+const MESSAGE_LINES: u32 = 3;
+
+/// The card of a subscription that could not update: "Backup couldn't update",
+/// the provider's message across the card's width ("Your provider says: “503
+/// Service Unavailable”. Using the saved copy.", a long one cut at three lines
+/// with Show All), then Retry and Close, beside the words while the card is
+/// wide enough and under them when it is not (a phone).
 fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
     let store = store();
     let id = p.get_untracked().id.clone();
@@ -466,65 +472,132 @@ fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
         let m = computed(move || store.state.with(|s| s.updating.contains(&id)));
         move || m.get()
     };
-    let said =
-        move || p.with(|p| plain_error(p.last_error.as_deref().unwrap_or_default(), p.url()));
+    let message = computed(move || {
+        p.with(|p| banner_text(&plain_error(p.last_error.as_deref().unwrap_or_default(), p.url()).0))
+    });
+    // Whether the message is cut: the height of all of it (an unseen copy
+    // across the same width) against the height it is given at three lines.
+    let whole = signal(0.0f32);
+    let cut_at = signal(0.0f32);
+    let open = signal(false);
+    let long = computed(move || whole.get() > cut_at.get() + 1.0);
     let close_id = id.clone();
     view()
         .flex_row()
+        .flex_wrap()
         .items_center()
-        .gap_3()
+        .gap_x_3()
+        .gap_y_2()
         .px_4()
         .py_3()
         .rounded(move || theme().radius)
         .bg(move || ui::warning().opacity(0.14))
         .child(
+            // The words take the card's width, the buttons what is left of it
+            // when that is room for a few words a line; else they go below.
             view()
-                .flex_1()
+                .flex_grow(1.0)
+                .flex_shrink(1.0)
+                .basis(px(BANNER_WORDS))
                 .min_w(px(0.0))
-                .gap_0p5()
+                .gap_1()
+                .child(
+                    text(move || -> SharedString {
+                        t!("profiles.banner.title", name = p.with(|p| p.name.clone())).into()
+                    })
+                    .text_size(px(size::body()))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .number_of_lines(2),
+                )
                 .child(
                     view()
-                        .flex_row()
-                        .gap_1()
                         .child(
-                            text(move || -> SharedString { p.with(|p| p.name.clone()).into() })
+                            text(move || -> SharedString { message.get().into() })
                                 .text_size(px(size::body()))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .number_of_lines(1),
+                                .number_of_lines(move || if open.get() { 0 } else { MESSAGE_LINES })
+                                .on_layout(move |b: &Bounds<Points>| {
+                                    if !open.get_untracked() {
+                                        set_changed(cut_at, b.size.height.0);
+                                    }
+                                }),
                         )
                         .child(
-                            text(move || -> SharedString { banner_text(&said().0).into() })
+                            text(move || -> SharedString { message.get().into() })
                                 .text_size(px(size::body()))
-                                .flex_1(),
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .invisible()
+                                .accessibility_elements_hidden(true)
+                                .on_layout(move |b: &Bounds<Points>| set_changed(whole, b.size.height.0)),
                         ),
                 )
+                .child(when(
+                    move || long.get(),
+                    move || {
+                        view().flex_row().child(
+                            ui::link_btn(move || -> SharedString {
+                                if open.get() {
+                                    t!("profiles.banner.less").into()
+                                } else {
+                                    t!("profiles.banner.more").into()
+                                }
+                            })
+                            .px_0()
+                            .on_press(move || open.update(|o| *o = !*o)),
+                        )
+                    },
+                )),
         )
         .child(
-            ui::btn(
-                move || -> SharedString {
-                    if updating() {
-                        t!("profiles.banner.retrying").into()
-                    } else {
-                        t!("profiles.banner.retry").into()
-                    }
-                },
-                Variant::Secondary,
-            )
-            .disabled(updating)
-            .on_press(move || {
-                // The banner says why; no second message.
-                let f = store.svc().update_profile(id.clone());
-                spawn(async move {
-                    let _ = f.await;
-                });
-            }),
-        )
-        // Closing hides it until the next failed update says it again.
-        .child(
-            ui::icon_btn(Icon::Close, t!("profiles.banner.close"))
-                .on_press(move || store.svc().dismiss_failure(&close_id)),
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .flex_shrink_0()
+                .child(
+                    ui::btn(
+                        move || -> SharedString {
+                            if updating() {
+                                t!("profiles.banner.retrying").into()
+                            } else {
+                                t!("profiles.banner.retry").into()
+                            }
+                        },
+                        Variant::Secondary,
+                    )
+                    .disabled(updating)
+                    .on_press(move || {
+                        // The banner says why; no second message.
+                        let f = store.svc().update_profile(id.clone());
+                        spawn(async move {
+                            let _ = f.await;
+                        });
+                    }),
+                )
+                // Closing hides it until the next failed update says it again.
+                .child(
+                    ui::icon_btn(Icon::Close, t!("profiles.banner.close"))
+                        .on_press(move || store.svc().dismiss_failure(&close_id)),
+                ),
         )
 }
+
+/// Sets `signal` to `value` unless it is that already (a layout's report).
+fn set_changed(signal: Signal<f32>, value: f32) {
+    if (signal.get_untracked() - value).abs() > 0.5 {
+        signal.set(value);
+    }
+}
+
+/// The least width of a subscription's name and numbers beside its controls
+/// (points): narrower, the controls go under them.
+const ROW_WORDS: f32 = 240.0;
+
+/// The least width of the failure card's words beside its buttons (points):
+/// narrower, the buttons go under them.
+const BANNER_WORDS: f32 = 360.0;
 
 // --- The list ------------------------------------------------------------------------
 
@@ -573,10 +646,15 @@ fn row(
 
     view()
         .child(
+            // The name and numbers take the row's width, the controls what is left
+            // of it while that is room for the numbers on a line; else the
+            // controls go under them (a narrow window).
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
-                .gap_3()
+                .gap_x_3()
+                .gap_y_2()
                 .px_4()
                 .py_3()
                 .min_h(px(66.0))
@@ -589,7 +667,9 @@ fn row(
                 )
                 .child(
                     view()
-                        .flex_1()
+                        .flex_grow(1.0)
+                        .flex_shrink(1.0)
+                        .basis(px(ROW_WORDS))
                         .min_w(px(0.0))
                         .gap_0p5()
                         .child(
@@ -624,48 +704,56 @@ fn row(
                                 .into()
                         })),
                 )
-                .child(when(limited, move || {
-                    view().w(px(120.0)).child(ui::meter(move || {
-                        p.with(|p| p.usage.and_then(|u| u.fraction()).unwrap_or(0.0) as f32)
-                    }))
-                }))
-                .child(when(active, || in_use_tag()).otherwise(move || {
-                    let id = id_use.clone();
-                    ui::btn(t!("profiles.use"), Variant::Secondary)
-                        .h(px(26.0))
-                        .on_press(move || store.run(store.svc().activate(id.clone())))
-                }))
-                // The groups are the active subscription's own: one press from where it is.
-                .child(when(active, || groups_button().h(px(26.0))))
-                .child(when(remote, move || {
-                    let id = id_update.clone();
-                    ui::btn(t!("profiles.update"), Variant::Secondary)
-                        .h(px(26.0))
-                        .disabled(updating)
-                        .on_press(move || store.run_update(store.svc().update_profile(id.clone())))
-                }))
-                .child(when(has_usage, move || {
-                    let toggle = toggle.clone();
-                    button()
-                        .accessibility_label(t!("profiles.usage.title"))
-                        .on_press(move || toggle())
-                        .items_center()
-                        .justify_center()
-                        .size(px(26.0))
-                        .rounded(ui::radius_control())
-                        .cursor_pointer()
-                        .text_color(move || theme().muted_foreground)
-                        .hover(|s| s.bg(move || theme().accent))
-                        .child(
-                            icon(Icon::ChevronDown, 14.0)
-                                .rotate(move || if open() { deg(180.0) } else { deg(0.0) }),
-                        )
-                }))
                 .child(
-                    ui::btn("···", Variant::Secondary)
-                        .accessibility_label(t!("profiles.more"))
-                        .h(px(26.0))
-                        .on_press(move || menu(id_menu.clone(), p, dialog)),
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_3()
+                        .flex_shrink_0()
+                        .ml(auto())
+                        .child(when(limited, move || {
+                            view().w(px(120.0)).child(ui::meter(move || {
+                                p.with(|p| p.usage.and_then(|u| u.fraction()).unwrap_or(0.0) as f32)
+                            }))
+                        }))
+                        .child(when(active, || in_use_tag()).otherwise(move || {
+                            let id = id_use.clone();
+                            ui::btn(t!("profiles.use"), Variant::Secondary)
+                                .h(px(26.0))
+                                .on_press(move || store.run(store.svc().activate(id.clone())))
+                        }))
+                        // The groups are the active subscription's own: one press from where it is.
+                        .child(when(active, || groups_button().h(px(26.0))))
+                        .child(when(remote, move || {
+                            let id = id_update.clone();
+                            ui::btn(t!("profiles.update"), Variant::Secondary)
+                                .h(px(26.0))
+                                .disabled(updating)
+                                .on_press(move || store.run_update(store.svc().update_profile(id.clone())))
+                        }))
+                        .child(when(has_usage, move || {
+                            let toggle = toggle.clone();
+                            button()
+                                .accessibility_label(t!("profiles.usage.title"))
+                                .on_press(move || toggle())
+                                .items_center()
+                                .justify_center()
+                                .size(px(26.0))
+                                .rounded(ui::radius_control())
+                                .cursor_pointer()
+                                .text_color(move || theme().muted_foreground)
+                                .hover(|s| s.bg(move || theme().accent))
+                                .child(
+                                    icon(Icon::ChevronDown, 14.0)
+                                        .rotate(move || if open() { deg(180.0) } else { deg(0.0) }),
+                                )
+                        }))
+                        .child(
+                            ui::btn("···", Variant::Secondary)
+                                .accessibility_label(t!("profiles.more"))
+                                .h(px(26.0))
+                                .on_press(move || menu(id_menu.clone(), p, dialog)),
+                        ),
                 ),
         )
         .child(when(
@@ -1486,14 +1574,14 @@ mod tests {
         assert_eq!(headline, "Your provider says: “503 Service Unavailable”");
         assert_eq!(
             banner_text(&headline),
-            "couldn't update · Your provider says: “503 Service Unavailable”. Using the saved copy."
+            "Your provider says: “503 Service Unavailable”. Using the saved copy."
         );
         // A refused link is a different story, and a headline's full stop is not doubled.
         let (headline, _) = plain_error("The server answered HTTP 404", None);
         assert_eq!(headline, "The provider refused this link.");
         assert_eq!(
             banner_text(&headline),
-            "couldn't update · The provider refused this link. Using the saved copy."
+            "The provider refused this link. Using the saved copy."
         );
     }
 

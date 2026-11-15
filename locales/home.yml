@@ -463,6 +463,13 @@ apps.subscription.more:
 apps.add.app_title:
   en: "Add an app"
   zh: "添加应用"
+# Add an app: what it is, a program on this device or a site.
+apps.add.program:
+  en: "A program"
+  zh: "程序"
+apps.add.site:
+  en: "A site"
+  zh: "网站"
 apps.add.name_first:
   en: "Type a name first."
   zh: "请先输入名称。"
