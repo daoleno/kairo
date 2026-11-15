@@ -63,10 +63,12 @@ pub fn main_view(backend: backend::Backend) -> impl IntoElement {
     });
 
     if os() == Os::MacOs && !chrome::native() {
-        nsh_core::element::desktop::set_title_bar(
-            nsh_core::desktop::TitleBarStyle::Hidden,
-            Some(px(ui::HEADER_HEIGHT)),
-        );
+        let mut bar = nsh_core::desktop::TitleBarOptions::default();
+        bar.style = nsh_core::desktop::TitleBarStyle::Hidden;
+        bar.height = Some(px(ui::HEADER_HEIGHT));
+        let mut attributes = nsh_core::desktop::WindowAttributes::default();
+        attributes.title_bar = Some(bar);
+        nsh_core::element::desktop::current_window().set(attributes);
     }
     // macOS has a menu bar; GTK apps on Linux keep their window free of one.
     if os() == Os::MacOs {
