@@ -119,19 +119,14 @@ fn symbol(item: Retained<NSMenuItem>, name: &str) -> Retained<NSMenuItem> {
 fn build(target: &Target, menu: &NSMenu, m: &Model) {
     let mtm = MainThreadMarker::from(target);
     menu.removeAllItems();
-    let status = if m.running {
-        kairo_core::tr!("tray.status.connected")
-    } else {
-        m.status.clone()
-    };
     menu.addItem(&symbol(
         item(
             target,
             mtm,
-            &status,
+            &m.status,
             TAG_CORE,
             m.has_profile,
-            Some(m.running),
+            Some(m.connected()),
         ),
         "power",
     ));
@@ -267,7 +262,8 @@ fn install(svc: Service, hooks: Hooks, mtm: MainThreadMarker) {
                     });
                 });
             }
-            let running = state.borrow().core.is_running();
+            // Bright only when connected as a person means it (a subscription, the core running).
+            let running = { let s = state.borrow(); s.core.is_running() && s.profiles.active.is_some() };
             if last != Some(running) {
                 last = Some(running);
                 dispatch2::DispatchQueue::main().exec_async(move || {

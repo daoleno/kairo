@@ -186,17 +186,12 @@ fn build(m: &Model) -> Option<HMENU> {
     // SAFETY: menus are created, filled and destroyed by the caller.
     unsafe {
         let menu = CreatePopupMenu().ok()?;
-        let status = if m.running {
-            kairo_core::tr!("tray.status.connected")
-        } else {
-            m.status.clone()
-        };
         item(
             menu,
             ID_CORE,
-            &status,
+            &m.status,
             m.has_profile,
-            m.running,
+            m.connected(),
         );
         if !m.ai.is_empty() {
             item(menu, 0, &m.ai, false, false);
@@ -380,7 +375,7 @@ fn run(svc: Service, hooks: Hooks, ready: std::sync::mpsc::Sender<Result<isize, 
                 return;
             }
         };
-        let running = svc.state().borrow().core.is_running();
+        let running = { let s = svc.state(); let s = s.borrow(); s.core.is_running() && s.profiles.active.is_some() };
         let ctx = Ctx {
             svc: svc.clone(),
             hooks,
@@ -449,7 +444,8 @@ pub fn start(svc: Service, hooks: Hooks) -> Result<(), String> {
         // The language of the tooltip (none yet: the first pass says it again).
         let mut said: Option<String> = None;
         loop {
-            let running = state.borrow().core.is_running();
+            // Connected as a person means it: a subscription, the core running.
+            let running = { let s = state.borrow(); s.core.is_running() && s.profiles.active.is_some() };
             let now = language.borrow_and_update().clone();
             if last != Some(running) || said.as_ref() != Some(&now) {
                 last = Some(running);

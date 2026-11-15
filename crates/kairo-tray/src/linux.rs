@@ -33,7 +33,7 @@ impl ksni::Tray for KairoTray {
             .map(|size| ksni::Icon {
                 width: size,
                 height: size,
-                data: crate::icon_argb(size as u32, !self.model.running),
+                data: crate::icon_argb(size as u32, !self.model.connected()),
             })
             .collect()
     }
@@ -55,12 +55,8 @@ impl ksni::Tray for KairoTray {
         let m = &self.model;
         let mut items: Vec<MenuItem<Self>> = vec![
             CheckmarkItem {
-                label: if m.running {
-                    kairo_core::tr!("tray.status.connected")
-                } else {
-                    m.status.clone()
-                },
-                checked: m.running,
+                label: m.status.clone(),
+                checked: m.connected(),
                 enabled: m.has_profile,
                 activate: Box::new(|t: &mut Self| act::connect(&t.svc, !t.model.running)),
                 ..Default::default()

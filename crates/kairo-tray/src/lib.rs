@@ -179,7 +179,28 @@ pub fn ai_line(state: &kairo_core::State) -> String {
     }
 }
 
+/// The menu's first line: the connection as a person says it. With no
+/// subscription it is "Not Set Up" whatever the core does (it runs, all
+/// direct), as Home says; never "Connected".
+pub fn status_of(core: &CoreStatus, has_profile: bool) -> String {
+    if !has_profile {
+        return kairo_core::tr!("model.view.not_set_up");
+    }
+    match core {
+        CoreStatus::Running { .. } => kairo_core::tr!("tray.status.connected"),
+        CoreStatus::Starting => kairo_core::tr!("tray.status.connecting"),
+        CoreStatus::Failed { .. } => kairo_core::tr!("tray.status.failed"),
+        _ => kairo_core::tr!("tray.status.off"),
+    }
+}
+
 impl Model {
+    /// Connected as a person means it: the core runs and there is a
+    /// subscription to go through (the tick, the bright icon, the tooltip).
+    pub fn connected(&self) -> bool {
+        self.running && self.has_profile
+    }
+
     pub fn of(svc: &Service) -> Model {
         use kairo_core::places;
         let state = svc.state().borrow().clone();
@@ -309,14 +330,8 @@ impl Model {
                 }
             }
         }
-        let status = match &state.core {
-            CoreStatus::Running { .. } => kairo_core::tr!("tray.status.connected"),
-            CoreStatus::Starting => kairo_core::tr!("tray.status.connecting"),
-            CoreStatus::Failed { .. } => kairo_core::tr!("tray.status.failed"),
-            _ => kairo_core::tr!("tray.status.off"),
-        };
         Model {
-            status,
+            status: status_of(&state.core, state.profiles.active.is_some()),
             running: state.core.is_running(),
             mode: s.mode,
             up: live.up,
@@ -514,6 +529,32 @@ pub fn stop() {
 
 #[cfg(test)]
 mod tests {
+    /// With no subscription the core still runs (all direct), but the menu
+    /// says what Home says, "Not Set Up", with no tick and a dim icon.
+    #[test]
+    fn no_subscription_is_not_set_up_never_connected() {
+        use super::{Model, status_of};
+        use kairo_core::CoreStatus;
+        let running = CoreStatus::Running { version: "v1".into() };
+        let t = |k: &str| kairo_core::i18n::translate(k, &[]);
+        assert_eq!(status_of(&running, false), t("model.view.not_set_up"));
+        assert_eq!(status_of(&CoreStatus::Stopped, false), t("model.view.not_set_up"));
+        assert_eq!(status_of(&running, true), t("tray.status.connected"));
+        assert_eq!(status_of(&CoreStatus::Starting, true), t("tray.status.connecting"));
+        assert_eq!(status_of(&CoreStatus::Failed { message: "x".into() }, true), t("tray.status.failed"));
+        assert_eq!(status_of(&CoreStatus::Stopped, true), t("tray.status.off"));
+        let m = |running, has_profile| Model { running, has_profile, ..Default::default() };
+        assert!(!m(true, false).connected());
+        assert!(m(true, true).connected());
+        assert!(!m(false, true).connected());
+        // Both languages have the words.
+        for lang in ["en", "zh"] {
+            let said = kairo_core::i18n::text_in(lang, "model.view.not_set_up", &[]);
+            assert!(!said.is_empty() && said != "model.view.not_set_up", "{lang}");
+        }
+        assert_eq!(kairo_core::i18n::text_in("zh", "model.view.not_set_up", &[]), "未设置");
+    }
+
     #[test]
     fn flags_are_left_out_of_menu_text() {
         assert_eq!(super::without_flags("🇯🇵  Tokyo 01"), "Tokyo 01");
