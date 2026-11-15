@@ -71,7 +71,7 @@ fn sidebar_row(page: Page) -> gtk::ListBoxRow {
     row.append(&icon);
     row.append(&title);
     let r = gtk::ListBoxRow::builder().child(&row).build();
-    r.update_property(&[gtk::accessible::Property::Label(page.title())]);
+    r.update_property(&[gtk::accessible::Property::Label(&page.title())]);
     r
 }
 
@@ -128,7 +128,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let footer = Footer::new();
     side_view.add_bottom_bar(&footer.root);
 
-    let title = adw::WindowTitle::new(first.title(), "");
+    let title = adw::WindowTitle::new(&first.title(), "");
     let content_bar = adw::HeaderBar::builder().title_widget(&title).build();
     let content_view = adw::ToolbarView::new();
     content_view.add_top_bar(&content_bar);
@@ -268,7 +268,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
                 }
                 None => list_page.unselect_all(),
             }
-            title_page.set_title(page.title());
+            title_page.set_title(&page.title());
             if pages.changed().await.is_err() {
                 break;
             }
@@ -745,7 +745,7 @@ fn make_tool(actions: &gio::SimpleActionGroup, tool: &Tool) -> gtk::Widget {
             id, placeholder, ..
         } => {
             let entry = gtk::SearchEntry::builder()
-                .placeholder_text(*placeholder)
+                .placeholder_text(placeholder.as_str())
                 .width_chars(22)
                 .build();
             entry.update_property(&[gtk::accessible::Property::Label(placeholder)]);
@@ -787,7 +787,7 @@ fn make_tool(actions: &gio::SimpleActionGroup, tool: &Tool) -> gtk::Widget {
             actions.add_action(&action);
             let menu = gio::Menu::new();
             for (i, o) in options.iter().enumerate() {
-                let item = gio::MenuItem::new(Some(o), None);
+                let item = gio::MenuItem::new(Some(o.as_str()), None);
                 item.set_action_and_target_value(
                     Some(&format!("tool.{id}")),
                     Some(&(i as i32).to_variant()),
@@ -796,7 +796,7 @@ fn make_tool(actions: &gio::SimpleActionGroup, tool: &Tool) -> gtk::Widget {
             }
             let b = gtk::MenuButton::builder()
                 .menu_model(&menu)
-                .tooltip_text(*label)
+                .tooltip_text(label.as_str())
                 .child(&gtk::Image::from_gicon(&gio::ThemedIcon::from_names(
                     glyph.icon(),
                 )))

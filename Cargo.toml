@@ -90,6 +90,8 @@ windows = { version = "0.62", features = [
 [dev-dependencies]
 nsh-engine = "0.5.1"
 nsh-testing = "0.5.1"
+# tests/i18n.rs reads locales/ file by file.
+serde_yaml = "0.9"
 
 [build-dependencies]
 embed-resource = "3"

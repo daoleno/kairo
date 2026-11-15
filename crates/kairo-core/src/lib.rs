@@ -10,6 +10,7 @@ pub mod ai_check;
 pub mod bypass;
 pub mod downloads;
 pub mod geo;
+pub mod i18n;
 pub mod icons;
 pub mod model;
 pub mod paths;
@@ -53,9 +54,12 @@ pub mod update;
 #[cfg(all(feature = "engine", windows))]
 pub mod winapi;
 
+// The catalog: every language of `locales/`, English where a key has no other.
+rust_i18n::i18n!("../../locales", fallback = "en");
+
 #[cfg(feature = "engine")]
 pub use service::Service;
-pub use settings::{LogLevel, Mode, Settings, Theme};
+pub use settings::{Language, LogLevel, Mode, Settings, Theme};
 pub use tokio;
 pub use view::{CoreStatus, Live, Notice, Proxies, State, Task, UpdateStatus};
 

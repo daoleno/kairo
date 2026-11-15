@@ -198,7 +198,7 @@ fn item_cell(mtm: MainThreadMarker, page: Page) -> Retained<NSView> {
     icon.setImage(image.as_deref());
     icon.setTranslatesAutoresizingMaskIntoConstraints(false);
     cell.addSubview(&icon);
-    let label = NSTextField::labelWithString(&NSString::from_str(page.title()), mtm);
+    let label = NSTextField::labelWithString(&NSString::from_str(&page.title()), mtm);
     label.setTranslatesAutoresizingMaskIntoConstraints(false);
     cell.addSubview(&label);
     NSLayoutConstraint::activateConstraints(&NSArray::from_retained_slice(&[
@@ -646,7 +646,7 @@ pub fn install(svc: Service) {
 
         let page = *chrome::bridge().page.borrow();
         sidebar.select(page);
-        window.setTitle(&NSString::from_str(page.title()));
+        window.setTitle(&NSString::from_str(&page.title()));
         table.sizeLastColumnToFit();
 
         INSTALLED.with(|i| {
@@ -689,7 +689,7 @@ fn follow(svc: Service) {
                         INSTALLED.with(|i| {
                             if let Some(i) = i.borrow().as_ref() {
                                 set_appearance(&i.window, theme);
-                                i.window.setTitle(&NSString::from_str(page.title()));
+                                i.window.setTitle(&NSString::from_str(&page.title()));
                                 i.window.setSubtitle(&NSString::from_str(&bar.subtitle));
                                 i.sidebar.select(page);
                                 i.footer.update(&s, &l);

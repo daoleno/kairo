@@ -135,7 +135,7 @@ pub enum Tool {
     /// only when they differ, so typing is never interrupted).
     Search {
         id: &'static str,
-        placeholder: &'static str,
+        placeholder: String,
         value: String,
     },
     /// A button: a glyph with a label for VoiceOver, Orca and tooltips.
@@ -148,9 +148,9 @@ pub enum Tool {
     /// A pull-down of choices, the selected one checked.
     Choice {
         id: &'static str,
-        label: &'static str,
+        label: String,
         glyph: Glyph,
-        options: Vec<&'static str>,
+        options: Vec<String>,
         selected: usize,
     },
 }

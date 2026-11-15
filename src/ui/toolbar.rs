@@ -24,7 +24,7 @@ type Shared<T> = Rc<dyn Fn() -> T>;
 pub enum Spec {
     Search {
         id: &'static str,
-        placeholder: &'static str,
+        placeholder: String,
         value: Signal<String>,
     },
     Button {
@@ -38,19 +38,19 @@ pub enum Spec {
     },
     Choice {
         id: &'static str,
-        label: &'static str,
+        label: String,
         glyph: Glyph,
-        options: Vec<&'static str>,
+        options: Vec<String>,
         selected: Shared<usize>,
         choose: Rc<dyn Fn(usize)>,
     },
 }
 
 /// A search field bound to `value`.
-pub fn search(id: &'static str, placeholder: &'static str, value: Signal<String>) -> Spec {
+pub fn search(id: &'static str, placeholder: impl Into<String>, value: Signal<String>) -> Spec {
     Spec::Search {
         id,
-        placeholder,
+        placeholder: placeholder.into(),
         value,
     }
 }
@@ -58,14 +58,15 @@ pub fn search(id: &'static str, placeholder: &'static str, value: Signal<String>
 /// A button showing `glyph` (and `icon` where NSH draws it), named `label`.
 pub fn button(
     id: &'static str,
-    label: &'static str,
+    label: impl Into<String>,
     glyph: Glyph,
     icon: Icon,
     press: impl Fn() + 'static,
 ) -> Spec {
+    let label: String = label.into();
     Spec::Button {
         id,
-        label: Rc::new(move || label.to_owned()),
+        label: Rc::new(move || label.clone()),
         glyph: Rc::new(move || glyph),
         icon: Rc::new(move || icon),
         enabled: Rc::new(|| true),
@@ -75,9 +76,9 @@ pub fn button(
 }
 
 /// A button whose glyph and label follow state (Pause / Resume).
-pub fn button_dyn(
+pub fn button_dyn<L: Into<String>>(
     id: &'static str,
-    label: impl Fn() -> &'static str + 'static,
+    label: impl Fn() -> L + 'static,
     glyph: impl Fn() -> (Glyph, Icon) + 'static,
     press: impl Fn() + 'static,
 ) -> Spec {
@@ -85,7 +86,7 @@ pub fn button_dyn(
     let g = glyph.clone();
     Spec::Button {
         id,
-        label: Rc::new(move || label().to_owned()),
+        label: Rc::new(move || label().into()),
         glyph: Rc::new(move || g().0),
         icon: Rc::new(move || glyph().1),
         enabled: Rc::new(|| true),
@@ -95,19 +96,19 @@ pub fn button_dyn(
 }
 
 /// A pull-down of `options`, the `selected()` one checked.
-pub fn choice(
+pub fn choice<L: Into<String>>(
     id: &'static str,
-    label: &'static str,
+    label: impl Into<String>,
     glyph: Glyph,
-    options: Vec<&'static str>,
+    options: Vec<L>,
     selected: impl Fn() -> usize + 'static,
     choose: impl Fn(usize) + 'static,
 ) -> Spec {
     Spec::Choice {
         id,
-        label,
+        label: label.into(),
         glyph,
-        options,
+        options: options.into_iter().map(Into::into).collect(),
         selected: Rc::new(selected),
         choose: Rc::new(choose),
     }
@@ -144,7 +145,7 @@ impl Spec {
                 value,
             } => Tool::Search {
                 id,
-                placeholder,
+                placeholder: placeholder.clone(),
                 value: value.get(),
             },
             Spec::Button {
@@ -168,7 +169,7 @@ impl Spec {
                 ..
             } => Tool::Choice {
                 id,
-                label,
+                label: label.clone(),
                 glyph: *glyph,
                 options: options.clone(),
                 selected: selected(),
@@ -230,7 +231,7 @@ impl Spec {
                 let selected = stored(selected);
                 let choose = stored(choose);
                 super::segmented(
-                    options.iter().enumerate().map(|(i, o)| (i, *o)).collect(),
+                    options.iter().enumerate().map(|(i, o)| (i, o.clone())).collect(),
                     move || selected.with(|f| f()),
                     move |i| choose.with(|f| f(i)),
                 )

@@ -1,0 +1,5 @@
+# Literals that read as English but are no text for a person to read in
+# Kairo's language: names, data the core or a provider reads, words compared
+# in code. One per line: the literal, a tab, why it stays.
+apps & sites	Page::named: the English title an older Kairo or a script names the page by (an id)
+ai service	Page::named: the English title an older Kairo or a script names the page by (an id)

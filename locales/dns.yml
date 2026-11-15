@@ -1,0 +1,43 @@
+_version: 2
+
+# Settings › Advanced › Inspect › DNS: look a name up through the core's resolver.
+dns.look_up:
+  en: Look Up
+  zh: 域名查询
+dns.query:
+  en: Query
+  zh: 查询
+dns.core_not_running:
+  en: The core is not running
+  zh: 内核未运行
+dns.fake_ip:
+  en: Fake-IP
+  zh: Fake-IP
+dns.flush_fake_ip:
+  en: Flush the fake-IP cache
+  zh: 清空 Fake-IP 缓存
+dns.flush:
+  en: Flush
+  zh: 清空
+dns.flushed:
+  en: Fake-IP cache flushed
+  zh: 已清空 Fake-IP 缓存
+# NOERROR · 2 answers · 31 ms
+dns.summary.one:
+  en: "%{status} · %{count} answer · %{ms} ms"
+  zh: "%{status} · %{count} 条记录 · %{ms} ms"
+dns.summary.other:
+  en: "%{status} · %{count} answers · %{ms} ms"
+  zh: "%{status} · %{count} 条记录 · %{ms} ms"
+dns.column.name:
+  en: Name
+  zh: 名称
+dns.column.type:
+  en: Type
+  zh: 类型
+dns.column.ttl:
+  en: TTL
+  zh: TTL
+dns.column.data:
+  en: Data
+  zh: 数据

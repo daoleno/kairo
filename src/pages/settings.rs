@@ -10,7 +10,7 @@ use std::cell::{Cell, RefCell};
 
 use kairo_core::protocol::SessionInfo;
 use kairo_core::tun::Privilege;
-use kairo_core::{CoreStatus, Settings, Theme, UpdateStatus};
+use kairo_core::{CoreStatus, Language, Settings, Theme, UpdateStatus};
 use nsh_base::{button, theme};
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
@@ -296,6 +296,23 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
                 )
                 .into_element(),
                 ui::setting_row(
+                    t!("settings.language.title"),
+                    None,
+                    ui::segmented(
+                        Language::ALL
+                            .into_iter()
+                            .map(|l| (l, language_name(l)))
+                            .collect(),
+                        move || settings.with(|s| s.language),
+                        move |l| {
+                            let mut next = store.svc().settings();
+                            next.language = l;
+                            store.run(store.svc().update_settings(next));
+                        },
+                    ),
+                )
+                .into_element(),
+                ui::setting_row(
                     if mac {
                         "Open at login"
                     } else {
@@ -337,12 +354,22 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
                 )
                 .into_element(),
             ];
-    // A phone has no login items, tray or window to close: only the look.
-    // Nor has the page of a server (the server starts with the machine).
+    // A phone has no login items, tray or window to close: only the look and
+    // the language. Nor has the page of a server (the server starts with the machine).
     if phone || store.svc().is_remote() {
-        rows.into_iter().take(1).collect()
+        rows.into_iter().take(2).collect()
     } else {
         rows
+    }
+}
+
+/// A language as its readers name it ("English", "简体中文"); the system's in
+/// the language shown.
+fn language_name(language: Language) -> String {
+    match language {
+        Language::System => t!("settings.language.system"),
+        Language::English => t!("settings.language.en"),
+        Language::Chinese => t!("settings.language.zh"),
     }
 }
 
@@ -613,7 +640,7 @@ fn about_group() -> impl IntoElement {
         vec![
             ui::setting_row(
                 concat!("Kairo ", env!("CARGO_PKG_VERSION")),
-                Some("Free software under the GPL-3.0. Flags: Twemoji, CC-BY 4.0."),
+                Some(t!("settings.about.licence").into()),
                 view(),
             )
             .into_element(),

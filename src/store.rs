@@ -60,24 +60,39 @@ impl Page {
         Page::Settings,
     ];
 
-    /// The page named `name` (its title or an old one, any case).
+    /// The page named `name`: its id (`Page::id`), its English title or an
+    /// old name, any case (the tray, `--page`).
     pub fn named(name: &str) -> Option<Page> {
-        let old = match name.to_ascii_lowercase().as_str() {
-            "overview" | "home" => Some(Page::Overview),
+        let name = name.to_ascii_lowercase();
+        let old = match name.as_str() {
+            "overview" => Some(Page::Overview),
             "location" | "locations" => Some(Page::Exits),
-            "profiles" | "subscriptions" => Some(Page::Profiles),
-            "apps" => Some(Page::Apps),
+            "subscriptions" | "subs" => Some(Page::Profiles),
             "connections" => Some(Page::Activity),
+            "apps & sites" => Some(Page::Apps),
             "groups" => Some(Page::Proxies),
-            "aiservice" | "ai-service" => Some(Page::AiService),
+            "ai-service" | "ai service" => Some(Page::AiService),
             "diagnostics" => Some(Page::Logs),
             _ => None,
         };
-        old.or_else(|| {
-            Page::ALL
-                .into_iter()
-                .find(|p| p.title().eq_ignore_ascii_case(name))
-        })
+        old.or_else(|| Page::ALL.into_iter().find(|p| p.id() == name))
+    }
+
+    /// The page's id: the same in every language.
+    pub fn id(self) -> &'static str {
+        match self {
+            Page::Overview => "home",
+            Page::Exits => "exits",
+            Page::Activity => "activity",
+            Page::Apps => "apps",
+            Page::Profiles => "profiles",
+            Page::Settings => "settings",
+            Page::Proxies => "proxies",
+            Page::Rules => "rules",
+            Page::Logs => "logs",
+            Page::Dns => "dns",
+            Page::AiService => "aiservice",
+        }
     }
 
     /// An Inspect view: opened from Settings, shown under its row.
@@ -119,28 +134,30 @@ impl Page {
     }
 
     /// The short name for a phone's tab bar.
-    pub fn tab_title(self) -> &'static str {
+    pub fn tab_title(self) -> String {
         match self {
-            Page::Apps => "Apps",
-            Page::Profiles => "Subs",
+            Page::Apps => kairo_core::tr!("page.apps.tab"),
+            Page::Profiles => kairo_core::tr!("page.profiles.tab"),
             other => other.title(),
         }
     }
 
-    pub fn title(self) -> &'static str {
-        match self {
-            Page::Overview => "Home",
-            Page::Exits => "Exits",
-            Page::Activity => "Activity",
-            Page::Apps => "Apps & Sites",
-            Page::Profiles => "Subscriptions",
-            Page::Settings => "Settings",
-            Page::Proxies => "Groups",
-            Page::Rules => "Rules",
-            Page::Logs => "Diagnostics",
-            Page::Dns => "DNS",
-            Page::AiService => "AI Service",
-        }
+    /// The page's title in the language shown (the window's and the platform's
+    /// sidebar and toolbar read it, so it is `tr!`).
+    pub fn title(self) -> String {
+        kairo_core::tr!(match self {
+            Page::Overview => "page.home",
+            Page::Exits => "page.exits",
+            Page::Activity => "page.activity",
+            Page::Apps => "page.apps",
+            Page::Profiles => "page.profiles",
+            Page::Settings => "page.settings",
+            Page::Proxies => "page.groups",
+            Page::Rules => "page.rules",
+            Page::Logs => "page.diagnostics",
+            Page::Dns => "page.dns",
+            Page::AiService => "page.ai_service",
+        })
     }
 }
 
