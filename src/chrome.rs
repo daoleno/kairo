@@ -292,14 +292,14 @@ pub fn update_button(u: &kairo_core::UpdateStatus) -> Option<UpdateButton> {
     };
     match u {
         U::Available { version } | U::Manual { version, .. } => button(
-            format!("Download Kairo {version}"),
+            kairo_core::tr!("update.download", version = version),
             true,
             UpdateStage::Download,
             None,
         ),
         // Android installs it where it is: no restart of ours in it.
         U::Ready { version } if cfg!(target_os = "android") => button(
-            format!("Update to {version}"),
+            kairo_core::tr!("update.to", version = version),
             true,
             UpdateStage::Ready,
             None,
@@ -307,21 +307,21 @@ pub fn update_button(u: &kairo_core::UpdateStatus) -> Option<UpdateButton> {
         U::Downloading {
             progress: Some(p), ..
         } => button(
-            format!("Downloading… {:.0}%", p * 100.0),
+            kairo_core::tr!("update.downloading_percent", percent = format!("{:.0}", p * 100.0)),
             false,
             UpdateStage::Downloading,
             Some(p.clamp(0.0, 1.0)),
         ),
         U::Downloading { .. } => {
-            button("Downloading…".into(), false, UpdateStage::Downloading, None)
+            button(kairo_core::tr!("update.downloading"), false, UpdateStage::Downloading, None)
         }
         U::Ready { version } => button(
-            format!("Restart to Update to {version}"),
+            kairo_core::tr!("update.restart", version = version),
             true,
             UpdateStage::Ready,
             None,
         ),
-        U::Installing { .. } => button("Installing…".into(), false, UpdateStage::Installing, None),
+        U::Installing { .. } => button(kairo_core::tr!("update.installing"), false, UpdateStage::Installing, None),
         _ => None,
     }
 }

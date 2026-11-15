@@ -12,6 +12,9 @@ use kairo_core::view::{AiAlert, State};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
+use kairo_core::tr;
+
+use crate::i18n::plural;
 use crate::store::store;
 use crate::ui::{self, Icon, icon, size};
 
@@ -39,6 +42,9 @@ pub struct Tile {
     pub flag: String,
     pub line1: String,
     pub line2: String,
+    /// Whether `line2` is for the table's "Used by" (the tools, or why it
+    /// failed), not a note about the check.
+    pub line2_used_by: bool,
 }
 
 fn flag(code: &str) -> String {
@@ -77,11 +83,12 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
                 tone: Tone::Idle,
                 flag: "◎".into(),
                 line1: if state.ai.checking {
-                    "Checking…".into()
+                    tr!("ai.checking")
                 } else {
-                    "Not checked yet".into()
+                    tr!("ai.not_checked")
                 },
                 line2: tools.clone(),
+                line2_used_by: true,
             };
             let Some(c) = checks.iter().find(|c| c.service == s.id) else {
                 return base;
@@ -90,14 +97,16 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
             let flag = c.country.code().map(flag).unwrap_or_else(|| "◎".into());
             let estimated = matches!(c.country, Country::Estimated { .. });
             if !c.reachable {
+                let (line2, line2_used_by) = match &c.api {
+                    Api::Unreachable { why } => (why.clone(), true),
+                    _ => (tr!("ai.no_answer"), false),
+                };
                 return Tile {
                     tone: Tone::Bad,
                     flag,
-                    line1: "Unreachable".into(),
-                    line2: match &c.api {
-                        Api::Unreachable { why } => why.clone(),
-                        _ => "No answer".into(),
-                    },
+                    line1: tr!("ai.unreachable"),
+                    line2,
+                    line2_used_by,
                     ..base
                 };
             }
@@ -106,8 +115,9 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
                 return Tile {
                     tone: Tone::Look,
                     flag,
-                    line1: format!("Sees {}", country.unwrap_or_default()),
-                    line2: "Not where the others are".into(),
+                    line1: tr!("ai.sees", country = country.unwrap_or_default()),
+                    line2: tr!("ai.not_where_others"),
+                    line2_used_by: false,
                     ..base
                 };
             }
@@ -116,9 +126,10 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
                     tone: Tone::Look,
                     flag,
                     line1: country
-                        .map(|c| format!("Sees {c}"))
-                        .unwrap_or_else(|| "Reachable".into()),
-                    line2: format!("Its API answered HTTP {status}"),
+                        .map(|c| tr!("ai.sees", country = c))
+                        .unwrap_or_else(|| tr!("ai.reachable")),
+                    line2: tr!("ai.api_answered", status = status),
+                    line2_used_by: false,
                     ..base
                 };
             }
@@ -126,7 +137,7 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
                 return Tile {
                     tone: Tone::Look,
                     flag,
-                    line1: "Site reached, API not".into(),
+                    line1: tr!("ai.site_not_api"),
                     line2: why.clone(),
                     ..base
                 };
@@ -135,14 +146,15 @@ pub fn tiles(state: &State, tally: &Tally) -> Vec<Tile> {
                 tone: Tone::Ok,
                 flag,
                 line1: match (country, estimated) {
-                    (Some(c), false) => format!("Sees {c}"),
+                    (Some(c), false) => tr!("ai.sees", country = c),
                     (Some(c), true) => format!("≈ {c}"),
-                    (None, _) => "Reachable".into(),
+                    (None, _) => tr!("ai.reachable"),
                 },
+                line2_used_by: !tools.is_empty(),
                 line2: match (estimated, tools.is_empty()) {
                     (_, false) => tools,
-                    (false, true) => "Not in use".into(),
-                    (true, true) => "Estimated".into(),
+                    (false, true) => tr!("ai.not_in_use"),
+                    (true, true) => tr!("ai.estimated"),
                 },
                 ..base
             }
@@ -184,19 +196,19 @@ pub fn summary(tiles: &[Tile], checking: bool) -> String {
 pub fn ago(now: i64, at: i64) -> String {
     let d = (now - at).max(0);
     match d {
-        0..=59 => "just now".into(),
-        60..=3599 => format!("{} min ago", d / 60),
-        _ => format!("{} h ago", d / 3600),
+        0..=59 => tr!("ai.ago.now"),
+        60..=3599 => tr!("ai.ago.min", n = d / 60),
+        _ => tr!("ai.ago.h", n = d / 3600),
     }
 }
 
 fn hold_line(h: Option<&Hold>, checking: bool) -> (Option<bool>, String) {
     match h {
-        Some(Hold::Held { secs }) => (Some(true), format!("Open for {secs} s, no drop")),
-        Some(Hold::Dropped { after }) => (Some(false), format!("Dropped after {after} s")),
-        Some(Hold::Failed { why }) => (None, format!("Could not test: {why}")),
-        None if checking => (None, "Testing for 90 s…".into()),
-        None => (None, "Not tested yet".into()),
+        Some(Hold::Held { secs }) => (Some(true), tr!("ai.hold.held", secs = secs)),
+        Some(Hold::Dropped { after }) => (Some(false), tr!("ai.hold.dropped", after = after)),
+        Some(Hold::Failed { why }) => (None, tr!("ai.hold.failed", why = why)),
+        None if checking => (None, tr!("ai.hold.testing")),
+        None => (None, tr!("ai.hold.untested")),
     }
 }
 
@@ -311,11 +323,11 @@ pub struct Row {
 /// problem: the AI exit is where AI belongs.
 pub fn goes_through(state: &State, service: &AiService) -> (String, bool) {
     if state.settings.mode == kairo_core::Mode::Direct {
-        return ("Direct".into(), true);
+        return (tr!("ai.goes.direct"), true);
     }
     match site_choice(state, service) {
-        Some(label) if label != "AI exit" => (label, true),
-        _ => ("AI exit".into(), false),
+        Some((label, false)) => (label, true),
+        _ => (tr!("ai.goes.ai_exit"), false),
     }
 }
 
@@ -336,16 +348,16 @@ fn site_routes<'a>(state: &'a State, service: &AiService) -> Vec<&'a kairo_core:
 }
 
 /// What the user chose for this service's sites in Apps & Sites, if anything,
-/// in the exits' names.
-fn site_choice(state: &State, service: &AiService) -> Option<String> {
+/// in the exits' names, and whether that is the AI exit.
+fn site_choice(state: &State, service: &AiService) -> Option<(String, bool)> {
     use kairo_core::routes::RouteExit as E;
     site_routes(state, service).first().map(|r| match &r.exit {
-        E::Ai | E::Usual => "AI exit".to_owned(),
-        E::Everything => "Everything else".to_owned(),
-        E::Downloads => "Downloads".to_owned(),
-        E::Direct => "Direct".to_owned(),
-        E::Block => "Blocked".to_owned(),
-        E::Node(n) => places::split_flag(n).1.trim().to_owned(),
+        E::Ai | E::Usual => (tr!("ai.goes.ai_exit"), true),
+        E::Everything => (crate::pages::exits::Exit::Rest.title(), false),
+        E::Downloads => (crate::pages::exits::Exit::Downloads.title(), false),
+        E::Direct => (tr!("ai.goes.direct"), false),
+        E::Block => (tr!("ai.goes.blocked"), false),
+        E::Node(n) => (places::split_flag(n).1.trim().to_owned(), false),
     })
 }
 
@@ -373,13 +385,13 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
             let (status, sees_flag, sees, tone) = match t.tone {
                 Tone::Idle => (t.line1.clone(), "◎".to_owned(), "—".to_owned(), Tone::Idle),
                 Tone::Bad => (
-                    "Unreachable".to_owned(),
+                    tr!("ai.unreachable"),
                     "◎".to_owned(),
                     "—".to_owned(),
                     Tone::Bad,
                 ),
                 Tone::Look if !check.is_some_and(|c| c.reachable) => (
-                    "Unreachable".to_owned(),
+                    tr!("ai.unreachable"),
                     "◎".to_owned(),
                     "—".to_owned(),
                     Tone::Bad,
@@ -391,9 +403,9 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
                     );
                     (
                         if api_trouble {
-                            "API not answering".to_owned()
+                            tr!("ai.api_not_answering")
                         } else {
-                            "Reachable".to_owned()
+                            tr!("ai.reachable")
                         },
                         t.flag.clone(),
                         country.clone().unwrap_or_else(|| "—".into()),
@@ -414,10 +426,10 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
             };
             let (goes, status, sees_flag, sees, tone) = if bypassing {
                 (
-                    "Direct".to_owned(),
-                    "Not through Kairo".to_owned(),
+                    tr!("ai.goes.direct"),
+                    tr!("ai.not_through_kairo"),
                     "◎".to_owned(),
-                    "your own network".to_owned(),
+                    tr!("ai.own_network"),
                     Tone::Bad,
                 )
             } else {
@@ -433,15 +445,10 @@ pub fn rows(state: &State, tally: &Tally) -> Vec<Row> {
                 sees,
                 odd: is_odd,
                 goes,
-                used_by: if t.line2 == "Not where the others are"
-                    || t.line2.starts_with("Its API")
-                    || t.line2 == "No answer"
-                    || t.line2 == "Estimated"
-                    || t.line2 == "Not in use"
-                {
-                    String::new()
-                } else {
+                used_by: if t.line2_used_by {
                     t.line2.clone()
+                } else {
+                    String::new()
                 },
                 fix,
             }
@@ -457,11 +464,10 @@ pub fn table_summary(rows: &[Row], checking: bool) -> (String, bool) {
         .count();
     if problems > 0 {
         return (
-            if problems == 1 {
-                "1 problem".into()
-            } else {
-                format!("{problems} problems")
-            },
+            tr!(
+                &plural("ai.summary.problems", problems as u64),
+                count = problems
+            ),
             true,
         );
     }
@@ -469,9 +475,9 @@ pub fn table_summary(rows: &[Row], checking: bool) -> (String, bool) {
     if ok == 0 {
         return (
             if checking {
-                "Checking…".into()
+                tr!("ai.checking")
             } else {
-                "Not checked yet".into()
+                tr!("ai.not_checked")
             },
             false,
         );
@@ -483,9 +489,13 @@ pub fn table_summary(rows: &[Row], checking: bool) -> (String, bool) {
         .map(|r| r.sees.as_str())
         .collect();
     let text = match (ok == rows.len(), flags.len()) {
-        (true, 1) => format!("All {ok} see {}", flags.iter().next().unwrap_or(&"")),
-        (true, _) => format!("All {ok} reachable"),
-        (false, _) => format!("{ok} of {} reachable", rows.len()),
+        (true, 1) => tr!(
+            "ai.summary.all_see",
+            count = ok,
+            country = flags.iter().next().unwrap_or(&"")
+        ),
+        (true, _) => tr!("ai.summary.all_reachable", count = ok),
+        (false, _) => tr!("ai.summary.some_reachable", ok = ok, total = rows.len()),
     };
     (text, false)
 }
@@ -507,7 +517,7 @@ pub fn board() -> impl IntoElement {
                         .px_5()
                         .pt_4()
                         .pb_2()
-                        .child(ui::body("AI").font_weight(FontWeight::SEMIBOLD))
+                        .child(ui::body(t!("ai.board.title")).font_weight(FontWeight::SEMIBOLD))
                         .child(
                             text(move || -> SharedString {
                                 table_summary(&rows.get(), checking()).0.into()
@@ -526,9 +536,9 @@ pub fn board() -> impl IntoElement {
                             ui::capsule(
                                 move || -> SharedString {
                                     if checking() {
-                                        "Checking…".into()
+                                        t!("ai.checking").into()
                                     } else {
-                                        "Check Now".into()
+                                        t!("ai.check_now").into()
                                     }
                                 },
                                 false,
@@ -571,7 +581,7 @@ fn cell(i: usize) -> View {
 }
 
 fn header_row() -> impl IntoElement {
-    let head = |i: usize, t: &'static str| {
+    let head = |i: usize, t: String| {
         cell(i).child(
             ui::muted(t)
                 .text_size(px(size::small()))
@@ -583,11 +593,11 @@ fn header_row() -> impl IntoElement {
         .items_center()
         .px_5()
         .h(px(28.0))
-        .child(head(0, "Service"))
-        .child(head(1, "Status"))
-        .child(head(2, "Sees"))
-        .child(head(3, "Goes through"))
-        .child(head(4, "Used by").justify_end())
+        .child(head(0, t!("ai.column.service")))
+        .child(head(1, t!("ai.column.status")))
+        .child(head(2, t!("ai.column.sees")))
+        .child(head(3, t!("ai.column.goes")))
+        .child(head(4, t!("ai.column.used_by")).justify_end())
 }
 
 /// A phone's row: the service and its status on one line, where it sees and goes
@@ -599,9 +609,12 @@ fn phone_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement
     let store = store();
     nsh_base::button()
         .w_full()
-        .accessibility_label(format!(
-            "{}: {} · sees {} · {}",
-            r.name, r.status, r.sees, r.goes
+        .accessibility_label(t!(
+            "ai.row.label",
+            name = r.name,
+            status = r.status,
+            sees = r.sees,
+            goes = r.goes
         ))
         .on_press(move || {
             selected.set(if selected.get_untracked() == Some(id) {
@@ -646,17 +659,10 @@ fn phone_row(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoElement
                         .flex_1(),
                 )
                 .children(r.fix.map(|fix| {
-                    ui::capsule(
-                        match fix {
-                            Fix::UseAiExit => "Use AI Exit",
-                            Fix::UseEveryApp => "Use Every App",
-                            Fix::CopyForTerminal => "Copy for Terminal",
-                        },
-                        true,
-                    )
-                    .h(px(28.0))
-                    .px_3p5()
-                    .on_press(move || apply_fix(store, id, fix))
+                    ui::capsule(fix_label(fix), true)
+                        .h(px(28.0))
+                        .px_3p5()
+                        .on_press(move || apply_fix(store, id, fix))
                 })),
         )
 }
@@ -675,9 +681,12 @@ fn table_row_wide(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoEl
     let store = store();
     nsh_base::button()
         .w_full()
-        .accessibility_label(format!(
-            "{}: {} · sees {} · {}",
-            r.name, r.status, r.sees, r.goes
+        .accessibility_label(t!(
+            "ai.row.label",
+            name = r.name,
+            status = r.status,
+            sees = r.sees,
+            goes = r.goes
         ))
         .on_press(move || {
             selected.set(if selected.get_untracked() == Some(id) {
@@ -740,23 +749,25 @@ fn table_row_wide(r: Row, selected: Signal<Option<&'static str>>) -> impl IntoEl
         )
         .child(
             cell(4).justify_end().child(match r.fix {
-                Some(fix) => ui::capsule(
-                    match fix {
-                        Fix::UseAiExit => "Use AI Exit",
-                        Fix::UseEveryApp => "Use Every App",
-                        Fix::CopyForTerminal => "Copy for Terminal",
-                    },
-                    true,
-                )
-                .h(px(28.0))
-                .px_3p5()
-                .on_press(move || apply_fix(store, id, fix))
-                .into_element(),
+                Some(fix) => ui::capsule(fix_label(fix), true)
+                    .h(px(28.0))
+                    .px_3p5()
+                    .on_press(move || apply_fix(store, id, fix))
+                    .into_element(),
                 None => ui::muted(r.used_by.clone())
                     .number_of_lines(1)
                     .into_element(),
             }),
         )
+}
+
+/// A fix's button.
+fn fix_label(fix: Fix) -> String {
+    match fix {
+        Fix::UseAiExit => t!("ai.fix.use_ai_exit"),
+        Fix::UseEveryApp => t!("ai.fix.use_every_app"),
+        Fix::CopyForTerminal => t!("ai.fix.copy_for_terminal"),
+    }
 }
 
 /// Carries out a row's fix.
@@ -797,10 +808,10 @@ fn alerts() -> impl IntoElement {
             let mut out = view().gap_2();
             if direct {
                 out = out.child(banner(
-                    "Mode is Direct: AI is not using the exit".to_owned(),
+                    t!("ai.alert.direct"),
                     String::new(),
                     vec![Some(
-                        ui::capsule("Use Smart", true)
+                        ui::capsule(t!("ai.alert.use_smart"), true)
                             .on_press(move || {
                                 store.run(store.svc().set_mode(kairo_core::Mode::Rule))
                             })
@@ -816,19 +827,19 @@ fn alerts() -> impl IntoElement {
                         // A sentence has no room for a flag picture: the name alone.
                         p.title.clone()
                     })
-                    .unwrap_or_else(|| "Everything else".into());
+                    .unwrap_or_else(|| crate::pages::exits::Exit::Rest.title());
                 let pin = place.map(|p| p.name);
                 out = out.child(banner(
-                    format!("{was} is no longer in your subscription"),
-                    format!("AI now follows Everything else ({now})"),
+                    t!("ai.alert.exit_gone", node = was),
+                    t!("ai.alert.follows_rest", node = now),
                     vec![
                         pin.map(|name| {
-                            ui::capsule("Pin it", true)
+                            ui::capsule(t!("ai.alert.pin"), true)
                                 .on_press(move || store.run(store.svc().set_ai_exit(name.clone())))
                                 .into_element()
                         }),
                         Some(
-                            ui::capsule("OK", false)
+                            ui::capsule(t!("ai.alert.ok"), false)
                                 .on_press(move || store.svc().dismiss_ai_alert())
                                 .into_element(),
                         ),
@@ -886,11 +897,7 @@ fn lanes() -> impl IntoElement {
                 .h(px(36.0))
                 .border_t_1()
                 .border_color(move || theme().border.opacity(0.7))
-                .child(
-                    ui::muted("Direct: Kimi, DeepSeek, Doubao, Tongyi")
-                        .flex_1()
-                        .number_of_lines(1),
-                )
+                .child(ui::muted(t!("ai.lanes.direct")).flex_1().number_of_lines(1))
                 .into_element()
         })
     })
@@ -923,9 +930,9 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
             let rows: Vec<AnyElement> = match &check {
                 None => vec![
                     ui::muted(if checking {
-                        "Checking…"
+                        t!("ai.checking")
                     } else {
-                        "Not checked yet"
+                        t!("ai.not_checked")
                     })
                     .px_1()
                     .into_element(),
@@ -960,13 +967,13 @@ fn detail(selected: Signal<Option<&'static str>>) -> impl IntoElement {
                                 .child(ui::muted(hosts).text_size(px(size::small()))),
                         )
                         .child(ui::flag(flag_text, 26.0))
-                        .child(ui::icon_btn(Icon::Close, "Close").on_press(move || selected.set(None))),
+                        .child(
+                            ui::icon_btn(Icon::Close, t!("ai.detail.close"))
+                                .on_press(move || selected.set(None)),
+                        ),
                 )
                 .children(rows)
-                .child(
-                    ui::muted("Kairo shows what the service sees. Where you are, and the service's own terms, still apply.")
-                        .text_size(px(size::small())),
-                )
+                .child(ui::muted(t!("ai.detail.note")).text_size(px(size::small())))
                 .into_element()
         })
     })
@@ -982,52 +989,42 @@ fn checks_rows(
     let mut out = Vec::new();
     out.push(check_row(
         Some(c.reachable),
-        "Reachable",
+        t!("ai.reachable"),
         if c.reachable {
-            "Through the exit".into()
+            t!("ai.check.through_exit")
         } else {
-            "No answer".into()
+            t!("ai.no_answer")
         },
     ));
     let (ok, line) = match &c.api {
-        Api::Answers { ms } => (Some(true), format!("Answers in {ms} ms")),
-        Api::Unexpected { status } => (
-            Some(false),
-            format!("Answered HTTP {status}, not what it gives without a key"),
-        ),
+        Api::Answers { ms } => (Some(true), t!("ai.check.answers", ms = ms)),
+        Api::Unexpected { status } => (Some(false), t!("ai.check.unexpected", status = status)),
         Api::Unreachable { why } => (Some(false), why.clone()),
-        Api::None => (None, "Kairo has no way to ask this one".into()),
+        Api::None => (None, t!("ai.check.no_api")),
     };
     if service.api.is_some() || !matches!(c.api, Api::None) {
-        out.push(check_row(ok, "API", line));
+        out.push(check_row(ok, t!("ai.check.api"), line));
     }
     let (ok, line) = match &c.country {
         Country::Seen { code, warp } => (
             Some(true),
-            format!(
-                "Sees {}{}",
-                ai_check::country_name(code),
-                if *warp {
-                    " · through Cloudflare WARP"
-                } else {
-                    ""
-                }
-            ),
+            if *warp {
+                t!("ai.check.sees_warp", country = ai_check::country_name(code))
+            } else {
+                t!("ai.sees", country = ai_check::country_name(code))
+            },
         ),
         Country::Estimated { code } => (
             None,
-            format!(
-                "About {} · estimated: this service does not say",
-                ai_check::country_name(code)
-            ),
+            t!("ai.check.estimated", country = ai_check::country_name(code)),
         ),
-        Country::Unknown => (None, "Not known".into()),
+        Country::Unknown => (None, t!("ai.check.unknown")),
     };
-    out.push(check_row(ok, "Country", line));
+    out.push(check_row(ok, t!("ai.check.country"), line));
     let (ok, line) = hold_line(hold, checking);
-    out.push(check_row(ok, "A connection held open", line));
+    out.push(check_row(ok, t!("ai.check.hold"), line));
     out.push(
-        ui::muted(format!("Checked {}", ago(now, c.at)))
+        ui::muted(t!("ai.check.checked", ago = ago(now, c.at)))
             .text_size(px(size::small()))
             .px_1()
             .into_element(),
@@ -1035,7 +1032,7 @@ fn checks_rows(
     out
 }
 
-fn check_row(ok: Option<bool>, title: &'static str, value: String) -> AnyElement {
+fn check_row(ok: Option<bool>, title: String, value: String) -> AnyElement {
     view()
         .flex_row()
         .items_center()

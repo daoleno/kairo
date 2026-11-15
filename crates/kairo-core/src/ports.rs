@@ -18,7 +18,7 @@ impl Holder {
     pub fn describe(&self) -> String {
         match &self.name {
             Some(n) => n.clone(),
-            None => "another program".into(),
+            None => crate::tr!("engine.ports.another_program"),
         }
     }
 }

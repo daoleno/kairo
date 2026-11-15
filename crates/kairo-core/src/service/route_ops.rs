@@ -30,7 +30,7 @@ impl Service {
                 && let Some(cfg) = svc.0.ai_cfg.lock().expect("ai cfg").as_ref()
                 && !crate::ai::has_node(cfg, n)
             {
-                return Err(format!("{n} is not a server of this subscription"));
+                return Err(crate::tr!("engine.service.not_a_server", name = n));
             }
             svc.change_routes(move |list| routes::upsert(list, route))
                 .await

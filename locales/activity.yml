@@ -1,0 +1,642 @@
+_version: 2
+
+# Activity: the toolbar (12 apps · 40 connections).
+activity.subtitle:
+  en: "%{apps} · %{connections}"
+  zh: "%{apps} · %{connections}"
+activity.apps.one:
+  en: "%{count} app"
+  zh: "%{count} 个应用"
+activity.apps.other:
+  en: "%{count} apps"
+  zh: "%{count} 个应用"
+activity.connections.one:
+  en: "%{count} connection"
+  zh: "%{count} 个连接"
+activity.connections.other:
+  en: "%{count} connections"
+  zh: "%{count} 个连接"
+activity.view.title:
+  en: View
+  zh: 显示
+activity.view.by_app:
+  en: By App
+  zh: 按应用
+activity.view.all:
+  en: All Connections
+  zh: 所有连接
+activity.search:
+  en: Search host or app
+  zh: 搜索主机或应用
+activity.pause:
+  en: Pause
+  zh: 暂停
+activity.resume:
+  en: Resume
+  zh: 继续
+activity.close_all:
+  en: Close All
+  zh: 全部关闭
+
+# Activity › By app: a row of the table ("2 open", "idle") and the exits it goes through.
+activity.idle:
+  en: idle
+  zh: 空闲
+activity.open:
+  en: "%{count} open"
+  zh: "%{count} 个连接"
+activity.exit.ai:
+  en: AI exit
+  zh: AI 出口
+activity.exit.rest:
+  en: Everything else
+  zh: 其他流量
+activity.exit.downloads:
+  en: Downloads
+  zh: 下载
+activity.exit.direct:
+  en: Direct
+  zh: 直连
+activity.exit.blocked:
+  en: Blocked
+  zh: 已拦截
+activity.exit.local_phone:
+  en: On this phone
+  zh: 本机
+activity.exit.local_computer:
+  en: On this computer
+  zh: 本机
+
+# Activity: a tool that goes around Kairo.
+activity.bypass.one:
+  en: "%{tool} goes around Kairo"
+  zh: "%{tool} 绕过了 Kairo"
+activity.bypass.two:
+  en: "%{first} and %{second} go around Kairo"
+  zh: "%{first} 和 %{second} 绕过了 Kairo"
+activity.bypass.more:
+  en: "%{first}, %{second} and %{count} more go around Kairo"
+  zh: "%{first}、%{second} 及另外 %{count} 个工具绕过了 Kairo"
+activity.bypass.use_tun:
+  en: Use Every App
+  zh: 使用「所有应用」
+activity.bypass.copy_terminal:
+  en: Copy for terminal
+  zh: 复制终端命令
+
+# Activity › By app: the table (its columns also in Connections).
+activity.by_app:
+  en: By app
+  zh: 按应用
+activity.column.app:
+  en: App
+  zh: 应用
+activity.column.talks_to:
+  en: Talks to
+  zh: 访问
+activity.column.goes_through:
+  en: Goes through
+  zh: 经由
+activity.column.total:
+  en: Total
+  zh: 总计
+activity.empty.not_connected:
+  en: Not connected
+  zh: 未连接
+activity.empty.no_match:
+  en: Nothing matches
+  zh: 无匹配结果
+activity.empty.nothing_yet:
+  en: Nothing yet
+  zh: 暂无活动
+activity.app_menu:
+  en: Choices for this app
+  zh: 此应用的选项
+
+# An app's or a site's route (Activity's menu, a connection's details).
+activity.route.direct:
+  en: Always Direct
+  zh: 始终直连
+activity.route.ai:
+  en: Always AI Exit
+  zh: 始终走 AI 出口
+activity.route.block:
+  en: Block
+  zh: 拦截
+activity.route.saved:
+  en: Saved in Apps & Sites
+  zh: 已保存到应用与网站
+activity.show_connections:
+  en: Show Connections
+  zh: 显示连接
+
+# Activity › All Connections.
+connections.empty:
+  en: No connections
+  zh: 暂无连接
+connections.sort.newest:
+  en: Newest
+  zh: 最新
+connections.sort.download:
+  en: Download speed
+  zh: 下载速度
+connections.sort.upload:
+  en: Upload speed
+  zh: 上传速度
+connections.sorted_by:
+  en: Sorted by
+  zh: 排序方式
+connections.sort.label:
+  en: Sort connections
+  zh: 连接排序
+connections.column.host:
+  en: Host
+  zh: 主机
+connections.column.process:
+  en: Process
+  zh: 进程
+connections.column.down:
+  en: Down
+  zh: 下载
+connections.column.up:
+  en: Up
+  zh: 上传
+connections.column.time:
+  en: Time
+  zh: 时长
+connections.close:
+  en: Close Connection
+  zh: 关闭连接
+connections.footer:
+  en: "Downloaded %{down} · Uploaded %{up}"
+  zh: "已下载 %{down} · 已上传 %{up}"
+connections.footer.memory:
+  en: "Downloaded %{down} · Uploaded %{up} · Core memory %{memory}"
+  zh: "已下载 %{down} · 已上传 %{up} · 内核内存 %{memory}"
+# How long a connection has been open: 30 s, 41 m, 1 h 12 m, 3 d.
+connections.age.seconds:
+  en: "%{n} s"
+  zh: "%{n} 秒"
+connections.age.minutes:
+  en: "%{n} m"
+  zh: "%{n} 分"
+connections.age.hours:
+  en: "%{h} h %{m} m"
+  zh: "%{h} 小时 %{m} 分"
+connections.age.days:
+  en: "%{n} d"
+  zh: "%{n} 天"
+
+# Activity › All Connections: the selected connection's details.
+connections.details:
+  en: Details
+  zh: 详情
+connections.close_details:
+  en: Close Details
+  zh: 关闭详情
+connections.closed:
+  en: Closed
+  zh: 已关闭
+connections.detail.destination_ip:
+  en: Destination IP
+  zh: 目标 IP
+connections.detail.source:
+  en: Source
+  zh: 来源
+connections.detail.network:
+  en: Network
+  zh: 网络
+connections.detail.inbound:
+  en: Inbound
+  zh: 入站
+connections.detail.rule:
+  en: Rule
+  zh: 规则
+connections.detail.chain:
+  en: Chain
+  zh: 代理链
+connections.detail.traffic:
+  en: Traffic
+  zh: 流量
+connections.detail.started:
+  en: Started
+  zh: 开始时间
+connections.for_site:
+  en: For this site
+  zh: 对此网站
+
+# Charts: the readout above a chart ("… · Total 1.2 MB").
+charts.total:
+  en: "Total %{value}"
+  zh: "总计 %{value}"
+
+# Statistics: dates (local time). "Nov 10", "Tue, Nov 10", "Mon 10".
+stats.weekday.sun:
+  en: Sun
+  zh: 周日
+stats.weekday.mon:
+  en: Mon
+  zh: 周一
+stats.weekday.tue:
+  en: Tue
+  zh: 周二
+stats.weekday.wed:
+  en: Wed
+  zh: 周三
+stats.weekday.thu:
+  en: Thu
+  zh: 周四
+stats.weekday.fri:
+  en: Fri
+  zh: 周五
+stats.weekday.sat:
+  en: Sat
+  zh: 周六
+stats.month.jan:
+  en: Jan
+  zh: 1月
+stats.month.feb:
+  en: Feb
+  zh: 2月
+stats.month.mar:
+  en: Mar
+  zh: 3月
+stats.month.apr:
+  en: Apr
+  zh: 4月
+stats.month.may:
+  en: May
+  zh: 5月
+stats.month.jun:
+  en: Jun
+  zh: 6月
+stats.month.jul:
+  en: Jul
+  zh: 7月
+stats.month.aug:
+  en: Aug
+  zh: 8月
+stats.month.sep:
+  en: Sep
+  zh: 9月
+stats.month.oct:
+  en: Oct
+  zh: 10月
+stats.month.nov:
+  en: Nov
+  zh: 11月
+stats.month.dec:
+  en: Dec
+  zh: 12月
+stats.date.day:
+  en: "%{month} %{day}"
+  zh: "%{month}%{day}日"
+stats.date.day_long:
+  en: "%{weekday}, %{month} %{day}"
+  zh: "%{month}%{day}日 %{weekday}"
+stats.date.weekday_day:
+  en: "%{weekday} %{day}"
+  zh: "%{day}日 %{weekday}"
+stats.date.day_hour:
+  en: "%{day}, %{hour}"
+  zh: "%{day} %{hour}"
+stats.date.day_hours:
+  en: "%{day}, %{from}–%{to}"
+  zh: "%{day} %{from}–%{to}"
+stats.tip.today_hour:
+  en: "Today, %{hour}"
+  zh: "今天 %{hour}"
+stats.tip.today_hour_so_far:
+  en: "Today, %{hour} (so far)"
+  zh: "今天 %{hour}（截至目前）"
+stats.tip.day_so_far:
+  en: "%{day} (so far)"
+  zh: "%{day}（截至目前）"
+
+# Statistics: ranges and the kinds of traffic.
+stats.range.today:
+  en: Today
+  zh: 今天
+stats.range.week:
+  en: 7 days
+  zh: 7 天
+stats.range.month:
+  en: 30 days
+  zh: 30 天
+stats.range.day:
+  en: 24 hours
+  zh: 24 小时
+stats.slot.ai:
+  en: AI
+  zh: AI
+stats.slot.rest:
+  en: Everything else
+  zh: 其他流量
+stats.slot.downloads:
+  en: Downloads
+  zh: 下载
+stats.slot.direct:
+  en: Direct
+  zh: 直连
+stats.collecting.title:
+  en: Collecting data
+  zh: 正在收集数据
+stats.collecting.just_now:
+  en: Started just now
+  zh: 刚刚开始
+stats.collecting.ago.one:
+  en: "Started %{count} minute ago"
+  zh: "%{count} 分钟前开始"
+stats.collecting.ago.other:
+  en: "Started %{count} minutes ago"
+  zh: "%{count} 分钟前开始"
+
+# Activity: traffic, top apps and AI services.
+stats.traffic.title:
+  en: Traffic
+  zh: 流量
+stats.traffic.summary.today:
+  en: "%{total} today · AI %{ai}"
+  zh: "今天 %{total} · AI %{ai}"
+stats.traffic.summary.today_share:
+  en: "%{total} today · AI %{ai} (%{share}%)"
+  zh: "今天 %{total} · AI %{ai}（%{share}%）"
+stats.traffic.summary.week:
+  en: "%{total} in 7 days · AI %{ai}"
+  zh: "7 天内 %{total} · AI %{ai}"
+stats.traffic.summary.week_share:
+  en: "%{total} in 7 days · AI %{ai} (%{share}%)"
+  zh: "7 天内 %{total} · AI %{ai}（%{share}%）"
+stats.traffic.summary.month:
+  en: "%{total} in 30 days · AI %{ai}"
+  zh: "30 天内 %{total} · AI %{ai}"
+stats.traffic.summary.month_share:
+  en: "%{total} in 30 days · AI %{ai} (%{share}%)"
+  zh: "30 天内 %{total} · AI %{ai}（%{share}%）"
+stats.traffic.per_hour:
+  en: Per hour
+  zh: 每小时
+stats.traffic.per_day:
+  en: Per day
+  zh: 每天
+stats.traffic.empty:
+  en: No traffic in this range yet.
+  zh: 此时间段内暂无流量。
+stats.top_apps.title:
+  en: Top apps
+  zh: 应用排行
+stats.top_apps.empty:
+  en: No traffic yet.
+  zh: 暂无流量。
+stats.ai_services:
+  en: AI services
+  zh: AI 服务
+stats.top_services.sub:
+  en: share of AI traffic
+  zh: 占 AI 流量的比例
+stats.top_services.empty:
+  en: No AI traffic yet.
+  zh: 暂无 AI 流量。
+stats.clear.confirm:
+  en: Press again to clear
+  zh: 再按一次以清除
+stats.clear.button:
+  en: Clear History
+  zh: 清除历史记录
+stats.clear.done:
+  en: History cleared.
+  zh: 已清除历史记录。
+
+# Activity: how reliable each AI service has been.
+stats.check.none:
+  en: not checked
+  zh: 未检测
+stats.check.ok:
+  en: reachable
+  zh: 可访问
+stats.check.part:
+  en: "some checks failed (%{passed} of %{checks} passed)"
+  zh: "部分检测失败（%{checks} 次中 %{passed} 次通过）"
+stats.check.down:
+  en: "unreachable (%{passed} of %{checks} passed)"
+  zh: "无法访问（%{checks} 次中 %{passed} 次通过）"
+stats.ai.range.today:
+  en: today
+  zh: 今天
+stats.ai.range.week:
+  en: last 7 days
+  zh: 最近 7 天
+stats.ai.range.month:
+  en: last 30 days
+  zh: 最近 30 天
+stats.ai.open_week:
+  en: "%{name}: open its week"
+  zh: "%{name}：查看最近 7 天"
+stats.ai.phone_line:
+  en: "%{up} up · API %{ms} · %{data} of data"
+  zh: "可用率 %{up} · API %{ms} · 流量 %{data}"
+stats.ai.reachable:
+  en: Reachable
+  zh: 可访问
+stats.ai.some_failed:
+  en: Some checks failed
+  zh: 部分检测失败
+stats.ai.unreachable:
+  en: Unreachable
+  zh: 无法访问
+stats.ai.column.service:
+  en: Service
+  zh: 服务
+stats.ai.column.up:
+  en: Up
+  zh: 可用率
+stats.ai.column.api:
+  en: API median
+  zh: API 中位数
+stats.ai.column.data:
+  en: Data
+  zh: 流量
+
+# AI service: one service's week.
+stats.service.reachable_now:
+  en: Reachable now
+  zh: 当前可访问
+stats.service.unreachable_now:
+  en: Unreachable now
+  zh: 当前无法访问
+stats.service.not_checked:
+  en: Not checked yet
+  zh: 尚未检测
+stats.service.goes:
+  en: "Goes through %{goes}"
+  zh: "经由 %{goes}"
+stats.service.api_response:
+  en: API response
+  zh: API 响应
+stats.service.reachable_week:
+  en: Reachable, 7 days
+  zh: 可访问率（7 天）
+stats.service.no_checks:
+  en: no checks yet
+  zh: 尚无检测
+stats.service.checks_failed:
+  en: "%{failed} of %{checks} checks failed"
+  zh: "%{checks} 次检测中 %{failed} 次失败"
+stats.service.api_median:
+  en: API response, median
+  zh: API 响应中位数
+stats.service.no_answers:
+  en: no answers yet
+  zh: 尚无响应
+stats.service.p95:
+  en: "95% under %{ms} ms"
+  zh: "95% 低于 %{ms} ms"
+stats.service.country:
+  en: Country it sees
+  zh: 识别地区
+stats.service.no_answer:
+  en: no answer yet
+  zh: 尚无结果
+stats.service.no_change:
+  en: no change this week
+  zh: 本周无变化
+# n - 1 changes: English reads "1 changes" too (as before).
+stats.service.changes:
+  en: "%{count} changes this week"
+  zh: "本周变化 %{count} 次"
+stats.service.held:
+  en: Held open 90 s
+  zh: 保持连接 90 秒
+stats.service.held_of:
+  en: "%{held} of %{holds}"
+  zh: "%{held} / %{holds}"
+stats.service.hourly:
+  en: hourly test
+  zh: 每小时测试
+stats.service.hourly_dropped:
+  en: "hourly test · %{count} dropped"
+  zh: "每小时测试 · 断开 %{count} 次"
+stats.service.was_reachable:
+  en: Was it reachable?
+  zh: 是否可访问？
+stats.service.all_passed:
+  en: All checks passed
+  zh: 全部通过
+stats.service.some_failed:
+  en: Some failed
+  zh: 部分失败
+stats.service.mostly_failed:
+  en: Mostly failed
+  zh: 大多失败
+stats.service.api_time:
+  en: API response time
+  zh: API 响应时间
+stats.service.api_time_sub:
+  en: hourly median, last 7 days
+  zh: 每小时中位数，最近 7 天
+stats.service.no_api:
+  en: No API answers recorded yet.
+  zh: 尚未记录到 API 响应。
+stats.service.nothing:
+  en: Nothing recorded yet.
+  zh: 尚无记录。
+stats.service.now:
+  en: now
+  zh: 当前
+
+# Exits › Quality.
+stats.quality.no_readings:
+  en: No readings yet
+  zh: 暂无测速数据
+stats.quality.switch_auto:
+  en: "Automatic: %{from} → %{to}"
+  zh: "自动：%{from} → %{to}"
+stats.quality.switch_you:
+  en: "You: %{from} → %{to}"
+  zh: "手动：%{from} → %{to}"
+stats.quality.response:
+  en: Response
+  zh: 响应
+stats.quality.failed:
+  en: Failed tests
+  zh: 测速失败
+stats.quality.failed_per_hour:
+  en: Failed tests per hour
+  zh: 每小时测速失败次数
+stats.quality.typical:
+  en: Typical response
+  zh: 典型响应
+stats.quality.median:
+  en: median
+  zh: 中位数
+stats.quality.of_tests:
+  en: "of %{tests}"
+  zh: "共 %{tests} 次"
+stats.quality.changes:
+  en: Changes
+  zh: 切换次数
+stats.quality.none:
+  en: none
+  zh: 无
+stats.quality.by:
+  en: "%{you} by you · %{auto} automatic"
+  zh: "手动 %{you} 次 · 自动 %{auto} 次"
+stats.quality.right_now:
+  en: Right now
+  zh: 当前节点
+stats.quality.response_time:
+  en: Response time
+  zh: 响应时间
+stats.quality.hourly_median:
+  en: hourly median
+  zh: 每小时中位数
+stats.quality.per_hour:
+  en: per hour
+  zh: 每小时
+stats.quality.ai_changed:
+  en: When the AI exit changed
+  zh: AI 出口切换记录
+stats.quality.switched:
+  en: When it switched
+  zh: 切换记录
+stats.quality.no_change:
+  en: No change in this time.
+  zh: 此期间无切换。
+stats.quality.automatic:
+  en: automatic
+  zh: 自动
+stats.quality.you:
+  en: you
+  zh: 手动
+
+# Subscriptions: what a subscription has used.
+stats.usage.none:
+  en: No usage recorded yet
+  zh: 尚未记录用量
+stats.usage.runs_out_before.one:
+  en: "At this pace it runs out %{date}, %{count} day before it expires."
+  zh: "按当前速度，将于 %{date}用完，比到期早 %{count} 天。"
+stats.usage.runs_out_before.other:
+  en: "At this pace it runs out %{date}, %{count} days before it expires."
+  zh: "按当前速度，将于 %{date}用完，比到期早 %{count} 天。"
+stats.usage.lasts:
+  en: At this pace it lasts until it expires.
+  zh: 按当前速度，到期前不会用完。
+stats.usage.runs_out:
+  en: "At this pace it runs out %{date}."
+  zh: "按当前速度，将于 %{date}用完。"
+stats.usage.expires:
+  en: Expires
+  zh: 到期
+stats.usage.used:
+  en: Used
+  zh: 已用
+stats.usage.at_pace:
+  en: At this pace
+  zh: 按当前速度
+stats.usage.title:
+  en: Used so far
+  zh: 已用流量
+stats.usage.legend:
+  en: "solid: recorded · dashed: if the recent pace continues"
+  zh: "实线：已记录 · 虚线：按近期速度推算"

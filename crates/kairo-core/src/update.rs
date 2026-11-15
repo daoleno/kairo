@@ -264,16 +264,23 @@ fn writable(dir: &Path) -> bool {
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum VerifyError {
-    #[error("The update's signature is not valid")]
     Signature,
-    #[error("The update manifest is unreadable: {0}")]
     Manifest(String),
-    #[error("The download's checksum does not match ({0})")]
     Checksum(String),
     /// A signed manifest past its date (or with none) offers nothing: an old
     /// one, replayed, would hold this copy at a release that is not the latest.
-    #[error("The update manifest has expired: no update is offered")]
     Expired,
+}
+
+impl std::fmt::Display for VerifyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self {
+            VerifyError::Signature => crate::tr!("engine.update.signature_invalid"),
+            VerifyError::Manifest(e) => crate::tr!("engine.update.manifest_unreadable", error = e),
+            VerifyError::Checksum(d) => crate::tr!("engine.update.checksum_mismatch", detail = d),
+            VerifyError::Expired => crate::tr!("engine.update.manifest_expired"),
+        })
+    }
 }
 
 /// Whether `manifest` may offer an update to `current` at `now` (unix
@@ -310,9 +317,10 @@ fn verify_with(key: &[u8; 32], bytes: &[u8], sig_hex: &str) -> Result<Manifest, 
 pub fn verify_package(bytes: &[u8], package: &Package, sums: &str) -> Result<(), VerifyError> {
     let actual = hex::encode(Sha256::digest(bytes));
     if !actual.eq_ignore_ascii_case(&package.sha256) {
-        return Err(VerifyError::Checksum(format!(
-            "expected {}, got {actual}",
-            package.sha256
+        return Err(VerifyError::Checksum(crate::tr!(
+            "engine.update.checksum_expected",
+            expected = package.sha256,
+            actual = actual
         )));
     }
     let listed = sums.lines().find_map(|l| {
@@ -322,12 +330,14 @@ pub fn verify_package(bytes: &[u8], package: &Package, sums: &str) -> Result<(),
     });
     match listed {
         Some(s) if s.eq_ignore_ascii_case(&actual) => Ok(()),
-        Some(s) => Err(VerifyError::Checksum(format!(
-            "SHA256SUMS says {s}, got {actual}"
+        Some(s) => Err(VerifyError::Checksum(crate::tr!(
+            "engine.update.checksum_listed",
+            listed = s,
+            actual = actual
         ))),
-        None => Err(VerifyError::Checksum(format!(
-            "{} is not in SHA256SUMS",
-            package.name
+        None => Err(VerifyError::Checksum(crate::tr!(
+            "engine.update.checksum_unlisted",
+            name = package.name
         ))),
     }
 }
@@ -380,15 +390,15 @@ async fn get(
             .timeout(Duration::from_secs(900))
             .send()
             .await
-            .map_err(|e| format!("Could not reach {}: {e}", host(url)));
+            .map_err(|e| crate::tr!("engine.update.unreachable", host = host(url), error = e));
         match r {
             Ok(resp) if resp.status().is_server_error() && attempt < 4 => {}
             Ok(resp) if resp.status().is_success() => break resp,
             Ok(resp) => {
-                return Err(format!(
-                    "{} answered HTTP {}",
-                    host(url),
-                    resp.status().as_u16()
+                return Err(crate::tr!(
+                    "engine.update.http_status",
+                    host = host(url),
+                    status = resp.status().as_u16()
                 ));
             }
             Err(e) if attempt >= 4 => return Err(e),
@@ -699,9 +709,9 @@ pub async fn download(svc: &Service) -> Result<(), String> {
             UpdateStatus::Available { version } => Ok(Some(version)),
             UpdateStatus::Ready { .. } | UpdateStatus::Downloading { .. } => Ok(None),
             UpdateStatus::Manual { .. } => {
-                Err("This copy of Kairo cannot update itself: use the release page".into())
+                Err(crate::tr!("engine.update.manual_only"))
             }
-            _ => Err("No update is waiting to be downloaded".into()),
+            _ => Err(crate::tr!("engine.update.nothing_to_download")),
         }
     }
     if wanted(svc.snapshot().update)?.is_none() {
@@ -751,12 +761,8 @@ impl DownloadError {
 /// What the person reads when a download did not work out.
 fn failure_words(version: &str, why: &DownloadError) -> String {
     match why {
-        DownloadError::Network(_) => {
-            format!("Kairo {version} could not be downloaded. Check the connection and try again.")
-        }
-        DownloadError::Verify(_) => {
-            format!("Kairo {version} did not download correctly and was thrown away. Try again.")
-        }
+        DownloadError::Network(_) => crate::tr!("engine.update.download_failed", version = version),
+        DownloadError::Verify(_) => crate::tr!("engine.update.download_corrupt", version = version),
     }
 }
 
@@ -777,12 +783,12 @@ async fn download_inner(svc: &Service) -> Result<String, DownloadError> {
 async fn stage(svc: &Service, proxy: Option<&str>) -> Result<String, Fetch> {
     let manifest = fetch_manifest(proxy).await?;
     if !is_newer(&manifest.version, VERSION) {
-        return Err(Fetch::Fatal("The update is no longer on offer".to_owned()));
+        return Err(Fetch::Fatal(crate::tr!("engine.update.withdrawn")));
     }
     let version = manifest.version.clone();
     let dir = svc.paths().update_dir();
     let package = package_of(&manifest)
-        .ok_or_else(|| Fetch::Fatal("This copy of Kairo cannot update itself".to_owned()))?;
+        .ok_or_else(|| Fetch::Fatal(crate::tr!("engine.update.cannot_update_itself")))?;
     // Only the very file the manifest names counts as downloaded already (not another
     // build of the same version: one Android refused is fetched again).
     if staged_info(&dir).is_some_and(|s| {
@@ -823,7 +829,7 @@ async fn stage(svc: &Service, proxy: Option<&str>) -> Result<String, Fetch> {
     verify_package(&file, &package, &String::from_utf8_lossy(&sums))
         .map_err(|e| Fetch::Fatal(e.to_string()))?;
     let _ = std::fs::remove_dir_all(&dir);
-    let io = |e: std::io::Error| Fetch::Fatal(format!("Could not keep the update: {e}"));
+    let io = |e: std::io::Error| Fetch::Fatal(crate::tr!("engine.update.keep_failed", error = e));
     std::fs::create_dir_all(&dir).map_err(io)?;
     write_atomic(&dir.join(&package.name), &file).map_err(io)?;
     let staged = Staged {
@@ -844,14 +850,14 @@ async fn stage(svc: &Service, proxy: Option<&str>) -> Result<String, Fetch> {
 /// starts it (see [`relaunch`]) and quits.
 pub async fn install(svc: &Service) -> Result<PathBuf, String> {
     let dir = svc.paths().update_dir();
-    let staged = staged_info(&dir).ok_or("No update is waiting")?;
+    let staged = staged_info(&dir).ok_or_else(|| crate::tr!("engine.update.nothing_waiting"))?;
     let file = dir.join(&staged.file);
     let bytes = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
     // Checked again: it sat on disk since the download.
     let actual = hex::encode(Sha256::digest(&bytes));
     if !actual.eq_ignore_ascii_case(&staged.sha256) {
         let _ = std::fs::remove_dir_all(&dir);
-        return Err("The downloaded update changed on disk; it was removed".into());
+        return Err(crate::tr!("engine.update.changed_on_disk"));
     }
     let install = Install::detect();
     let work = dir.join("work");
@@ -863,7 +869,7 @@ pub async fn install(svc: &Service) -> Result<PathBuf, String> {
         Install::Server { prefix } => install_server(&prefix, &bytes, &work),
         Install::WindowsDir { dir } => install_windows(&dir, &bytes, &work),
         Install::Android => install_android(&file),
-        Install::Other => Err("This copy of Kairo cannot update itself".into()),
+        Install::Other => Err(crate::tr!("engine.update.cannot_update_itself")),
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -879,10 +885,10 @@ fn run(cmd: &mut std::process::Command) -> Result<(), String> {
     if out.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "{} failed: {}",
-            cmd.get_program().to_string_lossy(),
-            String::from_utf8_lossy(&out.stderr).trim()
+        Err(crate::tr!(
+            "engine.update.command_failed",
+            program = cmd.get_program().to_string_lossy(),
+            error = String::from_utf8_lossy(&out.stderr).trim()
         ))
     }
 }
@@ -896,11 +902,11 @@ fn install_mac(bundle: &Path, zip: &Path, work: &Path) -> Result<PathBuf, String
         use std::process::Command;
         let s = bundle.to_string_lossy();
         if s.contains("/AppTranslocation/") {
-            return Err("Kairo is running from a temporary location. Move it to Applications, open it from there, and update again.".into());
+            return Err(crate::tr!("engine.update.translocated"));
         }
-        let parent = bundle.parent().ok_or("no parent")?;
+        let parent = bundle.parent().ok_or_else(|| crate::tr!("engine.update.no_parent"))?;
         if !writable(parent) {
-            return Err(format!("Kairo cannot write to {}", parent.display()));
+            return Err(crate::tr!("engine.update.cannot_write", dir = parent.display()));
         }
         let pid = std::process::id();
         let stage = parent.join(format!(".Kairo-update-{pid}"));
@@ -923,16 +929,14 @@ fn install_mac(bundle: &Path, zip: &Path, work: &Path) -> Result<PathBuf, String
         if !new.join("Contents/MacOS/Kairo").is_file()
             || !new.join("Contents/MacOS/mihomo").is_file()
         {
-            return Err(cleanup("The update is missing files".into()));
+            return Err(cleanup(crate::tr!("engine.update.missing_files")));
         }
         let old = parent.join(format!(".Kairo-old-{pid}.app"));
         std::fs::rename(bundle, &old)
-            .map_err(|e| cleanup(format!("Could not move the old Kairo aside: {e}")))?;
+            .map_err(|e| cleanup(crate::tr!("engine.update.move_old_failed", error = e)))?;
         if let Err(e) = std::fs::rename(&new, bundle) {
             let _ = std::fs::rename(&old, bundle);
-            return Err(cleanup(format!(
-                "Could not put the new Kairo in place: {e}"
-            )));
+            return Err(cleanup(crate::tr!("engine.update.place_new_failed", error = e)));
         }
         let _ = std::fs::remove_dir_all(&old);
         let _ = std::fs::remove_dir_all(&stage);
@@ -952,15 +956,15 @@ fn install_prefix(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
     archive.set_preserve_permissions(true);
     archive
         .unpack(work)
-        .map_err(|e| format!("Could not unpack the update: {e}"))?;
+        .map_err(|e| crate::tr!("engine.update.unpack_failed", error = e))?;
     let top = std::fs::read_dir(work)
         .map_err(|e| e.to_string())?
         .filter_map(Result::ok)
         .map(|e| e.path())
         .find(|p| p.join("bin/kairo").is_file())
-        .ok_or("The update has no bin/kairo")?;
+        .ok_or_else(|| crate::tr!("engine.update.no_file", file = "bin/kairo"))?;
     if !top.join("lib/kairo/mihomo").is_file() {
-        return Err("The update has no core".into());
+        return Err(crate::tr!("engine.update.no_core"));
     }
     let mut files = vec![PathBuf::from("lib/kairo/mihomo")];
     for sub in ["lib/kairo", "share/doc/kairo"] {
@@ -990,18 +994,18 @@ fn install_server(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
     archive.set_preserve_permissions(true);
     archive
         .unpack(work)
-        .map_err(|e| format!("Could not unpack the update: {e}"))?;
+        .map_err(|e| crate::tr!("engine.update.unpack_failed", error = e))?;
     let top = std::fs::read_dir(work)
         .map_err(|e| e.to_string())?
         .filter_map(Result::ok)
         .map(|e| e.path())
         .find(|p| p.join("bin/kairo-server").is_file())
-        .ok_or("The update has no bin/kairo-server")?;
+        .ok_or_else(|| crate::tr!("engine.update.no_file", file = "bin/kairo-server"))?;
     if !top.join("lib/kairo/mihomo").is_file() {
-        return Err("The update has no core".into());
+        return Err(crate::tr!("engine.update.no_core"));
     }
     if !top.join("share/kairo-server/web/index.html").is_file() {
-        return Err("The update has no page".into());
+        return Err(crate::tr!("engine.update.no_page"));
     }
     let mut files = Vec::new();
     for sub in ["lib/kairo", "share/doc/kairo"] {
@@ -1031,13 +1035,13 @@ fn install_server(prefix: &Path, tar_gz: &[u8], work: &Path) -> Result<PathBuf, 
     let _ = std::fs::remove_dir_all(&next);
     let _ = std::fs::remove_dir_all(&old);
     let page = (|| {
-        copy_dir(&top.join("share/kairo-server/web"), &next).map_err(|e| format!("The page: {e}"))?;
+        copy_dir(&top.join("share/kairo-server/web"), &next).map_err(|e| crate::tr!("engine.update.page_failed", error = e))?;
         if web.exists() {
-            std::fs::rename(&web, &old).map_err(|e| format!("The page: {e}"))?;
+            std::fs::rename(&web, &old).map_err(|e| crate::tr!("engine.update.page_failed", error = e))?;
         }
         if let Err(e) = std::fs::rename(&next, &web) {
             let _ = std::fs::rename(&old, &web);
-            return Err(format!("The page: {e}"));
+            return Err(crate::tr!("engine.update.page_failed", error = e));
         }
         Ok(())
     })();
@@ -1127,7 +1131,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Copies `from` next to `to` and renames it over `to`.
 fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
-    let dir = to.parent().ok_or("no parent")?;
+    let dir = to.parent().ok_or_else(|| crate::tr!("engine.update.no_parent"))?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let tmp = dir.join(format!(
         ".{}.update",
@@ -1145,14 +1149,14 @@ pub fn install_windows(dir: &Path, zip_bytes: &[u8], work: &Path) -> Result<Path
     use std::io::{Cursor, Read};
     std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
-        .map_err(|e| format!("Could not read the update: {e}"))?;
+        .map_err(|e| crate::tr!("engine.update.read_failed", error = e))?;
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
-            .map_err(|e| format!("Could not read the update: {e}"))?;
+            .map_err(|e| crate::tr!("engine.update.read_failed", error = e))?;
         // Names that climb out of the folder are refused.
         let Some(rel) = file.enclosed_name() else {
-            return Err("The update has a file outside its folder".into());
+            return Err(crate::tr!("engine.update.file_outside"));
         };
         let target = work.join(rel);
         if file.is_dir() {
@@ -1175,10 +1179,10 @@ pub fn install_windows(dir: &Path, zip_bytes: &[u8], work: &Path) -> Result<Path
             .filter_map(Result::ok)
             .map(|e| e.path())
             .find(|p| p.join("kairo.exe").is_file())
-            .ok_or("The update has no kairo.exe")?
+            .ok_or_else(|| crate::tr!("engine.update.no_file", file = "kairo.exe"))?
     };
     if !top.join("mihomo.exe").is_file() {
-        return Err("The update has no core".into());
+        return Err(crate::tr!("engine.update.no_core"));
     }
     let mut files = Vec::new();
     collect_files(&top, &top, &mut files).map_err(|e| e.to_string())?;
@@ -1279,17 +1283,17 @@ pub(crate) fn install_failure(status: i32, message: &str) -> Option<String> {
             || status == CONFLICT
             || status == INCOMPATIBLE
         {
-            "Android refused the update: it is signed with a different key than the Kairo installed on this phone (a test build, perhaps). Uninstall Kairo, then install this version from the release page; add your subscription again.".to_owned()
+            crate::tr!("engine.update.android_other_key")
         } else if status == STORAGE {
-            "There is not enough free storage on this phone to install the update.".to_owned()
+            crate::tr!("engine.update.android_storage")
         } else if status == BLOCKED {
-            "Android, or a security app on this phone, blocked the update.".to_owned()
+            crate::tr!("engine.update.android_blocked")
         } else if status == INVALID {
-            "Android did not accept the downloaded update as a valid app.".to_owned()
+            crate::tr!("engine.update.android_invalid")
         } else if status == FAILURE && message.is_empty() {
-            "Android could not install the update.".to_owned()
+            crate::tr!("engine.update.android_failed")
         } else {
-            format!("Android could not install the update ({}).", message.trim())
+            crate::tr!("engine.update.android_failed_because", reason = message.trim())
         },
     )
 }
@@ -1325,13 +1329,13 @@ fn install_deb(deb: &Path) -> Result<PathBuf, String> {
         let out = cmd.output().map_err(|e| format!("pkexec: {e}"))?;
         return match out.status.code() {
             Some(0) => Ok(PathBuf::from("/usr/bin/kairo")),
-            Some(126) => Err("Cancelled".into()),
-            Some(127) => Err("No polkit agent could ask for the password".into()),
+            Some(126) => Err(crate::tr!("engine.prompt.cancelled")),
+            Some(127) => Err(crate::tr!("engine.prompt.no_polkit_agent")),
             _ => Err(String::from_utf8_lossy(&out.stderr)
                 .lines()
                 .last()
-                .unwrap_or("apt-get failed")
-                .to_owned()),
+                .map(str::to_owned)
+                .unwrap_or_else(|| crate::tr!("engine.update.apt_failed"))),
         };
     }
     #[allow(unreachable_code)]
@@ -1363,7 +1367,7 @@ pub fn relaunch(exe: &Path) -> Result<(), String> {
     }
     cmd.spawn()
         .map(|_| ())
-        .map_err(|e| format!("Could not start the new Kairo: {e}"))
+        .map_err(|e| crate::tr!("engine.update.relaunch_failed", error = e))
 }
 
 /// In a relaunched Kairo: waits (up to 30 s) until the process it replaces is gone.

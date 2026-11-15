@@ -12,14 +12,19 @@ use crate::paths::{Paths, write_atomic};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
-    #[error(
-        "The mihomo core is missing from this installation of Kairo. Reinstall Kairo to get it back."
-    )]
     NotBundled,
-    #[error("The mihomo core bundled with Kairo does not run: {0}")]
     Broken(String),
-    #[error("Could not copy the core: {0}")]
     Io(String),
+}
+
+impl std::fmt::Display for CoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self {
+            CoreError::NotBundled => crate::tr!("engine.core_bin.not_bundled"),
+            CoreError::Broken(d) => crate::tr!("engine.core_bin.broken", detail = d),
+            CoreError::Io(e) => crate::tr!("engine.core_bin.copy_failed", error = e),
+        })
+    }
 }
 
 /// What [`seed`] found and did.
@@ -78,18 +83,25 @@ pub async fn seed(paths: &Paths) -> Result<Seeded, CoreError> {
     if existed {
         let pinned = pinned_version();
         let not_this = if version != pinned {
-            Some(format!("it is {version}, not the core this Kairo ships ({pinned})"))
+            Some(crate::tr!("engine.core_bin.not_pinned", version = version, pinned = pinned))
         } else {
             installed
                 .as_deref()
                 .filter(|i| is_newer(i, &version))
-                .map(|i| format!("it is {version}, older than the folder's {i}"))
+                .map(|i| crate::tr!("engine.core_bin.older", version = version, installed = i))
         };
         if let Some(why) = not_this {
             log::warn!("core: {} left as it is, {} not copied: {why}", target.display(), bundled.display());
             return installed
                 .map(|version| Seeded { version, replaced: None })
-                .ok_or_else(|| CoreError::Io(format!("The core at {} does not run, and {} is not one to replace it with: {why}", target.display(), bundled.display())));
+                .ok_or_else(|| {
+                    CoreError::Io(crate::tr!(
+                        "engine.core_bin.cannot_replace",
+                        core = target.display(),
+                        bundled = bundled.display(),
+                        why = why
+                    ))
+                });
         }
     } else if version != pinned_version() {
         log::warn!("core: {} is {version}, not the one this Kairo ships ({}); copied as the first core", bundled.display(), pinned_version());

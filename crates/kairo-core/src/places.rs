@@ -118,7 +118,8 @@ pub struct Place {
     /// The name without its flag.
     pub title: String,
     pub flag: Option<String>,
-    /// The country or region, in English ("Other" when the name says none).
+    /// The country or region, in English ("Other" when the name says none):
+    /// a value to compare; [`region_title`] is what a person reads.
     pub region: &'static str,
     /// Last delay in ms, `Some(0)` failed, `None` untested.
     pub delay: Option<u32>,
@@ -383,6 +384,57 @@ fn region_of_words(name: &str) -> Option<&'static str> {
             })
         })
         .map(|(_, n, _)| *n)
+}
+
+/// A region (a [`Place::region`]: "Hong Kong", "Other") as the person reads
+/// it. The region itself stays English: it is compared and matched.
+pub fn region_title(region: &str) -> String {
+    if region == "Other" {
+        return crate::tr!("model.places.other");
+    }
+    REGIONS
+        .iter()
+        .find(|(_, n, _)| *n == region)
+        .and_then(|(c, _, _)| code_title(c))
+        .unwrap_or_else(|| region.to_owned())
+}
+
+/// The name of a region Kairo knows by its ISO code ("JP"), as the person
+/// reads it; `None` for a code it does not name.
+pub fn code_title(code: &str) -> Option<String> {
+    Some(match code {
+        "HK" => crate::tr!("model.places.hk"),
+        "TW" => crate::tr!("model.places.tw"),
+        "JP" => crate::tr!("model.places.jp"),
+        "SG" => crate::tr!("model.places.sg"),
+        "US" => crate::tr!("model.places.us"),
+        "KR" => crate::tr!("model.places.kr"),
+        "GB" => crate::tr!("model.places.gb"),
+        "DE" => crate::tr!("model.places.de"),
+        "FR" => crate::tr!("model.places.fr"),
+        "NL" => crate::tr!("model.places.nl"),
+        "CA" => crate::tr!("model.places.ca"),
+        "AU" => crate::tr!("model.places.au"),
+        "IN" => crate::tr!("model.places.in"),
+        "RU" => crate::tr!("model.places.ru"),
+        "TR" => crate::tr!("model.places.tr"),
+        "MY" => crate::tr!("model.places.my"),
+        "TH" => crate::tr!("model.places.th"),
+        "VN" => crate::tr!("model.places.vn"),
+        "PH" => crate::tr!("model.places.ph"),
+        "ID" => crate::tr!("model.places.id"),
+        "AR" => crate::tr!("model.places.ar"),
+        "BR" => crate::tr!("model.places.br"),
+        "MO" => crate::tr!("model.places.mo"),
+        "AE" => crate::tr!("model.places.ae"),
+        "IT" => crate::tr!("model.places.it"),
+        "ES" => crate::tr!("model.places.es"),
+        "CH" => crate::tr!("model.places.ch"),
+        "SE" => crate::tr!("model.places.se"),
+        "MX" => crate::tr!("model.places.mx"),
+        "CN" => crate::tr!("model.places.cn"),
+        _ => return None,
+    })
 }
 
 /// The flag of a region (for places whose names carry none).

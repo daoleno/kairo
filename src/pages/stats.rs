@@ -11,6 +11,7 @@ use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::charts::{self, Col, Line, Mark, Row, Ser, Tone};
 use crate::ui::{self, Icon, size, toolbar};
@@ -25,10 +26,36 @@ fn tz(t: i64) -> i64 {
 
 // --- Dates (local time, no library) -------------------------------------------------
 
-const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+/// The keys of the weekdays' short names, Sunday first.
+const WEEKDAYS: [&str; 7] = [
+    "stats.weekday.sun",
+    "stats.weekday.mon",
+    "stats.weekday.tue",
+    "stats.weekday.wed",
+    "stats.weekday.thu",
+    "stats.weekday.fri",
+    "stats.weekday.sat",
 ];
+/// The keys of the months' short names ("Nov"; Chinese "11月").
+const MONTHS: [&str; 12] = [
+    "stats.month.jan",
+    "stats.month.feb",
+    "stats.month.mar",
+    "stats.month.apr",
+    "stats.month.may",
+    "stats.month.jun",
+    "stats.month.jul",
+    "stats.month.aug",
+    "stats.month.sep",
+    "stats.month.oct",
+    "stats.month.nov",
+    "stats.month.dec",
+];
+
+/// "Mon" for weekday 0=Sun..6.
+fn weekday(w: usize) -> String {
+    t!(WEEKDAYS[w])
+}
 
 /// (month 0..11, day of month, weekday 0=Sun, hour) of a local time in seconds.
 pub fn civil(local: i64) -> (usize, i64, usize, i64) {
@@ -50,13 +77,37 @@ pub fn civil(local: i64) -> (usize, i64, usize, i64) {
 /// "Nov 10" for a UTC time, in local time.
 pub fn day_text(t: i64) -> String {
     let (m, d, _, _) = civil(t + tz(t));
-    format!("{} {d}", MONTHS[m])
+    t!("stats.date.day", month = t!(MONTHS[m]), day = d)
 }
 
 /// "Tue, Nov 10".
 fn day_long(t: i64) -> String {
     let (m, d, w, _) = civil(t + tz(t));
-    format!("{}, {} {d}", WEEKDAYS[w], MONTHS[m])
+    t!("stats.date.day_long", weekday = weekday(w), month = t!(MONTHS[m]), day = d)
+}
+
+/// "Tue, Nov 10, 14:00".
+fn day_hour(t: i64) -> String {
+    t!("stats.date.day_hour", day = day_long(t), hour = hour_text(t))
+}
+
+/// "Today", "7 days", "30 days".
+fn range_title(r: Range) -> String {
+    match r {
+        Range::Today => t!("stats.range.today"),
+        Range::Week => t!("stats.range.week"),
+        Range::Month => t!("stats.range.month"),
+    }
+}
+
+/// A kind of traffic as the charts name it (`Slot` is data).
+fn slot_title(s: Slot) -> String {
+    match s {
+        Slot::Ai => t!("stats.slot.ai"),
+        Slot::Rest => t!("stats.slot.rest"),
+        Slot::Downloads => t!("stats.slot.downloads"),
+        Slot::Direct => t!("stats.slot.direct"),
+    }
 }
 
 fn hour_text(t: i64) -> String {
@@ -126,9 +177,9 @@ pub fn overview() -> impl IntoElement {
                 .items_center()
                 .child(ui::segmented(
                     vec![
-                        (Range::Today, "Today"),
-                        (Range::Week, "7 days"),
-                        (Range::Month, "30 days"),
+                        (Range::Today, range_title(Range::Today)),
+                        (Range::Week, range_title(Range::Week)),
+                        (Range::Month, range_title(Range::Month)),
                     ],
                     move || range.get(),
                     move |r| range.set(r),
@@ -146,16 +197,16 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
     let t = now();
     let z = tz(t);
     if st.collecting(t) {
-        let ago = if st.first_at == 0 {
-            "just now".to_owned()
+        let started = if st.first_at == 0 {
+            t!("stats.collecting.just_now")
         } else {
             let m = ((t - st.first_at) / 60).max(0);
-            format!("{m} minute{} ago", if m == 1 { "" } else { "s" })
+            t!(&plural("stats.collecting.ago", m as u64), count = m)
         };
         return card()
             .child(charts::collecting(
-                "Collecting data",
-                &format!("Started {ago}"),
+                &t!("stats.collecting.title"),
+                &started,
             ))
             .into_element();
     }
@@ -168,25 +219,15 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
         .map(|b| Col {
             vals: b.x.iter().map(|v| *v as f64).collect(),
             tip: if hourly {
-                format!(
-                    "Today, {}{}",
-                    hour_text(b.start),
-                    if b.start <= t && t < b.start + HOUR {
-                        " (so far)"
-                    } else {
-                        ""
-                    }
-                )
+                if b.start <= t && t < b.start + HOUR {
+                    t!("stats.tip.today_hour_so_far", hour = hour_text(b.start))
+                } else {
+                    t!("stats.tip.today_hour", hour = hour_text(b.start))
+                }
+            } else if b.start <= t && t < b.start + DAY {
+                t!("stats.tip.day_so_far", day = day_long(b.start))
             } else {
-                format!(
-                    "{}{}",
-                    day_long(b.start),
-                    if b.start <= t && t < b.start + DAY {
-                        " (so far)"
-                    } else {
-                        ""
-                    }
-                )
+                day_long(b.start)
             },
             open: b.open,
         })
@@ -201,7 +242,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
             }
             Range::Week => {
                 let (_, d, w, _) = civil(b.start + z);
-                Some((i, 1, format!("{} {d}", WEEKDAYS[w])))
+                Some((i, 1, t!("stats.date.weekday_day", weekday = weekday(w), day = d)))
             }
             Range::Month if i % 5 == 0 => Some((i, 5, day_text(b.start))),
             _ => None,
@@ -210,43 +251,43 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
     let ser: Vec<Ser> = Slot::ALL
         .iter()
         .map(|s| Ser {
-            name: s.title().to_owned(),
+            name: slot_title(*s),
             color: slot_color(*s),
         })
         .collect();
-    let when = match range {
-        Range::Today => "today",
-        Range::Week => "in 7 days",
-        Range::Month => "in 30 days",
-    };
-    let share = if series.total > 0 {
-        format!(
-            " ({}%)",
-            (ai_total as f64 / series.total as f64 * 100.0).round()
-        )
+    let total = kairo_core::bytes(series.total);
+    let ai = kairo_core::bytes(ai_total);
+    let summary = if series.total > 0 {
+        let share = (ai_total as f64 / series.total as f64 * 100.0).round();
+        match range {
+            Range::Today => t!("stats.traffic.summary.today_share", total = total, ai = ai, share = share),
+            Range::Week => t!("stats.traffic.summary.week_share", total = total, ai = ai, share = share),
+            Range::Month => t!("stats.traffic.summary.month_share", total = total, ai = ai, share = share),
+        }
     } else {
-        String::new()
+        match range {
+            Range::Today => t!("stats.traffic.summary.today", total = total, ai = ai),
+            Range::Week => t!("stats.traffic.summary.week", total = total, ai = ai),
+            Range::Month => t!("stats.traffic.summary.month", total = total, ai = ai),
+        }
     };
     let traffic = card()
-        .child(heading(
-            "Traffic",
-            format!(
-                "{} {when} · AI {}{share}",
-                kairo_core::bytes(series.total),
-                kairo_core::bytes(ai_total)
-            ),
-        ))
-        .child(ui::muted(if hourly { "Per hour" } else { "Per day" }))
+        .child(heading(&t!("stats.traffic.title"), summary))
+        .child(ui::muted(if hourly {
+            t!("stats.traffic.per_hour")
+        } else {
+            t!("stats.traffic.per_day")
+        }))
         .child(charts::legend(
             Slot::ALL
                 .iter()
-                .map(|s| (s.title().to_owned(), (slot_color(*s))()))
+                .map(|s| (slot_title(*s), (slot_color(*s))()))
                 .collect(),
         ))
         .child(if series.total == 0 {
             view()
                 .py_4()
-                .child(ui::muted("No traffic in this range yet."))
+                .child(ui::muted(t!("stats.traffic.empty")))
                 .into_element()
         } else {
             charts::columns(
@@ -273,7 +314,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
         .child(
             card()
                 .when(!ui::phone(), |v| v.flex_1().min_w(px(0.0)))
-                .child(heading("Top apps", range.title()))
+                .child(heading(&t!("stats.top_apps.title"), range_title(range)))
                 .child(charts::ranked(
                     apps.iter()
                         .take(6)
@@ -285,13 +326,13 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
                             lead: None,
                         })
                         .collect(),
-                    "No traffic yet.",
+                    &t!("stats.top_apps.empty"),
                 )),
         )
         .child(
             card()
                 .when(!ui::phone(), |v| v.flex_1().min_w(px(0.0)))
-                .child(heading("AI services", "share of AI traffic"))
+                .child(heading(&t!("stats.ai_services"), t!("stats.top_services.sub")))
                 .child(charts::ranked(
                     services
                         .iter()
@@ -308,7 +349,7 @@ fn content(st: &Stats, range: Range) -> impl IntoElement {
                             })
                         })
                         .collect(),
-                    "No AI traffic yet.",
+                    &t!("stats.top_services.empty"),
                 )),
         );
     let _ = apps_total;
@@ -332,16 +373,16 @@ fn clear_footer() -> impl IntoElement {
         .child(
             ui::link_btn(move || -> SharedString {
                 if sure.get() {
-                    "Press again to clear".into()
+                    t!("stats.clear.confirm").into()
                 } else {
-                    "Clear History".into()
+                    t!("stats.clear.button").into()
                 }
             })
             .on_press(move || {
                 if sure.get_untracked() {
                     sure.set(false);
                     store.svc().clear_stats();
-                    store.info("History cleared.");
+                    store.info(t!("stats.clear.done"));
                 } else {
                     sure.set(true);
                 }
@@ -371,21 +412,21 @@ fn cells(hours: &[(i64, Option<AiHour>)], group: usize) -> Vec<(Tone, String)> {
                 .fold(Cell::None, Cell::worst);
             let (from, to) = (ch[0].0, ch[ch.len() - 1].0 + HOUR);
             let when = if group == 1 {
-                format!("{}, {}", day_long(from), hour_text(from))
+                day_hour(from)
             } else if group >= 24 {
                 day_long(from)
             } else {
-                format!("{}, {}–{}", day_long(from), hour_text(from), hour_text(to))
+                t!("stats.date.day_hours", day = day_long(from), from = hour_text(from), to = hour_text(to))
             };
             let (c, p): (u32, u32) = ch
                 .iter()
                 .filter_map(|(_, h)| h.as_ref())
                 .fold((0, 0), |(c, p), h| (c + h.checks, p + h.passed));
             let what = match worst {
-                Cell::None => "not checked".to_owned(),
-                Cell::Ok => "reachable".to_owned(),
-                Cell::Part => format!("some checks failed ({p} of {c} passed)"),
-                Cell::Down => format!("unreachable ({p} of {c} passed)"),
+                Cell::None => t!("stats.check.none"),
+                Cell::Ok => t!("stats.check.ok"),
+                Cell::Part => t!("stats.check.part", passed = p, checks = c),
+                Cell::Down => t!("stats.check.down", passed = p, checks = c),
             };
             (tone_of(worst), format!("{when} · {what}"))
         })
@@ -428,7 +469,7 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
             let ms_text = ms.map_or("–".to_owned(), |m| format!("{m} ms"));
             let row = nsh_base::button()
                 .w_full()
-                .accessibility_label(format!("{}: open its week", s.name))
+                .accessibility_label(t!("stats.ai.open_week", name = s.name))
                 .on_press(move || {
                     store.ai_service.set(id);
                     store.page.set(Page::AiService);
@@ -459,7 +500,7 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
                             .child(view().flex_1().min_w(px(0.0)).child(charts::ribbon_bare(tones, 14.0))),
                     )
                     .child(
-                        ui::muted(format!("{up_text} up · API {ms_text} · {data} of data"))
+                        ui::muted(t!("stats.ai.phone_line", up = up_text, ms = ms_text, data = data))
                             .w_full()
                             .text_size(px(size::small())),
                     )
@@ -487,17 +528,17 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
         .collect();
     card()
         .child(heading(
-            "AI services",
+            &t!("stats.ai_services"),
             match range {
-                Range::Today => "today",
-                Range::Week => "last 7 days",
-                Range::Month => "last 30 days",
+                Range::Today => t!("stats.ai.range.today"),
+                Range::Week => t!("stats.ai.range.week"),
+                Range::Month => t!("stats.ai.range.month"),
             },
         ))
         .child(charts::legend(vec![
-            ("Reachable".into(), ui::success()),
-            ("Some checks failed".into(), ui::warning()),
-            ("Unreachable".into(), ui::chart_bad()),
+            (t!("stats.ai.reachable"), ui::success()),
+            (t!("stats.ai.some_failed"), ui::warning()),
+            (t!("stats.ai.unreachable"), ui::chart_bad()),
         ]))
         .child((!ui::phone()).then(|| {
             view()
@@ -505,11 +546,11 @@ fn reliability(st: &Stats, range: Range, t: i64) -> impl IntoElement {
                 .items_center()
                 .gap_3()
                 .px_1()
-                .child(ui::muted("Service").w(px(120.0)))
-                .child(ui::muted("Reachable").flex_1())
-                .child(ui::muted("Up").w(px(52.0)))
-                .child(ui::muted("API median").w(px(84.0)))
-                .child(ui::muted("Data").w(px(70.0)))
+                .child(ui::muted(t!("stats.ai.column.service")).w(px(120.0)))
+                .child(ui::muted(t!("stats.ai.reachable")).flex_1())
+                .child(ui::muted(t!("stats.ai.column.up")).w(px(52.0)))
+                .child(ui::muted(t!("stats.ai.column.api")).w(px(84.0)))
+                .child(ui::muted(t!("stats.ai.column.data")).w(px(70.0)))
         }))
         .child(view().children(rows))
 }
@@ -581,7 +622,7 @@ pub fn ai_service() -> impl IntoElement {
             },
             vec![toolbar::button(
                 "back",
-                "Activity",
+                Page::Activity.title(),
                 Glyph::Back,
                 Icon::ChevronLeft,
                 move || store.page.set(Page::Activity),
@@ -641,16 +682,16 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
     let now_check = state.ai.checks.iter().find(|c| c.service == id);
     let reachable_now = now_check.map(|c| c.reachable);
     let (state_text, state_tone) = match reachable_now {
-        Some(true) => ("Reachable now", ui::success()),
-        Some(false) => ("Unreachable now", ui::chart_bad()),
-        None => ("Not checked yet", theme().muted_foreground),
+        Some(true) => (t!("stats.service.reachable_now"), ui::success()),
+        Some(false) => (t!("stats.service.unreachable_now"), ui::chart_bad()),
+        None => (t!("stats.service.not_checked"), theme().muted_foreground),
     };
     let days: Vec<Vec<(i64, Option<AiHour>)>> = hours.chunks(24).map(|c| c.to_vec()).collect();
     let grid_rows: Vec<(String, Vec<(Tone, String)>)> = days
         .iter()
         .map(|d| {
             let (_, _, w, _) = civil(d[0].0 + tz(d[0].0));
-            (WEEKDAYS[w].to_owned(), cells(d, 1))
+            (weekday(w), cells(d, 1))
         })
         .collect();
     let api_vals: Vec<Option<f64>> = hours
@@ -659,7 +700,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
         .collect();
     let tips: Vec<String> = hours
         .iter()
-        .map(|(h, _)| format!("{}, {}", day_long(*h), hour_text(*h)))
+        .map(|(h, _)| day_hour(*h))
         .collect();
     let labels: Vec<charts::XLabel> = hours
         .iter()
@@ -667,12 +708,12 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
         .filter(|(_, (h, _))| (h + tz(*h)).rem_euclid(DAY) / HOUR == 0)
         .map(|(i, (h, _))| {
             let (_, _, w, _) = civil(h + tz(*h));
-            (i, 24, WEEKDAYS[w].to_owned())
+            (i, 24, weekday(w))
         })
         .collect();
     let line = charts::lines(
         vec![Line {
-            name: "API response".into(),
+            name: t!("stats.service.api_response"),
             color: ui::chart_neutral,
             vals: api_vals.clone(),
             area: true,
@@ -715,60 +756,60 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                                 .child(ui::dot(move || state_tone))
                                 .child(ui::muted(state_text)),
                         )
-                        .child(ui::muted(format!("Goes through {goes}"))),
+                        .child(ui::muted(t!("stats.service.goes", goes = goes))),
                 ),
         )
         .child(stats_row(vec![
             stat(
-                    "Reachable, 7 days",
+                    &t!("stats.service.reachable_week"),
                     up.map_or("–".into(), |u| format!("{u:.1}%")),
                     if checks == 0 {
-                        "no checks yet".into()
+                        t!("stats.service.no_checks")
                     } else {
-                        format!("{} of {checks} checks failed", checks - passed)
+                        t!("stats.service.checks_failed", failed = checks - passed, checks = checks)
                     },
                 )
             .into_element(),
             stat(
-                    "API response, median",
+                    &t!("stats.service.api_median"),
                     med.map_or("–".into(), |m| format!("{m} ms")),
-                    p95.map_or("no answers yet".into(), |p| format!("95% under {p} ms")),
+                    p95.map_or(t!("stats.service.no_answers"), |p| t!("stats.service.p95", ms = p)),
                 )
             .into_element(),
             stat(
-                    "Country it sees",
+                    &t!("stats.service.country"),
                     countries
                         .last()
                         .map_or("–".into(), |c| kairo_core::ai_check::country_name(&c.1)),
                     match countries.len() {
-                        0 => "no answer yet".into(),
-                        1 => "no change this week".into(),
-                        n => format!("{} changes this week", n - 1),
+                        0 => t!("stats.service.no_answer"),
+                        1 => t!("stats.service.no_change"),
+                        n => t!("stats.service.changes", count = n - 1),
                     },
                 )
             .into_element(),
             stat(
-                    "Held open 90 s",
+                    &t!("stats.service.held"),
                     if holds == 0 {
                         "–".into()
                     } else {
-                        format!("{held} of {holds}")
+                        t!("stats.service.held_of", held = held, holds = holds)
                     },
                     if holds == 0 {
-                        "hourly test".into()
+                        t!("stats.service.hourly")
                     } else {
-                        format!("hourly test · {} dropped", holds - held)
+                        t!("stats.service.hourly_dropped", count = holds - held)
                     },
                 )
             .into_element(),
         ]))
         .child(
             card()
-                .child(heading("Was it reachable?", ""))
+                .child(heading(&t!("stats.service.was_reachable"), ""))
                 .child(charts::legend(vec![
-                    ("All checks passed".into(), ui::success()),
-                    ("Some failed".into(), ui::warning()),
-                    ("Mostly failed".into(), ui::chart_bad()),
+                    (t!("stats.service.all_passed"), ui::success()),
+                    (t!("stats.service.some_failed"), ui::warning()),
+                    (t!("stats.service.mostly_failed"), ui::chart_bad()),
                 ]))
                 .child(charts::grid(
                     grid_rows,
@@ -777,18 +818,18 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
         )
         .child(
             card()
-                .child(heading("API response time", "hourly median, last 7 days"))
+                .child(heading(&t!("stats.service.api_time"), t!("stats.service.api_time_sub")))
                 .child(if api_vals.iter().all(Option::is_none) {
-                    ui::muted("No API answers recorded yet.").into_element()
+                    ui::muted(t!("stats.service.no_api")).into_element()
                 } else {
                     line.into_element()
                 }),
         )
         .child(
             card()
-                .child(heading("Country it sees", ""))
+                .child(heading(&t!("stats.service.country"), ""))
                 .child(view().gap_1().children(if countries.is_empty() {
-                    vec![ui::muted("Nothing recorded yet.").into_element()]
+                    vec![ui::muted(t!("stats.service.nothing")).into_element()]
                 } else {
                     countries
                         .iter()
@@ -803,7 +844,7 @@ fn service_content(st: &Stats, state: &kairo_core::State, id: &'static str) -> i
                                         .w(px(120.0)),
                                 )
                                 .child(ui::body(kairo_core::ai_check::country_name(c)))
-                                .child(ui::muted(if i == 0 { "now" } else { "" }))
+                                .child(ui::muted(if i == 0 { t!("stats.service.now") } else { String::new() }))
                                 .into_element()
                         })
                         .collect()
@@ -828,7 +869,7 @@ pub fn quality(exit: usize) -> impl IntoElement {
                 .when(ui::phone(), |v| v.gap_2())
                 .child(view().when(!ui::phone(), |t| t.flex_1()))
                 .child(ui::segmented(
-                    vec![(false, "24 hours"), (true, "7 days")],
+                    vec![(false, t!("stats.range.day")), (true, range_title(Range::Week))],
                     move || week.get(),
                     move |w| week.set(w),
                 )),
@@ -847,8 +888,8 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
     let data = st.exit_hours(key, t, hours);
     if data.iter().all(|(_, h)| h.is_none()) {
         return charts::collecting(
-            "Collecting data",
-            "No readings yet",
+            &t!("stats.collecting.title"),
+            &t!("stats.quality.no_readings"),
         )
         .into_element();
     }
@@ -872,9 +913,9 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         .iter()
         .map(|(h, _)| {
             if week {
-                format!("{}, {}", day_long(*h), hour_text(*h))
+                day_hour(*h)
             } else {
-                format!("Today, {}", hour_text(*h))
+                t!("stats.tip.today_hour", hour = hour_text(*h))
             }
         })
         .collect();
@@ -886,7 +927,7 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
             if week {
                 (local.rem_euclid(DAY) / HOUR == 0).then(|| {
                     let (_, _, w, _) = civil(local);
-                    (i, 24, WEEKDAYS[w].to_owned())
+                    (i, 24, weekday(w))
                 })
             } else {
                 (i % 3 == 0).then(|| (i, 3, hour_text(*h).trim_end_matches(":00").to_owned()))
@@ -901,12 +942,11 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
                 .position(|(h, _)| s.at >= *h && s.at < *h + HOUR)?;
             Some(Mark {
                 at: i,
-                text: format!(
-                    "{} {} → {}",
-                    if s.auto { "Automatic:" } else { "You:" },
-                    s.from,
-                    s.to
-                ),
+                text: if s.auto {
+                    t!("stats.quality.switch_auto", from = s.from, to = s.to)
+                } else {
+                    t!("stats.quality.switch_you", from = s.from, to = s.to)
+                },
             })
         })
         .collect();
@@ -917,7 +957,7 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
     };
     let line = charts::lines(
         vec![Line {
-            name: "Response".into(),
+            name: t!("stats.quality.response"),
             color,
             vals: meds,
             area: true,
@@ -942,14 +982,14 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         .collect();
     let failed = charts::columns(
         vec![Ser {
-            name: "Failed tests".into(),
+            name: t!("stats.quality.failed"),
             color: ui::chart_bad,
         }],
         fail_cols,
         count_f,
         vec![],
         80.0,
-        "Failed tests per hour".into(),
+        t!("stats.quality.failed_per_hour"),
         1.0,
         2.0,
     );
@@ -962,38 +1002,38 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         .gap_3()
         .child(stats_row(vec![
             stat(
-                "Typical response",
+                &t!("stats.quality.typical"),
                 stats::median(all.clone()).map_or("–".into(), |m| format!("{m} ms")),
-                "median".into(),
+                t!("stats.quality.median"),
             )
             .into_element(),
-            stat("Failed tests", fails.to_string(), format!("of {tests}")).into_element(),
+            stat(&t!("stats.quality.failed"), fails.to_string(), t!("stats.quality.of_tests", tests = tests)).into_element(),
             stat(
-                "Changes",
+                &t!("stats.quality.changes"),
                 switches.len().to_string(),
                 if switches.is_empty() {
-                    "none".into()
+                    t!("stats.quality.none")
                 } else {
-                    format!("{by_you} by you · {} automatic", switches.len() - by_you)
+                    t!("stats.quality.by", you = by_you, auto = switches.len() - by_you)
                 },
             )
             .into_element(),
-            stat("Right now", node_now, String::new()).into_element(),
+            stat(&t!("stats.quality.right_now"), node_now, String::new()).into_element(),
         ]))
-        .child(heading("Response time", "hourly median"))
+        .child(heading(&t!("stats.quality.response_time"), t!("stats.quality.hourly_median")))
         .child(line)
-        .child(heading("Failed tests", "per hour"))
+        .child(heading(&t!("stats.quality.failed"), t!("stats.quality.per_hour")))
         .child(failed)
         .child(heading(
-            if exit == 0 {
-                "When the AI exit changed"
+            &if exit == 0 {
+                t!("stats.quality.ai_changed")
             } else {
-                "When it switched"
+                t!("stats.quality.switched")
             },
             "",
         ))
         .child(view().gap_1().children(if switches.is_empty() {
-            vec![ui::muted("No change in this time.").into_element()]
+            vec![ui::muted(t!("stats.quality.no_change")).into_element()]
         } else {
             switches
                 .iter()
@@ -1010,7 +1050,11 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
                                 .flex_1()
                                 .number_of_lines(1),
                         )
-                        .child(ui::muted(if s.auto { "automatic" } else { "you" }))
+                        .child(ui::muted(if s.auto {
+                            t!("stats.quality.automatic")
+                        } else {
+                            t!("stats.quality.you")
+                        }))
                         .into_element()
                 })
                 .collect()
@@ -1059,10 +1103,6 @@ pub fn usage(profile: &str) -> impl IntoElement {
     })
 }
 
-fn plural_days(n: i64) -> String {
-    format!("{n} day{}", if n == 1 { "" } else { "s" })
-}
-
 fn gb(b: f64) -> f64 {
     b / (1u64 << 30) as f64
 }
@@ -1081,7 +1121,7 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
     let t = now();
     let samples = st.usage_of(id);
     let Some(last) = samples.last() else {
-        return ui::muted("No usage recorded yet").into_element();
+        return ui::muted(t!("stats.usage.none")).into_element();
     };
     let proj = stats::project(&samples, t);
     let left = last.total.saturating_sub(last.used);
@@ -1091,13 +1131,16 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
     let expire = last.expire;
     let days_left = expire.map(|e| ((e - t) as f64 / DAY as f64).ceil().max(0.0) as i64);
     let pace_text = match (pace, runs_out, expire) {
-        (Some(_), Some(r), Some(e)) if r < e => Some(format!(
-            "At this pace it runs out {}, {} before it expires.",
-            day_text(r),
-            plural_days((e - r) / DAY)
-        )),
-        (Some(_), Some(_), Some(_)) => Some("At this pace it lasts until it expires.".to_owned()),
-        (Some(_), Some(r), None) => Some(format!("At this pace it runs out {}.", day_text(r))),
+        (Some(_), Some(r), Some(e)) if r < e => {
+            let days = (e - r) / DAY;
+            Some(t!(
+                &plural("stats.usage.runs_out_before", days.max(0) as u64),
+                date = day_text(r),
+                count = days
+            ))
+        }
+        (Some(_), Some(_), Some(_)) => Some(t!("stats.usage.lasts")),
+        (Some(_), Some(r), None) => Some(t!("stats.usage.runs_out", date = day_text(r))),
         _ => None,
     };
     let _ = (left, budget, days_left);
@@ -1151,12 +1194,12 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
         .map(|i| {
             vec![Mark {
                 at: i,
-                text: "Expires".into(),
+                text: t!("stats.usage.expires"),
             }]
         })
         .unwrap_or_default();
     let mut series = vec![Line {
-        name: "Used".into(),
+        name: t!("stats.usage.used"),
         color: ui::chart_ai,
         vals: used.clone(),
         area: true,
@@ -1164,7 +1207,7 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
     }];
     if pace.is_some() {
         series.push(Line {
-            name: "At this pace".into(),
+            name: t!("stats.usage.at_pace"),
             color: ui::chart_ai,
             vals: proj_vals,
             area: false,
@@ -1184,11 +1227,11 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
     view()
         .gap_2()
         .child(heading(
-            "Used so far",
+            &t!("stats.usage.title"),
             if pace.is_some() {
-                "solid: recorded · dashed: if the recent pace continues"
+                t!("stats.usage.legend")
             } else {
-                ""
+                String::new()
             },
         ))
         .child(pace_text.map(|t| {
@@ -1198,4 +1241,29 @@ fn usage_content(st: &Stats, id: &str) -> impl IntoElement {
         }))
         .child(line)
         .into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use kairo_core::i18n::text_in;
+
+    #[test]
+    fn a_bare_percent_stays_beside_an_argument() {
+        let ms = 420;
+        assert_eq!(text_in("en", "stats.service.p95", &[("ms", &ms)]), "95% under 420 ms");
+        assert_eq!(text_in("zh", "stats.service.p95", &[("ms", &ms)]), "95% 低于 420 ms");
+        let share = 42.0f64;
+        let args: [(&str, &dyn std::fmt::Display); 3] = [("total", &"1.2 GB"), ("ai", &"300 MB"), ("share", &share)];
+        assert_eq!(text_in("en", "stats.traffic.summary.today_share", &args), "1.2 GB today · AI 300 MB (42%)");
+        assert_eq!(text_in("zh", "stats.traffic.summary.today_share", &args), "今天 1.2 GB · AI 300 MB（42%）");
+    }
+
+    #[test]
+    fn chinese_dates_have_a_numeric_month() {
+        let day = 10;
+        let month = text_in("zh", "stats.month.nov", &[]);
+        assert_eq!(text_in("zh", "stats.date.day", &[("month", &month), ("day", &day)]), "11月10日");
+        let month = text_in("en", "stats.month.nov", &[]);
+        assert_eq!(text_in("en", "stats.date.day", &[("month", &month), ("day", &day)]), "Nov 10");
+    }
 }

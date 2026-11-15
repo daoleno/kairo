@@ -543,10 +543,11 @@ pub fn mac_proxy_of(text: &str) -> MacProxy {
     for line in text.lines() {
         if let Some((k, v)) = line.split_once(':') {
             let v = v.trim();
-            match k.trim() {
-                "Enabled" => p.enabled = v.eq_ignore_ascii_case("yes"),
-                "Server" => p.server = v.to_owned(),
-                "Port" => p.port = v.parse().unwrap_or(0),
+            // networksetup's own words (`Enabled: Yes`), in any case.
+            match k.trim().to_ascii_lowercase().as_str() {
+                "enabled" => p.enabled = v.eq_ignore_ascii_case("yes"),
+                "server" => p.server = v.to_owned(),
+                "port" => p.port = v.parse().unwrap_or(0),
                 _ => {}
             }
         }
@@ -684,7 +685,7 @@ pub fn enable(paths: &Paths, spec: &ProxySpec) -> Result<(), String> {
     let _lock = lock(paths);
     let b = backends();
     if !(b.gnome || b.kde.is_some() || b.mac || b.windows) {
-        return Err("This desktop has no system proxy Kairo can set".into());
+        return Err(crate::tr!("engine.sysproxy.unsupported"));
     }
     let mut saved = match load_saved(paths) {
         Some(s) => s,

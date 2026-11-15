@@ -135,7 +135,7 @@ pub fn quote_args(args: &[String]) -> Result<String, String> {
         // A quote, a line break, or a backslash right before the closing quote
         // (which would escape it) cannot be carried in a Windows command line.
         if a.contains('"') || a.contains('\0') || a.contains('\n') || a.ends_with('\\') {
-            return Err(format!("cannot pass {a:?} to the core host"));
+            return Err(crate::tr!("engine.elevated.cannot_pass", arg = format!("{a:?}")));
         }
         parts.push(format!("\"{a}\""));
     }
@@ -152,10 +152,16 @@ pub fn ps_quote(s: &str) -> String {
 /// quotes nothing, so the arguments go as one string, quoted here.
 pub fn elevation_script(exe: &str, args: &[String]) -> Result<String, String> {
     let line = quote_args(args)?;
+    // A line a piece (PowerShell, not words of Kairo's: tests/i18n-allow.txt).
     Ok(format!(
-        "$ErrorActionPreference='Stop'\n\
-         try {{ $p = Start-Process -FilePath {exe} -ArgumentList {line} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }}\n\
-         catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}\n",
+        concat!(
+            "$ErrorActionPreference='Stop'",
+            "\n",
+            "try {{ $p = Start-Process -FilePath {exe} -ArgumentList {line} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }}",
+            "\n",
+            "catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}",
+            "\n",
+        ),
         exe = ps_quote(exe),
         line = ps_quote(&line),
     ))
@@ -211,14 +217,40 @@ pub fn grant_matches(g: &Grant, e: &Expected) -> bool {
         && g.wintun.eq_ignore_ascii_case(&e.wintun)
 }
 
-/// `Cancelled` for what Windows says when the user closes the UAC prompt.
+/// The PowerShell that registers the task (`win::register_task`): what it runs
+/// and who may run it come in its environment (`K_HOST`, `K_ARGS`, `K_TASK`,
+/// `K_SDDL`). A line a piece (PowerShell, not words of Kairo's:
+/// tests/i18n-allow.txt).
+#[cfg_attr(not(windows), allow(dead_code))]
+const REGISTER_TASK: &str = concat!(
+    "$ErrorActionPreference = 'Stop'",
+    "\n",
+    "$a = New-ScheduledTaskAction -Execute $env:K_HOST -Argument $env:K_ARGS",
+    "\n",
+    "$p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest",
+    "\n",
+    "$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew",
+    "\n",
+    "Register-ScheduledTask -TaskName $env:K_TASK -Action $a -Principal $p -Settings $s -Force | Out-Null",
+    "\n",
+    "$svc = New-Object -ComObject Schedule.Service",
+    "\n",
+    "$svc.Connect()",
+    "\n",
+    "$t = $svc.GetFolder('\\').GetTask($env:K_TASK)",
+    "\n",
+    "$t.SetSecurityDescriptor($env:K_SDDL, 0)",
+    "\n",
+);
+
+/// The message for what Windows says when the user closes the UAC prompt (cancelled).
 pub fn explain_elevation_failure(stderr: &str) -> String {
     let s = stderr.trim();
     let l = s.to_ascii_lowercase();
     if l.contains("canceled by the user") || l.contains("cancelled by the user") || l.contains("1223") {
-        "Cancelled".into()
+        crate::tr!("engine.prompt.cancelled")
     } else if s.is_empty() {
-        "Windows did not give Kairo the permission".into()
+        crate::tr!("engine.elevated.not_granted")
     } else {
         s.lines().next().unwrap_or(s).to_owned()
     }
@@ -280,7 +312,7 @@ mod win {
             parse_whoami(&String::from_utf8_lossy(&out.stdout))
         })
         .clone()
-        .ok_or_else(|| "Could not tell which Windows user this is".to_owned())
+        .ok_or_else(|| crate::tr!("engine.elevated.unknown_user"))
     }
 
     pub fn bundle() -> Option<Bundle> {
@@ -362,7 +394,7 @@ mod win {
             let text = String::from_utf8_lossy(if out.stderr.is_empty() { &out.stdout } else { &out.stderr })
                 .trim()
                 .to_owned();
-            Err(format!("Windows would not start the core: {text}"))
+            Err(crate::tr!("engine.elevated.start_refused", error = text))
         }
     }
 
@@ -430,11 +462,9 @@ mod win {
     /// Asks for administrator approval (UAC) and has an elevated copy of Kairo
     /// do the one-time setup (`run_grant`).
     pub fn grant(paths: &Paths) -> Result<(), String> {
-        let b = bundle().ok_or(
-            "This copy of Kairo has no TUN helper next to it. Reinstall Kairo to get it back.",
-        )?;
+        let b = bundle().ok_or_else(|| crate::tr!("engine.elevated.no_helper"))?;
         let (user, sid) = current_user()?;
-        let exe = crate::paths::current_exe().ok_or("Cannot find Kairo's own program")?;
+        let exe = crate::paths::current_exe().ok_or_else(|| crate::tr!("engine.elevated.no_program"))?;
         let result = paths.state_dir().join("tun-grant-result.txt");
         let _ = std::fs::create_dir_all(paths.state_dir());
         let _ = std::fs::remove_file(&result);
@@ -470,7 +500,7 @@ mod win {
         child
             .stdin
             .take()
-            .ok_or("powershell: no input")?
+            .ok_or_else(|| crate::tr!("engine.elevated.powershell_no_input"))?
             .write_all(script.as_bytes())
             .map_err(|e| e.to_string())?;
         let out = child.wait_with_output().map_err(|e| e.to_string())?;
@@ -522,16 +552,7 @@ mod win {
     }
 
     fn register_task(name: &str, host: &Path, args: &[String], sid: &str) -> Result<(), String> {
-        let script = "\
-$ErrorActionPreference = 'Stop'\n\
-$a = New-ScheduledTaskAction -Execute $env:K_HOST -Argument $env:K_ARGS\n\
-$p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest\n\
-$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew\n\
-Register-ScheduledTask -TaskName $env:K_TASK -Action $a -Principal $p -Settings $s -Force | Out-Null\n\
-$svc = New-Object -ComObject Schedule.Service\n\
-$svc.Connect()\n\
-$t = $svc.GetFolder('\\').GetTask($env:K_TASK)\n\
-$t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
+        let script = REGISTER_TASK;
         let arguments = quote_args(args)?;
         let ps = system32("WindowsPowerShell\\v1.0\\powershell.exe");
         let mut child = quiet(&ps.to_string_lossy())
@@ -546,17 +567,21 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
         child
             .stdin
             .take()
-            .ok_or("no input")?
+            .ok_or_else(|| crate::tr!("engine.elevated.no_input"))?
             .write_all(script.as_bytes())
             .map_err(|e| e.to_string())?;
         let out = child.wait_with_output().map_err(|e| e.to_string())?;
         if out.status.success() && registered(Route::Task, name) {
             Ok(())
         } else {
-            Err(format!(
-                "scheduled task: {}",
-                String::from_utf8_lossy(&out.stderr).trim().lines().next().unwrap_or("failed")
-            ))
+            let said = String::from_utf8_lossy(&out.stderr);
+            let error = said
+                .trim()
+                .lines()
+                .next()
+                .map(str::to_owned)
+                .unwrap_or_else(|| crate::tr!("engine.elevated.failed"));
+            Err(crate::tr!("engine.elevated.task_failed", error = error))
         }
     }
 
@@ -582,11 +607,17 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
             &format!("Kairo core ({name})"),
         ])?;
         if !out.status.success() {
-            return Err(format!("service: {}", String::from_utf8_lossy(&out.stdout).trim()));
+            return Err(crate::tr!(
+                "engine.elevated.service_failed",
+                error = String::from_utf8_lossy(&out.stdout).trim()
+            ));
         }
         let out = run(&["sdset", name, &service_sddl(sid)])?;
         if !out.status.success() {
-            return Err(format!("service rights: {}", String::from_utf8_lossy(&out.stdout).trim()));
+            return Err(crate::tr!(
+                "engine.elevated.service_rights_failed",
+                error = String::from_utf8_lossy(&out.stdout).trim()
+            ));
         }
         Ok(())
     }
@@ -613,11 +644,11 @@ $t.SetSecurityDescriptor($env:K_SDDL, 0)\n";
             }
             code
         };
-        let get = |k: &str| o.get(k).cloned().ok_or_else(|| format!("--{k} is missing"));
+        let get = |k: &str| o.get(k).cloned().ok_or_else(|| crate::tr!("engine.elevated.arg_missing", name = k));
         let go = || -> Result<Route, String> {
             let (user, sid) = (get("user")?, get("sid")?);
             if !sid.starts_with("S-1-") || sid.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '-')) {
-                return Err("not a user SID".into());
+                return Err(crate::tr!("engine.elevated.not_a_sid"));
             }
             let (dir, config, log) = (get("dir")?, get("config")?, get("log")?);
             let name = object_name(&user);
@@ -837,6 +868,34 @@ mod tests {
         // What cannot be carried is refused, not mangled.
         assert!(elevation_script("e", &["a\\".to_string()]).is_err());
         assert!(elevation_script("e", &["a\"b".to_string()]).is_err());
+    }
+
+    #[test]
+    fn the_scripts_are_the_powershell_they_were_line_by_line() {
+        let script = elevation_script("k.exe", &["--a".to_string()]).unwrap();
+        assert_eq!(
+            script,
+            format!(
+                "$ErrorActionPreference='Stop'\n\
+                 try {{ $p = Start-Process -FilePath {exe} -ArgumentList {line} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }}\n\
+                 catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}\n",
+                exe = "'k.exe'",
+                line = "'\"--a\"'",
+            )
+        );
+        assert_eq!(
+            REGISTER_TASK,
+            "\
+$ErrorActionPreference = 'Stop'\n\
+$a = New-ScheduledTaskAction -Execute $env:K_HOST -Argument $env:K_ARGS\n\
+$p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest\n\
+$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew\n\
+Register-ScheduledTask -TaskName $env:K_TASK -Action $a -Principal $p -Settings $s -Force | Out-Null\n\
+$svc = New-Object -ComObject Schedule.Service\n\
+$svc.Connect()\n\
+$t = $svc.GetFolder('\\').GetTask($env:K_TASK)\n\
+$t.SetSecurityDescriptor($env:K_SDDL, 0)\n"
+        );
     }
 
     #[test]

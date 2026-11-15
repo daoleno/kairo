@@ -49,6 +49,12 @@ struct Session {
 
 /// The page's root.
 pub fn app() -> impl IntoElement {
+    // What Kairo says outside `t!` (the answers below) follows the language
+    // shown from the door on, before the pages tell it.
+    let shown = crate::i18n::shown();
+    effect(move || {
+        let _ = shown.get();
+    });
     let door = signal(Door::Asking);
     let machine = signal(String::new());
     let ask = move || {
@@ -153,7 +159,7 @@ fn lost_banner() -> impl IntoElement {
         .items_center()
         .bg(move || theme().muted)
         .child(
-            text("Reconnecting…")
+            text(t!("web.reconnecting"))
                 .text_size(px(size::small()))
                 .text_color(move || theme().muted_foreground),
         )
@@ -209,7 +215,7 @@ fn not_encrypted_marker() -> impl IntoElement {
         .gap_1p5()
         .child(ui::dot(ui::warning))
         .child(
-            text("Not encrypted")
+            text(t!("web.not_encrypted"))
                 .text_size(px(size::small()))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || ui::warning()),
@@ -225,7 +231,7 @@ fn centered(child: impl IntoElement) -> View {
         .child(child)
 }
 
-fn password_field(value: Signal<String>, placeholder: &'static str, new: bool) -> nsh_base::Input {
+fn password_field(value: Signal<String>, placeholder: impl Into<String>, new: bool) -> nsh_base::Input {
     ui::field(value, placeholder)
         .masked(true)
         .auto_fill(if new { AutoFill::NewPassword } else { AutoFill::Password })
@@ -236,17 +242,21 @@ fn password_field(value: Signal<String>, placeholder: &'static str, new: bool) -
 /// `kairo-server status` prints it), only its characters kept, and the
 /// keyboard told it is no word: capitals, no correction, no suggestions.
 fn code_field(code: Signal<String>) -> nsh_base::Input {
-    spawn(async { no_autocorrect(CODE_PLACEHOLDER) });
-    ui::shaped_field(code, CODE_PLACEHOLDER, setup_code::grouped)
+    // The field is found by its placeholder, in the language shown.
+    let placeholder = t!("web.setup.code");
+    {
+        let placeholder = placeholder.clone();
+        spawn(async move { no_autocorrect(&placeholder) });
+    }
+    let focused = placeholder.clone();
+    ui::shaped_field(code, placeholder, setup_code::grouped)
         .auto_capitalize(AutoCapitalize::Characters)
         .auto_correct(false)
         .auto_fill(AutoFill::Off)
-        .on_focus(|| no_autocorrect(CODE_PLACEHOLDER))
+        .on_focus(move || no_autocorrect(&focused))
         .h(px(36.0))
         .auto_focus(true)
 }
-
-const CODE_PLACEHOLDER: &str = "Setup code";
 
 /// Sets `autocorrect="off"` on the field shown with `placeholder`. Chrome
 /// tells Android's keyboard not to correct (and Gboard then offers no
@@ -286,18 +296,19 @@ fn setup(machine: Signal<String>, door: Signal<Door>) -> impl IntoElement {
         // Each problem names its field, top to bottom.
         let typed = setup_code::normalize(&c).chars().count();
         if typed != setup_code::LENGTH {
-            problem.set(Some(format!(
-                "The setup code has {} letters and digits; this has {typed}",
-                setup_code::LENGTH
+            problem.set(Some(kairo_core::tr!(
+                "web.setup.code_length",
+                length = setup_code::LENGTH,
+                typed = typed
             )));
             return;
         }
         if p.chars().count() < 8 {
-            problem.set(Some("The new password needs at least 8 characters".into()));
+            problem.set(Some(kairo_core::tr!("web.setup.password_short")));
             return;
         }
         if p != a {
-            problem.set(Some("The two new passwords differ".into()));
+            problem.set(Some(kairo_core::tr!("web.setup.passwords_differ")));
             return;
         }
         busy.set(true);
@@ -313,18 +324,21 @@ fn setup(machine: Signal<String>, door: Signal<Door>) -> impl IntoElement {
         });
     };
     centered(
-        panel("Set a password", machine)
+        panel(t!("web.setup.title"), machine)
             .child(
-                text("Enter the code Kairo printed when it started on this machine (kairo-server status shows it).")
+                text(t!("web.setup.hint"))
                     .text_size(px(size::small()))
                     .text_color(move || theme().muted_foreground),
             )
             .child(code_field(code))
-            .child(password_field(password, "New password", true))
-            .child(password_field(again, "New password again", true).on_submit(move |_: &str| submit()))
+            .child(password_field(password, t!("web.setup.new_password"), true))
+            .child(password_field(again, t!("web.setup.again"), true).on_submit(move |_: &str| submit()))
             .child(problem_line(problem))
             .child(
-                ui::btn(move || -> SharedString { if busy.get() { "Setting…".into() } else { "Set Password".into() } }, Variant::Primary)
+                ui::btn({
+                    let (setting, set) = (SharedString::from(t!("web.setup.busy")), SharedString::from(t!("web.setup.submit")));
+                    move || if busy.get() { setting.clone() } else { set.clone() }
+                }, Variant::Primary)
                     .disabled(move || busy.get())
                     .on_press(submit),
             ),
@@ -355,11 +369,14 @@ fn sign_in(machine: Signal<String>, door: Signal<Door>) -> impl IntoElement {
         });
     };
     centered(
-        panel("Sign in to Kairo", machine)
-            .child(password_field(password, "Password", false).auto_focus(true).on_submit(move |_: &str| submit()))
+        panel(t!("web.sign_in.title"), machine)
+            .child(password_field(password, t!("web.sign_in.password"), false).auto_focus(true).on_submit(move |_: &str| submit()))
             .child(problem_line(problem))
             .child(
-                ui::btn(move || -> SharedString { if busy.get() { "Signing in…".into() } else { "Sign In".into() } }, Variant::Primary)
+                ui::btn({
+                    let (signing, sign) = (SharedString::from(t!("web.sign_in.busy")), SharedString::from(t!("web.sign_in.submit")));
+                    move || if busy.get() { signing.clone() } else { sign.clone() }
+                }, Variant::Primary)
                     .disabled(move || busy.get())
                     .on_press(submit),
             ),
@@ -371,13 +388,13 @@ fn away(why: String, retry: impl Fn() + Copy + 'static) -> impl IntoElement {
         view()
             .gap_3()
             .items_center()
-            .child(ui::title("Kairo is not answering"))
+            .child(ui::title(t!("web.away.title")))
             .child(
                 text(why)
                     .text_size(px(size::small()))
                     .text_color(move || theme().muted_foreground),
             )
-            .child(ui::btn("Try Again", Variant::Secondary).on_press(retry)),
+            .child(ui::btn(t!("web.away.retry"), Variant::Secondary).on_press(retry)),
     )
 }
 
@@ -397,14 +414,14 @@ struct Problem {
 }
 
 async fn send(request: HttpRequest) -> Result<String, String> {
-    let response = fetch(request).await.map_err(|_| "Kairo is not answering".to_owned())?;
+    let response = fetch(request).await.map_err(|_| kairo_core::tr!("web.away.title"))?;
     let text = response.text();
     if response.ok() {
         Ok(text)
     } else {
         Err(serde_json::from_str::<Problem>(&text)
             .map(|p| p.error)
-            .unwrap_or_else(|_| format!("The server answered {}", response.status())))
+            .unwrap_or_else(|_| kairo_core::tr!("web.http_status", status = response.status())))
     }
 }
 

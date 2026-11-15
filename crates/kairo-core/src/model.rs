@@ -72,17 +72,6 @@ impl Group {
     pub fn selectable(&self) -> bool {
         self.kind == "Selector"
     }
-
-    pub fn kind_title(&self) -> &str {
-        match self.kind.as_str() {
-            "Selector" => "Select",
-            "URLTest" => "URL Test",
-            "Fallback" => "Fallback",
-            "LoadBalance" => "Load Balance",
-            "Relay" => "Relay",
-            other => other,
-        }
-    }
 }
 
 /// The groups of `/proxies`, in the order the config lists them (mihomo's
@@ -166,14 +155,15 @@ pub struct RawProvider {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Default, serde::Serialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct SubscriptionInfo {
-    #[serde(rename = "Upload", default)]
+    #[serde(default)]
     pub upload: u64,
-    #[serde(rename = "Download", default)]
+    #[serde(default)]
     pub download: u64,
-    #[serde(rename = "Total", default)]
+    #[serde(default)]
     pub total: u64,
-    #[serde(rename = "Expire", default)]
+    #[serde(default)]
     pub expire: i64,
 }
 
@@ -442,10 +432,11 @@ pub struct Connections {
 
 /// The answer of `/dns/query`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Default, serde::Serialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct DnsResponse {
-    #[serde(rename = "Status", default)]
+    #[serde(default)]
     pub status: i32,
-    #[serde(rename = "Answer", default)]
+    #[serde(default)]
     pub answer: Option<Vec<DnsAnswer>>,
 }
 
@@ -536,7 +527,7 @@ mod tests {
         assert_eq!(proxy.members[1].delay, Some(0));
         assert!(!proxy.members[1].alive);
         assert!(proxy.members[2].is_group);
-        assert_eq!(groups[0].kind_title(), "URL Test");
+        assert_eq!(groups[0].kind, "URLTest");
         assert!(groups[2].hidden);
     }
 

@@ -197,32 +197,106 @@ impl ProfileIndex {
 }
 
 /// Why a profile cannot be used, in words for the user.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ProfileError {
-    #[error("The file is empty")]
     Empty,
-    #[error("This looks like a base64 node list, not a Clash/mihomo config")]
     NodeList,
-    #[error("Not valid YAML: {0}")]
     Yaml(String),
     /// The provider answered with a message instead of a config (a login or
     /// "enable fetching" notice, an expired plan): its own words.
-    #[error("Your provider says: {0}")]
     Notice(String),
-    #[error("The config has no proxies, proxy providers or proxy groups")]
     NoProxies,
-    #[error("Download failed: {0}")]
     Download(String),
-    #[error("The server answered HTTP {0}")]
     Http(u16),
     /// Anything that went wrong with an address on this machine or its
     /// network: one answer, whatever it was (see [`download`]).
-    #[error("{PRIVATE_FAILED}")]
     Private,
 }
 
+impl std::fmt::Display for ProfileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            ProfileError::Empty => crate::tr!("model.profile.empty"),
+            ProfileError::NodeList => crate::tr!("model.profile.node_list"),
+            ProfileError::Yaml(e) => crate::tr!("model.profile.yaml", error = e),
+            ProfileError::Notice(n) => crate::tr!("model.profile.notice", notice = n),
+            ProfileError::NoProxies => crate::tr!("model.profile.no_proxies"),
+            ProfileError::Download(e) => crate::tr!("model.profile.download", error = e),
+            ProfileError::Http(status) => crate::tr!("model.profile.http", status = status),
+            ProfileError::Private => private_failed(),
+        };
+        f.write_str(&text)
+    }
+}
+
+impl std::error::Error for ProfileError {}
+
+/// The provider's own words in the text of a [`ProfileError::Notice`], in
+/// whichever language Kairo said it; `None` for any other text.
+pub fn provider_notice(text: &str) -> Option<&str> {
+    const MARK: &str = "\u{1}";
+    crate::_rust_i18n_available_locales().into_iter().find_map(|locale| {
+        let whole = crate::i18n::text_in(&locale, "model.profile.notice", &[("notice", &MARK)]);
+        let (before, after) = whole.split_once(MARK)?;
+        if before.is_empty() && after.is_empty() {
+            return None;
+        }
+        text.strip_prefix(before)?.strip_suffix(after)
+    })
+}
+
+/// What a subscription's failure was, from its error as the window gets it
+/// (text, in whichever language Kairo said it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Failure {
+    /// The address timed out or did not connect.
+    Unreachable,
+    /// A base64 node list, not a config.
+    NodeList,
+    /// Not valid YAML, or no proxies in it.
+    BadConfig,
+}
+
+/// The [`Failure`] an error's text tells of, if it is one.
+pub fn failure_of(text: &str) -> Option<Failure> {
+    if says(text, "model.profile.timed_out") || says(text, "model.profile.no_connect") {
+        Some(Failure::Unreachable)
+    } else if says(text, "model.profile.node_list") {
+        Some(Failure::NodeList)
+    } else if says(text, "model.profile.yaml") || says(text, "model.profile.no_proxies") {
+        Some(Failure::BadConfig)
+    } else {
+        None
+    }
+}
+
+/// Whether `text` has in it the message `key` in any language Kairo speaks:
+/// every piece of it around its `%{…}` (without the punctuation at its ends),
+/// case ignored.
+fn says(text: &str, key: &str) -> bool {
+    let low = text.to_lowercase();
+    crate::_rust_i18n_available_locales().iter().any(|locale| {
+        let message = crate::i18n::text_in(locale, key, &[]).to_lowercase();
+        let mut pieces = Vec::new();
+        let mut rest = message.as_str();
+        while let Some(i) = rest.find("%{") {
+            pieces.push(&rest[..i]);
+            rest = rest[i..].find('}').map_or("", |j| &rest[i + j + 1..]);
+        }
+        pieces.push(rest);
+        let pieces: Vec<&str> = pieces
+            .into_iter()
+            .map(|p| p.trim_matches(|c: char| c.is_whitespace() || ":：,，.。".contains(c)))
+            .filter(|p| !p.is_empty())
+            .collect();
+        !pieces.is_empty() && pieces.iter().all(|p| low.contains(p))
+    })
+}
+
 /// The one error a subscription on a private address gets.
-pub const PRIVATE_FAILED: &str = "No subscription could be read from that address";
+pub fn private_failed() -> String {
+    crate::tr!("model.profile.private")
+}
 
 /// The largest subscription read.
 pub const MAX_SUBSCRIPTION: usize = 16 * 1024 * 1024;
@@ -244,7 +318,8 @@ pub fn check_yaml_size(text: &str) -> Result<(), String> {
     use serde::de::{DeserializeSeed, Deserializer, EnumAccess, Error, MapAccess, SeqAccess, VariantAccess, Visitor};
     use std::cell::Cell;
 
-    const TOO_BIG: &str = "the YAML unfolds too far (its aliases repeat too much)";
+    // The mark of the count's own error among serde's (not shown).
+    const TOO_BIG: &str = "kairo-yaml-unfolds-too-far";
 
     #[derive(Clone, Copy)]
     struct Count<'a>(&'a Cell<usize>);
@@ -267,7 +342,7 @@ pub fn check_yaml_size(text: &str) -> Result<(), String> {
     impl<'de> Visitor<'de> for Count<'_> {
         type Value = ();
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.write_str("any YAML")
+            f.write_str(&crate::tr!("model.profile.any_yaml"))
         }
         fn visit_bool<E: Error>(self, _: bool) -> Result<(), E> {
             self.one()
@@ -316,10 +391,15 @@ pub fn check_yaml_size(text: &str) -> Result<(), String> {
     for doc in serde_yaml::Deserializer::from_str(text) {
         Count(&counted).deserialize(doc).map_err(|e| {
             let s = e.to_string();
-            if s.contains(TOO_BIG) { TOO_BIG.to_owned() } else { s }
+            if s.contains(TOO_BIG) { yaml_too_big() } else { s }
         })?;
     }
     Ok(())
+}
+
+/// What [`check_yaml_size`] says of a config that unfolds too far.
+fn yaml_too_big() -> String {
+    crate::tr!("model.profile.yaml_too_big")
 }
 
 /// Redirects followed, each checked.
@@ -365,7 +445,7 @@ pub fn inspect(text: &str) -> Result<ConfigStats, ProfileError> {
         return Err(ProfileError::Notice(notice_of(&strip_tags(trimmed))));
     }
     if let Err(e) = check_yaml_size(trimmed)
-        && e.contains("unfolds too far")
+        && e == yaml_too_big()
     {
         return Err(ProfileError::Yaml(e));
     }
@@ -387,7 +467,7 @@ pub fn inspect(text: &str) -> Result<ConfigStats, ProfileError> {
         } else if value.is_string() || looks_like_prose(trimmed) {
             ProfileError::Notice(notice_of(trimmed))
         } else {
-            ProfileError::Yaml("the top level is not a mapping".into())
+            ProfileError::Yaml(crate::tr!("model.profile.not_mapping"))
         });
     };
     let len = |key: &str| -> usize {
@@ -559,12 +639,12 @@ pub async fn download(
     proxy: Option<&str>,
     core: Option<&crate::controller::Controller>,
 ) -> Result<Download, ProfileError> {
-    let mut current = url::Url::parse(url).map_err(|_| ProfileError::Download("not a valid URL".into()))?;
+    let mut current = url::Url::parse(url).map_err(|_| ProfileError::Download(crate::tr!("model.profile.bad_url")))?;
     let mut private = false;
     let fail = |private: bool, e: ProfileError| if private { ProfileError::Private } else { e };
     for _ in 0..=MAX_REDIRECTS {
         if !matches!(current.scheme(), "http" | "https") {
-            return Err(fail(private, ProfileError::Download("redirected to an address that is not http or https".into())));
+            return Err(fail(private, ProfileError::Download(crate::tr!("model.profile.bad_redirect"))));
         }
         let (addrs, here) = addresses_of(&current, core).await;
         private |= here;
@@ -615,7 +695,7 @@ pub async fn download(
             return Err(fail(private, ProfileError::Http(response.status().as_u16())));
         }
         if response.content_length().is_some_and(|n| n > MAX_SUBSCRIPTION as u64) {
-            return Err(fail(private, ProfileError::Download("the subscription is larger than 16 MB".into())));
+            return Err(fail(private, ProfileError::Download(crate::tr!("model.profile.too_large"))));
         }
         let header = |name: &str| {
             response
@@ -636,7 +716,7 @@ pub async fn download(
             match response.chunk().await {
                 Ok(Some(chunk)) => {
                     if bytes.len() + chunk.len() > MAX_SUBSCRIPTION {
-                        return Err(fail(private, ProfileError::Download("the subscription is larger than 16 MB".into())));
+                        return Err(fail(private, ProfileError::Download(crate::tr!("model.profile.too_large"))));
                     }
                     bytes.extend_from_slice(&chunk);
                 }
@@ -657,15 +737,15 @@ pub async fn download(
             private,
         });
     }
-    Err(fail(private, ProfileError::Download("too many redirects".into())))
+    Err(fail(private, ProfileError::Download(crate::tr!("model.profile.redirects"))))
 }
 
 #[cfg(feature = "engine")]
 fn short_error(e: &reqwest::Error) -> String {
     if e.is_timeout() {
-        "timed out".into()
+        crate::tr!("model.profile.timed_out")
     } else if e.is_connect() {
-        "could not connect".into()
+        crate::tr!("model.profile.no_connect")
     } else {
         let mut text = e.to_string();
         let mut source = std::error::Error::source(e);
@@ -728,7 +808,7 @@ pub fn name_from_url(url: &str) -> String {
     url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
-        .unwrap_or_else(|| "Subscription".into())
+        .unwrap_or_else(|| crate::tr!("model.profile.default_name"))
 }
 
 /// A new profile id.
@@ -765,12 +845,30 @@ pub fn write_override(paths: &Paths, id: &str, text: &str) -> std::io::Result<()
 /// Reads a local file to import.
 pub fn read_import(path: &Path) -> Result<String, ProfileError> {
     let bytes = std::fs::read(path).map_err(|e| ProfileError::Download(e.to_string()))?;
-    String::from_utf8(bytes).map_err(|_| ProfileError::Yaml("the file is not UTF-8 text".into()))
+    String::from_utf8(bytes).map_err(|_| ProfileError::Yaml(crate::tr!("model.profile.not_utf8")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failures_are_read_in_either_language() {
+        use crate::i18n::text_in;
+        for lang in ["en", "zh"] {
+            let said = text_in(lang, "model.profile.notice", &[("notice", &"Plan expired")]);
+            assert_eq!(provider_notice(&said), Some("Plan expired"), "{said}");
+            let why = text_in(lang, "model.profile.no_connect", &[]);
+            let e = text_in(lang, "model.profile.download", &[("error", &why)]);
+            assert_eq!(failure_of(&e), Some(Failure::Unreachable), "{e}");
+            let e = text_in(lang, "model.profile.yaml", &[("error", &"x")]);
+            assert_eq!(failure_of(&e), Some(Failure::BadConfig), "{e}");
+        }
+        assert_eq!(failure_of("The profile is not valid YAML: x"), Some(Failure::BadConfig));
+        assert_eq!(failure_of("operation timed out"), Some(Failure::Unreachable));
+        assert_eq!(provider_notice("Download failed: x"), None);
+        assert_eq!(failure_of("something else"), None);
+    }
 
     #[test]
     fn parses_userinfo() {

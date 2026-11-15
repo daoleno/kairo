@@ -267,7 +267,8 @@ pub fn columns(
                     s.push_str(&format!("  ·  {} {}", series[k].name, fmt(*v)));
                 }
                 if c.vals.len() > 1 {
-                    s.push_str(&format!("  ·  Total {}", fmt(c.vals.iter().sum())));
+                    s.push_str("  ·  ");
+                    s.push_str(&t!("charts.total", value = fmt(c.vals.iter().sum())));
                 }
                 s
             }

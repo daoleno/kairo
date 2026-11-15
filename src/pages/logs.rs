@@ -6,11 +6,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use kairo_core::model::LogEntry;
-use kairo_core::{CoreStatus, State};
+use kairo_core::State;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
+use crate::i18n::plural;
+use crate::pages::settings::core_state_key;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, size};
@@ -26,7 +28,17 @@ fn rank(level: &str) -> u8 {
 }
 
 /// The levels the filter offers, lowest first.
-const LEVELS: [&str; 4] = ["Debug", "Info", "Warning", "Error"];
+fn levels() -> Vec<String> {
+    vec![
+        t!("logs.level.debug"),
+        t!("logs.level.info"),
+        t!("logs.level.warning"),
+        t!("logs.level.error"),
+    ]
+}
+
+/// How many levels the filter offers.
+const LEVEL_COUNT: usize = 4;
 
 pub fn page() -> impl IntoElement {
     let store = store();
@@ -71,7 +83,7 @@ pub fn page() -> impl IntoElement {
                 svc.user_home().as_deref(),
             ),
         });
-        ui::copy(store, text, "Diagnostics copied");
+        ui::copy(store, text, t!("logs.copied"));
     };
 
     view()
@@ -80,35 +92,31 @@ pub fn page() -> impl IntoElement {
             Page::Logs,
             move || {
                 let n = rows.with(|r| r.len());
-                let lines = if n == 1 {
-                    "1 line".to_owned()
-                } else {
-                    format!("{n} lines")
-                };
+                let lines = t!(&plural("logs.lines", n as u64), count = n);
                 if paused.with(Option::is_some) {
-                    format!("{lines} · paused")
+                    t!("logs.paused", lines = lines)
                 } else {
                     lines
                 }
             },
             vec![
                 crate::pages::settings::back(),
-                toolbar::search("logs.search", "Search the log", query),
+                toolbar::search("logs.search", t!("logs.tool.search"), query),
                 toolbar::choice(
                     "logs.level",
-                    "Level",
+                    t!("logs.tool.level"),
                     Glyph::Filter,
-                    LEVELS.to_vec(),
+                    levels(),
                     move || level.get(),
-                    move |i| level.set(i.min(LEVELS.len() - 1)),
+                    move |i| level.set(i.min(LEVEL_COUNT - 1)),
                 ),
                 toolbar::button_dyn(
                     "logs.pause",
                     move || {
                         if paused.with(Option::is_some) {
-                            "Resume"
+                            t!("logs.tool.resume")
                         } else {
-                            "Pause"
+                            t!("logs.tool.pause")
                         }
                     },
                     move || {
@@ -128,7 +136,7 @@ pub fn page() -> impl IntoElement {
                 ),
                 toolbar::button(
                     "logs.clear",
-                    "Clear",
+                    t!("logs.tool.clear"),
                     Glyph::Clear,
                     Icon::Trash,
                     move || {
@@ -138,7 +146,7 @@ pub fn page() -> impl IntoElement {
                 ),
                 toolbar::button(
                     "logs.copy",
-                    "Copy Diagnostics",
+                    t!("logs.tool.copy"),
                     Glyph::Copy,
                     Icon::File,
                     copy,
@@ -231,11 +239,11 @@ pub fn page() -> impl IntoElement {
                     Icon::Logs,
                     move || -> SharedString {
                         if !store.state.with(|s| s.core.is_running()) {
-                            "The core is not running".into()
+                            t!("logs.core_not_running").into()
                         } else if query.with(|q| !q.is_empty()) {
-                            "Nothing matches".into()
+                            t!("logs.nothing_matches").into()
                         } else {
-                            "No log lines".into()
+                            t!("logs.empty").into()
                         }
                     },
                     None,
@@ -254,17 +262,18 @@ fn header() -> impl IntoElement {
         store.svc().user_home().as_deref(),
     );
     let core_line = move || -> SharedString {
-        let (text, running) = store.state.with(|s| (core_text(s), s.core.is_running()));
+        let (text, running) = store.state.with(|s| (core_line_shown(s), s.core.is_running()));
         let memory = store.live.with(|l| l.memory);
         let ports = store.state.with(|s| {
-            format!(
-                "ports {} / {}",
-                s.settings.mixed_port, s.settings.controller_port
+            t!(
+                "logs.ports",
+                proxy = s.settings.mixed_port,
+                controller = s.settings.controller_port
             )
         });
         let mut line = text;
         if running && memory > 0 {
-            line.push_str(&format!(" · memory {}", kairo_core::bytes(memory)));
+            line.push_str(&format!(" · {}", t!("logs.memory", size = kairo_core::bytes(memory))));
         }
         format!("{line} · {ports}").into()
     };
@@ -274,14 +283,14 @@ fn header() -> impl IntoElement {
         .mt_3()
         .mb_2()
         .child(ui::setting_row_dyn(
-            "Core",
+            t!("logs.core"),
             core_line,
             ui::btn(
                 move || -> SharedString {
                     if running() {
-                        "Restart Core".into()
+                        t!("logs.restart_core").into()
                     } else {
-                        "Start Core".into()
+                        t!("logs.start_core").into()
                     }
                 },
                 Variant::Secondary,
@@ -297,8 +306,8 @@ fn header() -> impl IntoElement {
         .child(ui::divider().ml_4())
         .child(ui::setting_row_dyn(
             concat!("Kairo ", env!("CARGO_PKG_VERSION")),
-            move || -> SharedString { format!("data folder {shown_home}").into() },
-            ui::btn("Open Folder", Variant::Secondary).on_press(move || {
+            move || -> SharedString { t!("logs.data_folder", path = shown_home).into() },
+            ui::btn(t!("logs.open_folder"), Variant::Secondary).on_press(move || {
                 let home = home.clone();
                 spawn(async move {
                     let _ = open_path(home).await;
@@ -307,20 +316,24 @@ fn header() -> impl IntoElement {
         ))
 }
 
-/// "mihomo 1.19.18 (running)".
-fn core_text(s: &State) -> String {
-    let version = match &s.core_version {
+/// "mihomo 1.19.18".
+fn core_version(s: &State) -> String {
+    match &s.core_version {
         Some(v) => format!("mihomo {v}"),
         None => "mihomo".to_owned(),
-    };
-    let state = match &s.core {
-        CoreStatus::Running { .. } => "running",
-        CoreStatus::Starting => "starting",
-        CoreStatus::Stopping => "stopping",
-        CoreStatus::Stopped => "stopped",
-        CoreStatus::Failed { .. } => "stopped with an error",
-    };
-    format!("{version} · {state}")
+    }
+}
+
+/// "mihomo 1.19.18 · running", in the language shown.
+fn core_line_shown(s: &State) -> String {
+    format!("{} · {}", core_version(s), t!(core_state_key(&s.core)))
+}
+
+/// "mihomo 1.19.18 · running" for a report, which is in English: it goes to
+/// Kairo's maintainers with the core's English log lines.
+fn core_text(s: &State) -> String {
+    let state = kairo_core::i18n::text_in("en", core_state_key(&s.core), &[]);
+    format!("{} · {state}", core_version(s))
 }
 
 // --- Copy Diagnostics ----------------------------------------------------------------
@@ -367,16 +380,22 @@ fn hidden_strings(state: &State, kairo_home: Option<&str>, user_home: Option<&st
 fn diagnostics_text(r: &Report) -> String {
     let skip = r.lines.len().saturating_sub(DIAGNOSTIC_LINES);
     let lines = &r.lines[skip..];
-    let mut out = format!(
-        "Kairo {}\n{}\nSystem: {}\nPorts: proxy {}, controller {}\n\nThe last {} log line{} (oldest first; addresses, links and keys removed):\n",
-        r.kairo_version,
-        r.core,
-        r.os,
-        r.ports.0,
-        r.ports.1,
-        lines.len(),
-        if lines.len() == 1 { "" } else { "s" },
-    );
+    // In English: the report goes to Kairo's maintainers, with the core's
+    // English log lines.
+    let mut out = [
+        format!("Kairo {}", r.kairo_version),
+        r.core.clone(),
+        format!("System: {}", r.os),
+        format!("Ports: proxy {}, controller {}", r.ports.0, r.ports.1),
+        String::new(),
+        format!(
+            "The last {} log line{} (oldest first; addresses, links and keys removed):",
+            lines.len(),
+            if lines.len() == 1 { "" } else { "s" },
+        ),
+    ]
+    .join("\n");
+    out.push('\n');
     for l in lines {
         out.push_str(&format!(
             "{} {} {}\n",

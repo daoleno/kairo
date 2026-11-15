@@ -17,3 +17,371 @@ settings.language.zh:
 settings.about.licence:
   en: "Free software under the GPL-3.0. Flags: Twemoji, CC-BY 4.0."
   zh: "自由软件，以 GPL-3.0 授权。旗帜图标：Twemoji，CC-BY 4.0。"
+
+# Settings: the toolbar, the bar of unapplied changes, Back from an Inspect view.
+settings.back:
+  en: Back
+  zh: 返回
+settings.tab.general:
+  en: General
+  zh: 通用
+settings.tab.advanced:
+  en: Advanced
+  zh: 高级
+settings.applied:
+  en: Settings applied
+  zh: 设置已应用
+settings.unapplied:
+  en: Unapplied changes
+  zh: 有未应用的更改
+settings.revert:
+  en: Revert
+  zh: 还原
+settings.apply:
+  en: Apply
+  zh: 应用
+
+# The typed values, checked before they apply.
+settings.error.proxy_port:
+  en: The proxy port must be a port (1–65535)
+  zh: 代理端口必须是 1–65535 之间的端口号
+settings.error.controller_port:
+  en: The controller port must be a port (1–65535)
+  zh: 控制器端口必须是 1–65535 之间的端口号
+settings.error.secret_empty:
+  en: The controller secret can't be empty
+  zh: 控制器密钥不能为空
+settings.error.timeout:
+  en: The delay test timeout must be a number of milliseconds
+  zh: 测速超时必须是毫秒数
+
+# Settings › General.
+settings.appearance.title:
+  en: Appearance
+  zh: 外观
+settings.appearance.system:
+  en: System
+  zh: 跟随系统
+settings.appearance.light:
+  en: Light
+  zh: 浅色
+settings.appearance.dark:
+  en: Dark
+  zh: 深色
+settings.login.open:
+  en: Open at login
+  zh: 登录时打开
+settings.login.launch:
+  en: Launch at login
+  zh: 登录时打开
+settings.start_minimized:
+  en: Start minimized
+  zh: 启动时最小化
+settings.keep_running.menu_bar:
+  en: Keep running in the menu bar
+  zh: 在菜单栏中保持运行
+settings.keep_running.tray:
+  en: Keep running in the tray
+  zh: 在托盘中保持运行
+
+# Settings › General › Connection: how apps reach the proxy, and TUN's permission.
+settings.connection.title:
+  en: Connection
+  zh: 连接
+settings.connection.title_on:
+  en: "Connection on %{machine}"
+  zh: "%{machine} 的连接"
+settings.connection.apps_follow:
+  en: Apps follow
+  zh: 代理方式
+settings.connection.system:
+  en: System settings
+  zh: 系统设置
+settings.connection.tun:
+  en: Every app (TUN)
+  zh: 所有应用（TUN）
+settings.connection.no_sysproxy:
+  en: This desktop has no system proxy setting Kairo can use; choose Every app (TUN).
+  zh: 此电脑没有 Kairo 可用的系统代理设置，请选择所有应用（TUN）。
+settings.connection.no_sysproxy_on:
+  en: "%{machine} has no system proxy setting Kairo can use; choose Every app (TUN)."
+  zh: "%{machine} 没有 Kairo 可用的系统代理设置，请选择所有应用（TUN）。"
+settings.tun.granted:
+  en: Permission granted
+  zh: 已授予权限
+settings.tun.unsupported:
+  en: Every app (TUN) is not available on this system
+  zh: 此系统不支持所有应用（TUN）
+settings.tun.unsupported_on:
+  en: "Every app (TUN) is not available on %{machine}"
+  zh: "%{machine} 不支持所有应用（TUN）"
+settings.tun.install_core:
+  en: Install the core to use Every app (TUN)
+  zh: 请先安装内核，才能使用所有应用（TUN）
+settings.permission.title:
+  en: Every app permission
+  zh: TUN 权限
+settings.permission.install_core:
+  en: Install the core to use Every app (TUN).
+  zh: 请先安装内核，才能使用所有应用（TUN）。
+# A server: its owner runs the command there.
+settings.permission.run_on:
+  en: "Run on %{machine}: %{command}"
+  zh: "在 %{machine} 上运行：%{command}"
+settings.permission.run_on_it:
+  en: "Run on it: %{command}"
+  zh: "在该设备上运行：%{command}"
+settings.permission.unsupported:
+  en: Not available on this platform
+  zh: 此平台不可用
+settings.permission.granted:
+  en: Granted
+  zh: 已授权
+settings.permission.check_again:
+  en: Check Again
+  zh: 重新检查
+settings.permission.allow:
+  en: Allow
+  zh: 允许
+settings.permission.unavailable:
+  en: Unavailable
+  zh: 不可用
+
+# Settings › General › AI.
+settings.ai.title:
+  en: AI
+  zh: AI
+settings.ai.one_exit:
+  en: AI tools use one exit
+  zh: AI 工具使用同一出口
+settings.ai.domestic_direct:
+  en: Domestic AI goes direct
+  zh: 国内 AI 直连
+
+# Settings › General › Signed-in browsers (a server's page).
+settings.sessions.title:
+  en: Signed-in browsers
+  zh: 已登录的浏览器
+settings.sessions.sign_out:
+  en: Sign Out
+  zh: 退出登录
+settings.sessions.all_others:
+  en: All other browsers
+  zh: 其他所有浏览器
+settings.sessions.all_others_n:
+  en: "All %{count} other browsers"
+  zh: "其他全部 %{count} 个浏览器"
+settings.sessions.this_browser:
+  en: "This browser · %{address}"
+  zh: "此浏览器 · %{address}"
+settings.sessions.active_now:
+  en: active now
+  zh: 当前活跃
+settings.sessions.active_today:
+  en: active today
+  zh: 今天活跃
+settings.sessions.last_active:
+  en: "last active %{date}"
+  zh: "上次活跃于 %{date}"
+
+# Settings › General › About: the updater, in a line.
+settings.about.title:
+  en: About
+  zh: 关于
+settings.update.idle:
+  en: Updates
+  zh: 更新
+settings.update.checking:
+  en: Checking for updates…
+  zh: 正在检查更新…
+settings.update.up_to_date_at:
+  en: "Kairo is up to date · checked at %{time}"
+  zh: "Kairo 已是最新版本 · 检查于 %{time}"
+settings.update.downloading_progress:
+  en: "Downloading Kairo %{version} · %{percent}"
+  zh: "正在下载 Kairo %{version} · %{percent}"
+settings.update.downloading:
+  en: "Downloading Kairo %{version}…"
+  zh: "正在下载 Kairo %{version}…"
+settings.update.available:
+  en: "Kairo %{version} is available"
+  zh: "Kairo %{version} 现已推出"
+settings.update.ready:
+  en: "Kairo %{version} is ready"
+  zh: "Kairo %{version} 已准备就绪"
+settings.update.manual:
+  en: "Kairo %{version} is out (this copy cannot update itself)"
+  zh: "Kairo %{version} 已发布（此副本无法自动更新）"
+settings.update.installing:
+  en: "Installing Kairo %{version}…"
+  zh: "正在安装 Kairo %{version}…"
+settings.update.failed:
+  en: "Update failed: %{message}"
+  zh: "更新失败：%{message}"
+settings.update.check:
+  en: Check for Updates
+  zh: 检查更新
+settings.update.up_to_date:
+  en: Kairo is up to date
+  zh: Kairo 已是最新版本
+
+# Settings › Advanced: ports, the controller, delay tests, the config folder.
+settings.advanced.port:
+  en: Port (HTTP + SOCKS)
+  zh: 混合端口（HTTP + SOCKS）
+settings.advanced.allow_lan:
+  en: Allow other devices on the network
+  zh: 允许局域网设备连接
+settings.advanced.bypass:
+  en: Skip the proxy for
+  zh: 绕过代理
+settings.advanced.controller:
+  en: Controller
+  zh: 控制器
+settings.advanced.secret_placeholder:
+  en: secret
+  zh: 密钥
+settings.advanced.new_secret:
+  en: New Secret
+  zh: 生成新密钥
+settings.advanced.new_secret_made:
+  en: New secret made
+  zh: 已生成新密钥
+settings.advanced.show_secret:
+  en: Show secret
+  zh: 显示密钥
+settings.advanced.delay_test:
+  en: Delay test
+  zh: 测速
+settings.advanced.config_folder:
+  en: Config folder
+  zh: 配置文件夹
+settings.advanced.open_in_finder:
+  en: Open in Finder
+  zh: 在访达中打开
+settings.advanced.open_folder:
+  en: Open Folder
+  zh: 打开文件夹
+
+# Settings › Advanced › Core: mihomo's state ("mihomo 1.19.18 · running"), also
+# in Diagnostics.
+settings.core.title:
+  en: Core
+  zh: 内核
+settings.core.state.running:
+  en: running
+  zh: 运行中
+settings.core.state.starting:
+  en: starting
+  zh: 正在启动
+settings.core.state.stopping:
+  en: stopping
+  zh: 正在停止
+settings.core.state.stopped:
+  en: stopped
+  zh: 已停止
+settings.core.state.failed:
+  en: stopped with an error
+  zh: 因错误停止
+settings.core.own:
+  en: your own core
+  zh: 自定义内核
+settings.core.restart:
+  en: Restart
+  zh: 重启
+settings.core.use_kairos:
+  en: Use Kairo's
+  zh: 使用 Kairo 自带
+settings.core.custom:
+  en: Custom
+  zh: 自定义
+settings.core.choose_title:
+  en: Choose a mihomo binary
+  zh: 选择 mihomo 程序
+settings.core.choose:
+  en: Choose
+  zh: 选择
+
+# Settings › Advanced › GeoIP and GeoSite.
+settings.geo.title:
+  en: GeoIP and GeoSite
+  zh: GeoIP 与 GeoSite
+settings.geo.updated_on:
+  en: "Updated %{date}"
+  zh: "更新于 %{date}"
+settings.geo.not_downloaded:
+  en: Not downloaded yet
+  zh: 尚未下载
+settings.geo.updating:
+  en: Updating…
+  zh: 正在更新…
+settings.geo.update:
+  en: Update
+  zh: 更新
+settings.geo.updated:
+  en: GeoIP and GeoSite updated
+  zh: GeoIP 与 GeoSite 已更新
+
+# A day: "Nov 8", "Feb 29, 2024" (11月8日, 2024年2月29日).
+settings.date.this_year:
+  en: "%{month} %{day}"
+  zh: "%{month}%{day}日"
+settings.date.other_year:
+  en: "%{month} %{day}, %{year}"
+  zh: "%{year}年%{month}%{day}日"
+settings.date.month.jan:
+  en: Jan
+  zh: 1月
+settings.date.month.feb:
+  en: Feb
+  zh: 2月
+settings.date.month.mar:
+  en: Mar
+  zh: 3月
+settings.date.month.apr:
+  en: Apr
+  zh: 4月
+settings.date.month.may:
+  en: May
+  zh: 5月
+settings.date.month.jun:
+  en: Jun
+  zh: 6月
+settings.date.month.jul:
+  en: Jul
+  zh: 7月
+settings.date.month.aug:
+  en: Aug
+  zh: 8月
+settings.date.month.sep:
+  en: Sep
+  zh: 9月
+settings.date.month.oct:
+  en: Oct
+  zh: 10月
+settings.date.month.nov:
+  en: Nov
+  zh: 11月
+settings.date.month.dec:
+  en: Dec
+  zh: 12月
+
+# Settings › Advanced › Inspect.
+settings.inspect.title:
+  en: Inspect
+  zh: 查看
+settings.inspect.groups:
+  en: The subscription's groups
+  zh: 订阅的策略组
+settings.inspect.groups_count.one:
+  en: "%{count} group"
+  zh: "%{count} 个策略组"
+settings.inspect.groups_count.other:
+  en: "%{count} groups"
+  zh: "%{count} 个策略组"
+settings.inspect.show:
+  en: Show
+  zh: 查看
+settings.inspect.look_up:
+  en: Look Up
+  zh: 域名查询

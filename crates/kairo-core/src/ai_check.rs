@@ -93,24 +93,10 @@ pub fn parse_trace(body: &str) -> Option<(String, bool)> {
 /// A country code as a name, for the codes services report.
 pub fn country_name(code: &str) -> String {
     match code {
-        "US" => "United States",
-        "JP" => "Japan",
-        "SG" => "Singapore",
-        "HK" => "Hong Kong",
-        "TW" => "Taiwan",
-        "KR" => "South Korea",
-        "DE" => "Germany",
-        "GB" => "United Kingdom",
-        "FR" => "France",
-        "NL" => "Netherlands",
-        "CA" => "Canada",
-        "AU" => "Australia",
-        "IN" => "India",
-        "CN" => "China",
-        "RU" => "Russia",
-        other => other,
+        "US" | "JP" | "SG" | "HK" | "TW" | "KR" | "DE" | "GB" | "FR" | "NL" | "CA" | "AU"
+        | "IN" | "CN" | "RU" => crate::places::code_title(code).unwrap_or_else(|| code.to_owned()),
+        other => other.to_owned(),
     }
-    .to_owned()
 }
 
 #[cfg(feature = "engine")]
@@ -150,7 +136,7 @@ pub async fn check_service(
             service: service.id,
             reachable: false,
             api: Api::Unreachable {
-                why: "no proxy client".into(),
+                why: crate::tr!("model.ai_check.no_client"),
             },
             country: Country::Unknown,
             at: now,
@@ -201,11 +187,11 @@ pub async fn check_service(
 #[cfg(feature = "engine")]
 fn short(e: &reqwest::Error) -> String {
     if e.is_timeout() {
-        "no answer in 12 s".into()
+        crate::tr!("model.ai_check.timed_out")
     } else if e.is_connect() {
-        "could not connect".into()
+        crate::tr!("model.ai_check.no_connect")
     } else {
-        "the connection failed".into()
+        crate::tr!("model.ai_check.failed")
     }
 }
 
@@ -320,7 +306,7 @@ pub async fn hold(
 ) -> Hold {
     let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{proxy_port}")) else {
         return Hold::Failed {
-            why: "no proxy client".into(),
+            why: crate::tr!("model.ai_check.no_client"),
         };
     };
     let Ok(http) = reqwest::Client::builder()
@@ -333,7 +319,7 @@ pub async fn hold(
         .build()
     else {
         return Hold::Failed {
-            why: "no proxy client".into(),
+            why: crate::tr!("model.ai_check.no_client"),
         };
     };
     let url = format!("https://{host}{path}");
@@ -352,7 +338,7 @@ pub async fn hold(
     }
     let Some(id) = id else {
         return Hold::Failed {
-            why: "the core did not list the connection".into(),
+            why: crate::tr!("model.ai_check.not_listed"),
         };
     };
     if let Err(after) = watch_alive(secs, Duration::from_secs(3), || alive(&id)).await {

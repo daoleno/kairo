@@ -375,7 +375,11 @@ fn every_key_the_code_names_exists_and_every_key_is_named() {
     // A key may also be named as a literal handed on (a table of keys): one
     // in a namespace of the catalog must be in it.
     let namespaces: BTreeSet<&str> = catalog.keys().filter_map(|k| k.split('.').next()).collect();
-    let files = [".json", ".yml", ".yaml", ".toml", ".txt", ".log", ".svg", ".png", ".rs"];
+    // File names and domains are no keys.
+    let files = [
+        ".json", ".yml", ".yaml", ".toml", ".txt", ".log", ".svg", ".png", ".rs", ".com", ".net",
+        ".org", ".dev", ".io", ".ai", ".app", ".cn", ".co", ".so", ".me", ".gg", ".im", ".sh",
+    ];
     for lit in &literals {
         let t = lit.text.as_str();
         let key_like = t.contains('.')
@@ -408,17 +412,21 @@ fn every_key_the_code_names_exists_and_every_key_is_named() {
     assert!(problems.is_empty(), "keys:\n  {}", problems.join("\n  "));
 }
 
-/// The literals that may stay in the code, with why (`tests/i18n-allow.txt`).
-fn allowed() -> BTreeSet<String> {
+/// The literals that may stay in the code, by file, with why
+/// (`tests/i18n-allow.txt`: file, tab, literal, tab, reason). An entry holds
+/// in its own file only, so it never hides the same words shown elsewhere.
+fn allowed() -> BTreeSet<(String, String)> {
     let text = fs::read_to_string(root().join("tests/i18n-allow.txt")).unwrap();
     text.lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
         .map(|l| {
-            let (literal, why) = l.split_once('\t').unwrap_or_else(|| {
-                panic!("tests/i18n-allow.txt: `{l}` needs a tab and a reason")
-            });
+            let mut parts = l.splitn(3, '\t');
+            let (file, literal, why) = (parts.next(), parts.next(), parts.next());
+            let (Some(file), Some(literal), Some(why)) = (file, literal, why) else {
+                panic!("tests/i18n-allow.txt: `{l}` needs a file, a literal and a reason, tab-separated")
+            };
             assert!(!why.trim().is_empty(), "tests/i18n-allow.txt: `{literal}` needs a reason");
-            literal.to_owned()
+            (file.to_owned(), literal.to_owned())
         })
         .collect()
 }
@@ -503,15 +511,16 @@ fn no_text_a_person_reads_is_written_in_the_code() {
         if !reads_as_text(&lit.text) || exempt_context(&lit.before) {
             continue;
         }
-        if allowed.contains(&lit.text) {
-            used.insert(lit.text.clone());
+        let entry = (lit.file.replace('\\', "/"), lit.text.clone());
+        if allowed.contains(&entry) {
+            used.insert(entry);
             continue;
         }
         problems.push(format!("{}:{}: {:?}", lit.file, lit.line, lit.text));
     }
-    for literal in &allowed {
-        if !used.contains(literal) {
-            problems.push(format!("tests/i18n-allow.txt: {literal:?} is in the code no more"));
+    for entry in &allowed {
+        if !used.contains(entry) {
+            problems.push(format!("tests/i18n-allow.txt: {:?} is in {} no more", entry.1, entry.0));
         }
     }
     assert!(

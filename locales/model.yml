@@ -1,0 +1,385 @@
+_version: 2
+
+# Places: countries and regions a server is in (Exits, Apps & Sites, the tray, the AI checks).
+model.places.hk:
+  en: "Hong Kong"
+  zh: "香港"
+model.places.tw:
+  en: "Taiwan"
+  zh: "台湾"
+model.places.jp:
+  en: "Japan"
+  zh: "日本"
+model.places.sg:
+  en: "Singapore"
+  zh: "新加坡"
+model.places.us:
+  en: "United States"
+  zh: "美国"
+model.places.kr:
+  en: "South Korea"
+  zh: "韩国"
+model.places.gb:
+  en: "United Kingdom"
+  zh: "英国"
+model.places.de:
+  en: "Germany"
+  zh: "德国"
+model.places.fr:
+  en: "France"
+  zh: "法国"
+model.places.nl:
+  en: "Netherlands"
+  zh: "荷兰"
+model.places.ca:
+  en: "Canada"
+  zh: "加拿大"
+model.places.au:
+  en: "Australia"
+  zh: "澳大利亚"
+model.places.in:
+  en: "India"
+  zh: "印度"
+model.places.ru:
+  en: "Russia"
+  zh: "俄罗斯"
+model.places.tr:
+  en: "Türkiye"
+  zh: "土耳其"
+model.places.my:
+  en: "Malaysia"
+  zh: "马来西亚"
+model.places.th:
+  en: "Thailand"
+  zh: "泰国"
+model.places.vn:
+  en: "Vietnam"
+  zh: "越南"
+model.places.ph:
+  en: "Philippines"
+  zh: "菲律宾"
+model.places.id:
+  en: "Indonesia"
+  zh: "印度尼西亚"
+model.places.ar:
+  en: "Argentina"
+  zh: "阿根廷"
+model.places.br:
+  en: "Brazil"
+  zh: "巴西"
+model.places.mo:
+  en: "Macao"
+  zh: "澳门"
+model.places.ae:
+  en: "United Arab Emirates"
+  zh: "阿联酋"
+model.places.it:
+  en: "Italy"
+  zh: "意大利"
+model.places.es:
+  en: "Spain"
+  zh: "西班牙"
+model.places.ch:
+  en: "Switzerland"
+  zh: "瑞士"
+model.places.se:
+  en: "Sweden"
+  zh: "瑞典"
+model.places.mx:
+  en: "Mexico"
+  zh: "墨西哥"
+model.places.cn:
+  en: "China"
+  zh: "中国"
+model.places.other:
+  en: "Other"
+  zh: "其他"
+
+# AI services that go by another name in Chinese.
+model.ai.domestic.doubao:
+  en: "Doubao"
+  zh: "豆包"
+model.ai.domestic.tongyi:
+  en: "Tongyi"
+  zh: "通义"
+model.ai.domestic.zhipu:
+  en: "Zhipu"
+  zh: "智谱"
+model.ai.domestic.yuanbao:
+  en: "Yuanbao"
+  zh: "元宝"
+model.ai.domestic.ernie:
+  en: "Ernie"
+  zh: "文心一言"
+
+# The AI check: why a service or a held connection was not reached.
+model.ai_check.no_client:
+  en: "no proxy client"
+  zh: "无法创建代理客户端"
+model.ai_check.timed_out:
+  en: "no answer in 12 s"
+  zh: "12 秒内无响应"
+model.ai_check.no_connect:
+  en: "could not connect"
+  zh: "无法连接"
+model.ai_check.failed:
+  en: "the connection failed"
+  zh: "连接失败"
+model.ai_check.not_listed:
+  en: "the core did not list the connection"
+  zh: "内核未列出该连接"
+
+# Subscriptions: why one cannot be used or downloaded.
+model.profile.empty:
+  en: "The file is empty"
+  zh: "文件为空"
+model.profile.node_list:
+  en: "This looks like a base64 node list, not a Clash/mihomo config"
+  zh: "这看起来是 base64 节点列表，而不是 Clash/mihomo 配置"
+model.profile.yaml:
+  en: "Not valid YAML: %{error}"
+  zh: "不是有效的 YAML：%{error}"
+model.profile.notice:
+  en: "Your provider says: %{notice}"
+  zh: "服务商提示：%{notice}"
+model.profile.no_proxies:
+  en: "The config has no proxies, proxy providers or proxy groups"
+  zh: "配置中没有代理、代理集合或策略组"
+model.profile.download:
+  en: "Download failed: %{error}"
+  zh: "下载失败：%{error}"
+model.profile.http:
+  en: "The server answered HTTP %{status}"
+  zh: "服务器返回 HTTP %{status}"
+model.profile.private:
+  en: "No subscription could be read from that address"
+  zh: "无法从该地址读取订阅"
+model.profile.yaml_too_big:
+  en: "the YAML unfolds too far (its aliases repeat too much)"
+  zh: "YAML 展开后过大（别名重复过多）"
+model.profile.any_yaml:
+  en: "any YAML"
+  zh: "任意 YAML"
+model.profile.not_mapping:
+  en: "the top level is not a mapping"
+  zh: "顶层不是映射"
+model.profile.bad_url:
+  en: "not a valid URL"
+  zh: "不是有效的 URL"
+model.profile.bad_redirect:
+  en: "redirected to an address that is not http or https"
+  zh: "被重定向到非 http 或 https 的地址"
+model.profile.too_large:
+  en: "the subscription is larger than 16 MB"
+  zh: "订阅超过 16 MB"
+model.profile.redirects:
+  en: "too many redirects"
+  zh: "重定向次数过多"
+model.profile.timed_out:
+  en: "timed out"
+  zh: "连接超时"
+model.profile.no_connect:
+  en: "could not connect"
+  zh: "无法连接"
+model.profile.not_utf8:
+  en: "the file is not UTF-8 text"
+  zh: "文件不是 UTF-8 文本"
+model.profile.default_name:
+  en: "Subscription"
+  zh: "订阅"
+
+# Apps & Sites: the app or site of a route, and its server, checked.
+model.routes.app_empty:
+  en: "Enter the app's name"
+  zh: "请输入应用名称"
+model.routes.app_too_long:
+  en: "That app name is too long"
+  zh: "应用名称过长"
+model.routes.app_comma:
+  en: "An app name cannot contain a comma"
+  zh: "应用名称不能包含逗号"
+model.routes.app_control:
+  en: "An app name cannot contain line breaks or control characters"
+  zh: "应用名称不能包含换行符或控制字符"
+model.routes.app_path:
+  en: "Use the app's name, not its path"
+  zh: "请使用应用名称，而不是路径"
+model.routes.site_scheme:
+  en: "Enter only the site's name, without http:// or https://"
+  zh: "只需输入域名，不要带 http:// 或 https://"
+model.routes.site_empty:
+  en: "Enter the site's name"
+  zh: "请输入域名"
+model.routes.site_spaces:
+  en: "A site name cannot contain spaces"
+  zh: "域名不能包含空格"
+model.routes.site_path:
+  en: "Enter only the site's name, without a path"
+  zh: "只需输入域名，不要带路径"
+model.routes.site_port:
+  en: "Enter only the site's name, without a port or a user"
+  zh: "只需输入域名，不要带端口或用户名"
+model.routes.site_wildcard:
+  en: "A site name cannot contain commas or wildcards"
+  zh: "域名不能包含逗号或通配符"
+model.routes.site_invalid:
+  en: "That is not a site name"
+  zh: "这不是有效的域名"
+model.routes.site_too_long:
+  en: "That site name is too long"
+  zh: "域名过长"
+model.routes.site_not_name:
+  en: "That is not a site name (like example.com)"
+  zh: "这不是有效的域名（例如 example.com）"
+model.routes.site_address:
+  en: "Use a site's name, not an address"
+  zh: "请使用域名，而不是 IP 地址"
+model.routes.target_empty:
+  en: "Choose a server"
+  zh: "请选择节点"
+model.routes.target_invalid:
+  en: "That server's name has a comma or a line break, which a route cannot use"
+  zh: "该节点名称包含逗号或换行符，无法用于路由"
+
+# The connection's state (the sidebar, the toolbar), and the core's (kairo-server status).
+model.view.not_connected:
+  en: "Not Connected"
+  zh: "未连接"
+model.view.connecting:
+  en: "Connecting"
+  zh: "正在连接"
+model.view.connected:
+  en: "Connected"
+  zh: "已连接"
+model.view.disconnecting:
+  en: "Disconnecting"
+  zh: "正在断开"
+model.view.failed:
+  en: "Couldn't Connect"
+  zh: "无法连接"
+model.view.not_set_up:
+  en: "Not Set Up"
+  zh: "未设置"
+model.view.core.stopped:
+  en: "Stopped"
+  zh: "已停止"
+model.view.core.starting:
+  en: "Starting"
+  zh: "正在启动"
+model.view.core.running:
+  en: "Running"
+  zh: "运行中"
+model.view.core.stopping:
+  en: "Stopping"
+  zh: "正在停止"
+model.view.core.failed:
+  en: "Stopped with an error"
+  zh: "因错误停止"
+
+# Routing modes: mihomo's name, and the route's in Kairo's words.
+model.settings.mode.rule:
+  en: "Rule"
+  zh: "规则"
+model.settings.mode.global:
+  en: "Global"
+  zh: "全局"
+model.settings.mode.direct:
+  en: "Direct"
+  zh: "直连"
+model.settings.route.smart:
+  en: "Smart"
+  zh: "智能分流"
+model.settings.route.all:
+  en: "All Traffic"
+  zh: "全局"
+model.settings.route.direct:
+  en: "Direct"
+  zh: "直连"
+
+# Settings that would stop the core from starting.
+model.settings.error.ports:
+  en: "Ports must be between 1 and 65535"
+  zh: "端口必须在 1 到 65535 之间"
+model.settings.error.same_port:
+  en: "The proxy port and the controller port must differ"
+  zh: "代理端口与控制器端口不能相同"
+model.settings.error.timeout:
+  en: "The delay test timeout is too short"
+  zh: "测速超时时间过短"
+model.settings.error.test_url:
+  en: "The delay test URL is not a URL"
+  zh: "测速地址不是有效的 URL"
+model.settings.error.tun_stack:
+  en: "Unknown TUN stack"
+  zh: "未知的 TUN 协议栈"
+
+# Activity: where a connection leaves, and a tool no process is known for.
+model.activity.exit.ai:
+  en: "AI exit"
+  zh: "AI 出口"
+model.activity.exit.rest:
+  en: "Everything else"
+  zh: "其他流量"
+model.activity.exit.downloads:
+  en: "Downloads"
+  zh: "下载"
+model.activity.exit.direct:
+  en: "Direct"
+  zh: "直连"
+model.activity.exit.blocked:
+  en: "Blocked"
+  zh: "已拦截"
+model.activity.exit.local_phone:
+  en: "On this phone"
+  zh: "本机"
+model.activity.exit.local_computer:
+  en: "On this computer"
+  zh: "本机"
+model.activity.unknown_tool:
+  en: "Unknown"
+  zh: "未知"
+
+# Statistics: the exits traffic is counted under, the ranges of a chart, the apps summed.
+model.stats.slot.ai:
+  en: "AI"
+  zh: "AI"
+model.stats.slot.rest:
+  en: "Everything else"
+  zh: "其他流量"
+model.stats.slot.downloads:
+  en: "Downloads"
+  zh: "下载"
+model.stats.slot.direct:
+  en: "Direct"
+  zh: "直连"
+model.stats.range.today:
+  en: "Today"
+  zh: "今天"
+model.stats.range.week:
+  en: "7 days"
+  zh: "7 天"
+model.stats.range.month:
+  en: "30 days"
+  zh: "30 天"
+model.stats.other_apps:
+  en: "Other"
+  zh: "其他"
+
+# The Downloads exit's mirror test.
+model.downloads.mirror_refused:
+  en: "Test the mirror first: it can be turned on once it has answered through the Downloads exit"
+  zh: "请先测试镜像：镜像通过下载出口响应后才能开启"
+model.downloads.too_little:
+  en: "The mirror answered with too little to measure"
+  zh: "镜像返回的数据太少，无法测速"
+model.downloads.no_answer:
+  en: "The mirror did not answer through the Downloads exit"
+  zh: "镜像未通过下载出口响应"
+model.downloads.slower:
+  en: "The mirror is slower than Hugging Face through this exit (%{mirror} ms against %{origin} ms)"
+  zh: "通过此出口，镜像比 Hugging Face 慢（%{mirror} ms 对比 %{origin} ms）"
+
+# GeoIP and GeoSite downloads: a source that sent too little.
+model.geo.too_small:
+  en: "%{source}: only %{bytes} bytes"
+  zh: "%{source}：只有 %{bytes} 字节"

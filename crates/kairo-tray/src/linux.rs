@@ -56,7 +56,7 @@ impl ksni::Tray for KairoTray {
         let mut items: Vec<MenuItem<Self>> = vec![
             CheckmarkItem {
                 label: if m.running {
-                    "Connected".into()
+                    kairo_core::tr!("tray.status.connected")
                 } else {
                     m.status.clone()
                 },
@@ -84,7 +84,7 @@ impl ksni::Tray for KairoTray {
             if let Some(on) = e.fastest {
                 sub.push(
                     CheckmarkItem {
-                        label: "Fastest".into(),
+                        label: kairo_core::tr!("tray.fastest"),
                         checked: on,
                         activate: Box::new(|t: &mut Self| act::locate(&t.svc, String::new())),
                         ..Default::default()
@@ -130,7 +130,7 @@ impl ksni::Tray for KairoTray {
             sub.push(MenuItem::Separator);
             sub.push(
                 StandardItem {
-                    label: "All Servers…".into(),
+                    label: kairo_core::tr!("tray.all_servers"),
                     activate: Box::new(|t: &mut Self| (t.hooks.page)("exits")),
                     ..Default::default()
                 }
@@ -138,7 +138,7 @@ impl ksni::Tray for KairoTray {
             );
             sub.push(
                 StandardItem {
-                    label: "Test Again".into(),
+                    label: kairo_core::tr!("tray.test_again"),
                     activate: Box::new(|t: &mut Self| act::test_again(&t.svc)),
                     ..Default::default()
                 }
@@ -146,7 +146,7 @@ impl ksni::Tray for KairoTray {
             );
             items.push(
                 SubMenu {
-                    label: format!("{}: {}", e.title, e.place).replace('_', "__"),
+                    label: Model::exit_line(e).replace('_', "__"),
                     submenu: sub,
                     ..Default::default()
                 }
@@ -161,7 +161,7 @@ impl ksni::Tray for KairoTray {
                 options: Mode::ALL
                     .iter()
                     .map(|x| RadioItem {
-                        label: format!("Mode: {}", Model::route_title(*x)),
+                        label: kairo_core::tr!("tray.mode.line", mode = Model::route_title(*x)),
                         ..Default::default()
                     })
                     .collect(),
@@ -171,7 +171,7 @@ impl ksni::Tray for KairoTray {
         items.push(MenuItem::Separator);
         items.push(
             StandardItem {
-                label: "Open Kairo".into(),
+                label: kairo_core::tr!("tray.open"),
                 icon_name: "window-new-symbolic".into(),
                 activate: Box::new(|t: &mut Self| (t.hooks.show)()),
                 ..Default::default()
@@ -180,7 +180,7 @@ impl ksni::Tray for KairoTray {
         );
         items.push(
             StandardItem {
-                label: "Settings…".into(),
+                label: kairo_core::tr!("tray.settings"),
                 icon_name: "emblem-system-symbolic".into(),
                 activate: Box::new(|t: &mut Self| (t.hooks.page)("settings")),
                 ..Default::default()
@@ -189,7 +189,7 @@ impl ksni::Tray for KairoTray {
         );
         items.push(
             StandardItem {
-                label: "Quit Kairo".into(),
+                label: kairo_core::tr!("tray.quit"),
                 icon_name: "application-exit-symbolic".into(),
                 activate: Box::new(|t: &mut Self| (t.hooks.quit)()),
                 ..Default::default()
@@ -220,12 +220,20 @@ pub fn start(svc: Service, hooks: Hooks) -> Result<(), String> {
             }
         };
         let (mut state, mut live, mut proxies) = (svc.state(), svc.live(), svc.proxies());
+        // A new language is a new menu (the model knows the language it is in).
+        let mut language = kairo_core::i18n::watch();
+        // The first pass: the language may have changed while the tray started.
+        let mut first = true;
         loop {
-            tokio::select! {
-                r = state.changed() => if r.is_err() { break },
-                r = live.changed() => if r.is_err() { break },
-                r = proxies.changed() => if r.is_err() { break },
+            if !first {
+                tokio::select! {
+                    r = state.changed() => if r.is_err() { break },
+                    r = live.changed() => if r.is_err() { break },
+                    r = proxies.changed() => if r.is_err() { break },
+                    r = language.changed() => if r.is_err() { break },
+                }
             }
+            first = false;
             // Coalesce bursts (a delay test updates many nodes).
             tokio::time::sleep(Duration::from_millis(150)).await;
             let next = Model::of(&svc);

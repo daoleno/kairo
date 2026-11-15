@@ -697,7 +697,7 @@ async fn tun_in_a_network_namespace() {
         .await;
     assert_eq!(
         behind_fake,
-        Err(kairo_core::profile::PRIVATE_FAILED.to_owned()),
+        Err(kairo_core::profile::private_failed()),
         "a fake address is not taken for a public one"
     );
     let conns = svc.connections();

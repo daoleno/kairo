@@ -119,7 +119,7 @@ pub async fn fetch(paths: &Paths, file: GeoFile) -> Result<bool, String> {
                 log::info!("{} ({} bytes) from {source}", file.name, bytes.len());
                 return Ok(true);
             }
-            Ok(bytes) => errors.push(format!("{source}: only {} bytes", bytes.len())),
+            Ok(bytes) => errors.push(crate::tr!("model.geo.too_small", source = source, bytes = bytes.len())),
             Err(e) => errors.push(format!("{source}: {e}")),
         }
     }

@@ -34,8 +34,9 @@ pub use crate::view::{AiAlert, AiView, CoreStatus, HISTORY, Live, Notice, Proxie
 
 const LOG_CAPACITY: usize = 3000;
 
-/// The config before the first profile: no nodes, everything direct.
-const NO_PROFILE: &str = "proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n";
+/// The config before the first profile: no nodes, everything direct (a line
+/// a piece: YAML, not words of Kairo's, tests/i18n-allow.txt).
+const NO_PROFILE: &str = concat!("proxies: []", "\n", "proxy-groups: []", "\n", "rules:", "\n", "  - MATCH,DIRECT", "\n");
 
 enum CoreCmd {
     Start(oneshot::Sender<Result<(), String>>),
@@ -105,7 +106,7 @@ async fn futures_join<T>(fs: Vec<impl Future<Output = T>>) -> Vec<T> {
 
 /// Turns a task's failure into the user's words.
 fn joined<T>(r: Result<Result<T, String>, tokio::task::JoinError>) -> Result<T, String> {
-    r.unwrap_or_else(|e| Err(format!("internal error: {e}")))
+    r.unwrap_or_else(|e| Err(crate::tr!("engine.service.internal_error", error = e)))
 }
 
 impl Service {
@@ -419,23 +420,19 @@ impl Service {
             .unwrap_or(port);
             let who = holder
                 .map(|h| h.describe())
-                .unwrap_or_else(|| "another program".into());
+                .unwrap_or_else(|| crate::tr!("engine.ports.another_program"));
             let taken = tokio::task::spawn_blocking(move || crate::settings::port_in_use(free))
                 .await
                 .unwrap_or(true);
             if taken || free == other {
-                return Err(format!(
-                    "Port {port} is used by {who}, and Kairo found no free port near it. Quit {who} or choose another port in Settings."
-                ));
+                return Err(crate::tr!("engine.service.port_taken", port = port, who = who));
             }
             log::warn!("port {port} is used by {who}: Kairo moves to {free}");
             if controller {
                 next.controller_port = free;
             } else {
                 next.mixed_port = free;
-                note = Some(format!(
-                    "Port {port} is used by {who}, so Kairo is on {free}."
-                ));
+                note = Some(crate::tr!("engine.service.port_moved", port = port, who = who, free = free));
             }
         }
         if next != self.settings() {
@@ -448,14 +445,14 @@ impl Service {
     fn save_settings(&self) {
         let s = self.settings();
         if let Err(e) = s.save(&self.0.paths) {
-            self.notify(format!("Could not save settings: {e}"), true);
+            self.notify(crate::tr!("engine.service.save_settings_failed", error = e), true);
         }
     }
 
     fn save_profiles(&self) {
         let p = self.0.state.borrow().profiles.clone();
         if let Err(e) = p.save(&self.0.paths) {
-            self.notify(format!("Could not save profiles: {e}"), true);
+            self.notify(crate::tr!("engine.service.save_profiles_failed", error = e), true);
         }
     }
 
@@ -486,10 +483,7 @@ impl Service {
         if self.settings().tun && privilege == Privilege::Needed {
             self.modify(|s| s.settings.tun = false);
             self.save_settings();
-            self.notify(
-                "TUN is off: the updated core needs permission again. Turn TUN on to grant it.",
-                true,
-            );
+            self.notify(crate::tr!("engine.service.tun_off_after_update"), true);
         }
         match (version, seeded) {
             (Some(_), _) => {
@@ -508,7 +502,7 @@ impl Service {
                 message: e.to_string(),
             }),
             (None, Ok(_)) => self.set_core(CoreStatus::Failed {
-                message: format!("The core at {} does not run", core.display()),
+                message: crate::tr!("engine.service.core_does_not_run", path = core.display()),
             }),
         }
         crate::update::spawn_checks(self.clone());
@@ -552,7 +546,7 @@ impl Service {
 
     pub fn start_core(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let f = self.send_core(CoreCmd::Start);
-        async move { f.await.unwrap_or_else(|| Err("The service stopped".into())) }
+        async move { f.await.unwrap_or_else(|| Err(crate::tr!("engine.service.stopped"))) }
     }
 
     pub fn stop_core(&self) -> impl Future<Output = ()> + 'static {
@@ -564,7 +558,7 @@ impl Service {
 
     pub fn restart_core(&self) -> impl Future<Output = Result<(), String>> + 'static {
         let f = self.send_core(CoreCmd::Restart);
-        async move { f.await.unwrap_or_else(|| Err("The service stopped".into())) }
+        async move { f.await.unwrap_or_else(|| Err(crate::tr!("engine.service.stopped"))) }
     }
 
     async fn core_actor(self, mut rx: mpsc::UnboundedReceiver<CoreCmd>) {
@@ -611,7 +605,7 @@ impl Service {
                         crashes.pop_front();
                     }
                     if crashes.len() <= 3 {
-                        self.notify(format!("The core stopped unexpectedly and is restarting: {reason}"), true);
+                        self.notify(crate::tr!("engine.service.core_restarting", reason = reason), true);
                         self.set_core(CoreStatus::Starting);
                         tokio::time::sleep(Duration::from_millis(500 * crashes.len() as u64)).await;
                         if let Err(e) = self.launch(&mut process, &mut streams).await {
@@ -633,7 +627,7 @@ impl Service {
     ) -> Result<(), String> {
         let core = self.core_path();
         if !core.exists() {
-            let message = format!("The core is missing ({})", core.display());
+            let message = crate::tr!("engine.service.core_missing", path = core.display());
             self.set_core(CoreStatus::Failed {
                 message: message.clone(),
             });
@@ -683,7 +677,7 @@ impl Service {
         let mut child = match spawned {
             Ok(c) => c,
             Err(e) => {
-                let message = format!("Could not start the core: {e}");
+                let message = crate::tr!("engine.service.start_failed", error = e);
                 self.set_core(CoreStatus::Failed {
                     message: message.clone(),
                 });
@@ -691,25 +685,27 @@ impl Service {
             }
         };
         let ctl = self.controller();
+        // The error, and whether the controller only never answered (the
+        // core's own last error line then says why).
         let ready = tokio::select! {
-            r = ctl.wait_ready(Duration::from_secs(15)) => r.map_err(|e| e.to_string()),
-            exit = child.wait() => Err(exit.reason()),
+            r = ctl.wait_ready(Duration::from_secs(15)) => r.map_err(|e| {
+                (matches!(e, ApiError::Unreachable | ApiError::Timeout), e.to_string())
+            }),
+            exit = child.wait() => Err((false, exit.reason())),
         };
         let version = match ready {
             Ok(v) => v.version,
-            Err(e) => {
+            Err((silent, e)) => {
                 child.stop(&self.0.paths).await;
-                let message = if e == ApiError::Unreachable.to_string()
-                    || e == ApiError::Timeout.to_string()
-                {
+                let message = if silent {
                     let tail = child.tail();
                     let core_error = tail
                         .iter()
                         .rev()
                         .find(|l| l.contains("level=error") || l.contains("level=fatal"));
-                    core_error.map(|l| config::explain(l)).unwrap_or_else(|| {
-                        "The core started but its controller never answered".into()
-                    })
+                    core_error
+                        .map(|l| config::explain(l))
+                        .unwrap_or_else(|| crate::tr!("engine.service.controller_silent"))
                 } else {
                     e
                 };
@@ -1043,7 +1039,7 @@ impl Service {
         let active = self.0.state.borrow().profiles.active.clone();
         let text = match active.and_then(|id| profile::read_config(&self.0.paths, &id).ok()) {
             Some(t) => t,
-            None => "rules:\n  - GEOIP,CN,DIRECT\n".to_owned(),
+            None => concat!("rules:", "\n", "  - GEOIP,CN,DIRECT", "\n").to_owned(),
         };
         self.ensure_geo(&text).await;
     }
@@ -1070,7 +1066,7 @@ impl Service {
         let (text, over) = match &active {
             Some(id) => (
                 profile::read_config(paths, id)
-                    .map_err(|e| format!("The active profile's file is missing: {e}"))?,
+                    .map_err(|e| crate::tr!("engine.service.profile_file_missing", error = e))?,
                 profile::read_override(paths, id),
             ),
             None => (NO_PROFILE.to_owned(), String::new()),
@@ -1102,7 +1098,7 @@ impl Service {
             self.controller()
                 .reload(&paths.runtime_config().to_string_lossy())
                 .await
-                .map_err(|e| format!("The core rejected the config: {e}"))?;
+                .map_err(|e| crate::tr!("engine.service.config_rejected", error = e))?;
             self.refresh_proxies_now().await;
             let svc = self.clone();
             tokio::spawn(async move {
@@ -1195,7 +1191,7 @@ impl Service {
                 && !prev.downloads.mirror
                 && !svc.0.state.borrow().downloads.mirror_test.passed()
             {
-                return Err(crate::downloads::MIRROR_REFUSED.into());
+                return Err(crate::downloads::mirror_refused());
             }
             svc.modify(|s| s.settings = next.clone());
             svc.save_settings();
@@ -1204,7 +1200,7 @@ impl Service {
                 || prev.start_minimized != next.start_minimized
             {
                 crate::autostart::set(next.launch_at_login, next.start_minimized)
-                    .map_err(|e| format!("Launch at login: {e}"))?;
+                    .map_err(|e| crate::tr!("engine.service.launch_at_login_failed", error = e))?;
             }
             let restart = prev.controller_port != next.controller_port
                 || prev.secret != next.secret
@@ -1267,10 +1263,10 @@ impl Service {
             f.await?;
             let s = svc.snapshot();
             if on && s.core.is_running() && !s.sysproxy_active {
-                return Err("The system proxy could not be set".into());
+                return Err(crate::tr!("engine.service.sysproxy_not_set"));
             }
             if on && !s.core.is_running() {
-                return Err("The system proxy turns on when the core is running".into());
+                return Err(crate::tr!("engine.service.sysproxy_needs_core"));
             }
             Ok(())
         }
@@ -1282,7 +1278,7 @@ impl Service {
         next.tun = on;
         async move {
             if on && tun::status(&svc.core_path()) != Privilege::Granted {
-                return Err("TUN needs permission first".into());
+                return Err(crate::tr!("engine.service.tun_needs_permission"));
             }
             svc.update_settings(next).await
         }
@@ -1341,7 +1337,7 @@ impl Service {
             Ok(()) => self.modify(|s| s.sysproxy_active = on),
             Err(e) => {
                 self.modify(|s| s.sysproxy_active = false);
-                self.notify(format!("System proxy: {e}"), true);
+                self.notify(crate::tr!("engine.service.sysproxy_failed", error = e), true);
             }
         }
     }
@@ -1411,12 +1407,10 @@ impl Service {
     async fn go_through(&self, name: &str) -> Result<(), String> {
         let group = self
             .main_group()
-            .ok_or("This subscription has no locations to choose from")?;
+            .ok_or_else(|| crate::tr!("engine.service.no_locations"))?;
         let steps = crate::places::route_to(&self.0.proxies.borrow().groups, &group, name);
         if steps.is_empty() {
-            return Err(format!(
-                "{name} is not one of this subscription's locations"
-            ));
+            return Err(crate::tr!("engine.service.not_a_location", name = name));
         }
         for (g, member) in steps {
             self.select_inner(g, member).await?;
@@ -1461,9 +1455,7 @@ impl Service {
             )
         };
         let Some(best) = best else {
-            return Err(
-                "No location answered. Check the network, or update the subscription".into(),
-            );
+            return Err(crate::tr!("engine.service.no_location_answered"));
         };
         let keep = !force
             && current.as_ref().is_some_and(|c| {
@@ -1587,10 +1579,7 @@ impl Service {
     /// [`profile::MAX_PROFILES`]: each is a file, updated on its own schedule).
     fn room_for_a_profile(&self) -> Result<(), String> {
         if self.0.state.borrow().profiles.profiles.len() >= profile::MAX_PROFILES {
-            return Err(format!(
-                "Kairo keeps at most {} subscriptions: delete one first",
-                profile::MAX_PROFILES
-            ));
+            return Err(crate::tr!("engine.service.too_many_profiles", max = profile::MAX_PROFILES));
         }
         Ok(())
     }
@@ -1604,9 +1593,9 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             let url = url.trim().to_owned();
-            let parsed = url::Url::parse(&url).map_err(|_| "Enter a valid URL".to_string())?;
+            let parsed = url::Url::parse(&url).map_err(|_| crate::tr!("engine.service.invalid_url"))?;
             if !matches!(parsed.scheme(), "http" | "https") {
-                return Err("Subscriptions use http or https".into());
+                return Err(crate::tr!("engine.service.http_only"));
             }
             svc.room_for_a_profile()?;
             let download = svc.download(&url).await?;
@@ -1652,7 +1641,7 @@ impl Service {
             let name = path
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "Local".into());
+                .unwrap_or_else(|| crate::tr!("engine.service.local_profile"));
             svc.insert_profile(Profile {
                 id: id.clone(),
                 name,
@@ -1718,10 +1707,10 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             let Some(p) = svc.0.state.borrow().profiles.get(&id).cloned() else {
-                return Err("No such profile".into());
+                return Err(crate::tr!("engine.service.no_such_profile"));
             };
             let Some(url) = p.url().map(str::to_owned) else {
-                return Err("Local profiles have nothing to update from".into());
+                return Err(crate::tr!("engine.service.local_no_update"));
             };
             svc.modify(|s| s.updating.insert(id.clone()));
             let result = async {
@@ -1811,7 +1800,7 @@ impl Service {
 
     async fn activate_inner(&self, id: String) -> Result<(), String> {
         if !self.0.state.borrow().profiles.profiles.iter().any(|p| p.id == id) {
-            return Err("There is no such subscription".into());
+            return Err(crate::tr!("engine.service.no_such_subscription"));
         }
         let previous = self.0.state.borrow().profiles.active.clone();
         self.modify(|s| s.profiles.active = Some(id.clone()));
@@ -1874,7 +1863,7 @@ impl Service {
             let was_active = svc.0.state.borrow().profiles.active.as_deref() == Some(id.as_str());
             let known = svc.0.state.borrow().profiles.profiles.iter().any(|p| p.id == id);
             if !known {
-                return Err("There is no such subscription".into());
+                return Err(crate::tr!("engine.service.no_such_subscription"));
             }
             svc.modify(|s| {
                 s.profiles.profiles.retain(|p| p.id != id);
@@ -2070,7 +2059,7 @@ impl Service {
                     .groups
                     .iter()
                     .find(|g| g.name == group)
-                    .ok_or("No such group")?;
+                    .ok_or_else(|| crate::tr!("engine.service.no_such_group"))?;
                 (
                     g.members
                         .iter()
@@ -2079,8 +2068,8 @@ impl Service {
                         .collect::<Vec<_>>(),
                     // Groups that test themselves keep their own URL; mihomo reports a
                     // default one for select groups too, which the user's setting overrides.
-                    match g.kind.as_str() {
-                        "URLTest" | "Fallback" | "LoadBalance" => g
+                    match g.kind.to_ascii_lowercase().as_str() {
+                        "urltest" | "fallback" | "loadbalance" => g
                             .test_url
                             .clone()
                             .filter(|u| !u.is_empty())
@@ -2227,7 +2216,7 @@ impl Service {
         self.run(async move {
             svc.modify(|s| {
                 s.task = Some(Task {
-                    label: "Updating geo databases".into(),
+                    label: crate::tr!("engine.service.updating_geo"),
                     progress: None,
                 })
             });
@@ -2311,7 +2300,7 @@ impl Service {
             let _busy = svc.0.update_lock.lock().await;
             let previous = svc.snapshot().update;
             let crate::update::UpdateStatus::Ready { version } = previous.clone() else {
-                return Err("No update is ready".into());
+                return Err(crate::tr!("engine.service.no_update_ready"));
             };
             svc.set_update(crate::update::UpdateStatus::Installing { version });
             let exe = match crate::update::install(&svc).await {

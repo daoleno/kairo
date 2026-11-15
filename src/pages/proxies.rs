@@ -58,12 +58,12 @@ pub fn page() -> impl IntoElement {
             },
             vec![
                 crate::pages::settings::back(),
-                toolbar::search("proxies.filter", "Filter nodes", query),
+                toolbar::search("proxies.filter", t!("groups.filter"), query),
                 toolbar::choice(
                     "proxies.sort",
-                    "Sort",
+                    t!("groups.sort.label"),
                     Glyph::Sort,
-                    vec!["Config Order", "Delay", "Name"],
+                    vec![t!("groups.sort.config"), t!("groups.sort.delay"), t!("groups.sort.name")],
                     move || match sort.get() {
                         Sort::Config => 0,
                         Sort::Delay => 1,
@@ -73,7 +73,7 @@ pub fn page() -> impl IntoElement {
                 ),
                 toolbar::button(
                     "proxies.refresh",
-                    "Refresh",
+                    t!("groups.refresh"),
                     Glyph::Refresh,
                     Icon::Refresh,
                     move || store.run(store.svc().refresh_proxies()),
@@ -100,7 +100,7 @@ pub fn page() -> impl IntoElement {
                             }
                             None => ui::empty_state(
                                 Icon::Proxies,
-                                "No groups",
+                                t!("groups.empty"),
                                 None,
                             )
                             .into_element(),
@@ -110,9 +110,9 @@ pub fn page() -> impl IntoElement {
             .otherwise(move || {
                 ui::empty_state(
                     Icon::Proxies,
-                    "The core is not running",
+                    t!("groups.core_not_running"),
                     Some(
-                        ui::btn_icon(Icon::Play, "Start Core", Variant::Primary)
+                        ui::btn_icon(Icon::Play, t!("groups.start_core"), Variant::Primary)
                             .on_press(move || store.run(store.svc().start_core()))
                             .into_element(),
                     ),
@@ -167,7 +167,7 @@ fn group_list(
             view()
                 .p_2()
                 .gap_0p5()
-                .child(ui::section_label("Groups").px_2p5().pt_1().pb_1())
+                .child(ui::section_label(t!("groups.section.groups")).px_2p5().pt_1().pb_1())
                 .child(each(
                     move || {
                         groups
@@ -194,8 +194,8 @@ fn group_list(
                                         .iter()
                                         .find(|x| x.name == name)
                                         .map(|x| match &x.now {
-                                            Some(now) => format!("{} · {now}", x.kind_title()),
-                                            None => x.kind_title().to_owned(),
+                                            Some(now) => format!("{} · {now}", kind_title(x)),
+                                            None => kind_title(x),
                                         })
                                         .unwrap_or_default()
                                         .into()
@@ -212,7 +212,7 @@ fn group_list(
                     move || {
                         view()
                             .gap_0p5()
-                            .child(ui::section_label("Providers").px_2p5().pt_4().pb_1())
+                            .child(ui::section_label(t!("groups.section.providers")).px_2p5().pt_4().pb_1())
                             .child(each(
                                 move || providers.get(),
                                 |p: &kairo_core::model::ProxyProvider| p.name.clone(),
@@ -227,9 +227,11 @@ fn group_list(
                                     };
                                     list_row(
                                         p.name.clone().into(),
-                                        SharedString::from(format!(
-                                            "{} · {}/{} alive",
-                                            p.vehicle, p.alive, p.count
+                                        SharedString::from(t!(
+                                            "groups.provider.alive",
+                                            vehicle = p.vehicle,
+                                            alive = p.alive,
+                                            count = p.count
                                         )),
                                         is,
                                         move || selected.set(Some(key.clone())),
@@ -305,8 +307,12 @@ fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl
                         .child(ui::muted(move || -> SharedString {
                             group.with(|g| match g {
                                 Some(g) => {
-                                    format!("{} · {} members", g.kind_title(), g.members.len())
-                                        .into()
+                                    t!(
+                                        "groups.members",
+                                        kind = kind_title(g),
+                                        count = g.members.len()
+                                    )
+                                    .into()
                                 }
                                 None => "".into(),
                             })
@@ -317,9 +323,9 @@ fn group_detail(name: String, query: Signal<String>, sort: Signal<Sort>) -> impl
                         Icon::Bolt,
                         move || -> SharedString {
                             if testing_group() {
-                                "Testing…".into()
+                                t!("groups.testing").into()
                             } else {
-                                "Test All".into()
+                                t!("groups.test_all").into()
                             }
                         },
                         Variant::Secondary,
@@ -409,7 +415,7 @@ fn node_list(
                     .text_color(move || ui::delay_tone(delay())),
                 )
                 .child(
-                    ui::icon_btn(Icon::Bolt, "Test")
+                    ui::icon_btn(Icon::Bolt, t!("groups.test"))
                         .size(px(24.0))
                         .disabled(testing)
                         .on_press(move || store.run(store.svc().test_node(name(), None))),
@@ -421,6 +427,19 @@ fn node_list(
     .content_padding_top(px(4.0))
     .content_padding_bottom(px(12.0))
     .flex_1()
+}
+
+/// A group's type in words: mihomo's `type` is the value, the label is ours
+/// (an unknown type shows as mihomo says it).
+fn kind_title(g: &Group) -> String {
+    match g.kind.as_str() {
+        "Selector" => t!("groups.kind.select"),
+        "URLTest" => t!("groups.kind.url_test"),
+        "Fallback" => t!("groups.kind.fallback"),
+        "LoadBalance" => t!("groups.kind.load_balance"),
+        "Relay" => t!("groups.kind.relay"),
+        other => other.to_owned(),
+    }
 }
 
 /// mihomo's adapter type, spelled the way the protocols spell themselves.
@@ -442,7 +461,7 @@ fn kind_name(kind: &str) -> &str {
 
 fn type_label(n: &Node) -> String {
     let mut s = if n.is_group {
-        "Group".to_owned()
+        t!("groups.node.group")
     } else {
         kind_name(&n.kind).to_owned()
     };
@@ -489,19 +508,21 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                         )
                         .child(ui::muted(move || -> SharedString {
                             provider.with(|p| match p {
-                                Some(p) => format!(
-                                    "{} · {} nodes · {} alive{}",
-                                    p.vehicle,
-                                    p.count,
-                                    p.alive,
-                                    p.updated_at
-                                        .as_ref()
-                                        .map(|u| format!(
-                                            " · updated {}",
-                                            u.split('T').next().unwrap_or(u)
-                                        ))
-                                        .unwrap_or_default()
-                                )
+                                Some(p) => match p.updated_at.as_ref() {
+                                    Some(u) => t!(
+                                        "groups.provider.summary_updated",
+                                        vehicle = p.vehicle,
+                                        count = p.count,
+                                        alive = p.alive,
+                                        date = u.split('T').next().unwrap_or(u)
+                                    ),
+                                    None => t!(
+                                        "groups.provider.summary",
+                                        vehicle = p.vehicle,
+                                        count = p.count,
+                                        alive = p.alive
+                                    ),
+                                }
                                 .into(),
                                 None => "".into(),
                             })
@@ -512,9 +533,9 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                         Icon::Bolt,
                         move || -> SharedString {
                             if testing() {
-                                "Checking…".into()
+                                t!("groups.checking").into()
                             } else {
-                                "Health Check".into()
+                                t!("groups.health_check").into()
                             }
                         },
                         Variant::Secondary,
@@ -523,10 +544,10 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                     .on_press(move || store.run(store.svc().healthcheck_provider(n1.clone()))),
                 )
                 .child(
-                    ui::btn_icon(Icon::Refresh, "Update", Variant::Secondary).on_press(move || {
+                    ui::btn_icon(Icon::Refresh, t!("groups.provider.update"), Variant::Secondary).on_press(move || {
                         store.run_then(store.svc().update_provider(n2.clone()), move |r| {
                             if r.is_ok() {
-                                store.info("Provider updated");
+                                store.info(t!("groups.provider.updated"));
                             }
                         })
                     }),
@@ -548,13 +569,13 @@ fn provider_detail(name: String, query: Signal<String>) -> impl IntoElement {
                         ui::card()
                             .p_4()
                             .gap_2()
-                            .child(ui::section_label("Subscription"))
+                            .child(ui::section_label(t!("groups.provider.subscription")))
                             .child(ui::meter(move || fraction))
-                            .child(ui::muted(format!(
-                                "{} of {} · {}",
-                                kairo_core::bytes(used),
-                                kairo_core::bytes(i.total),
-                                crate::pages::overview::expiry_text(
+                            .child(ui::muted(t!(
+                                "groups.provider.usage",
+                                used = kairo_core::bytes(used),
+                                total = kairo_core::bytes(i.total),
+                                expiry = crate::pages::overview::expiry_text(
                                     (i.expire > 0).then_some(i.expire)
                                 )
                             )))

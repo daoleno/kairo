@@ -9,6 +9,7 @@ use kairo_core::routes::{Route, RouteExit, RouteKind};
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, size};
@@ -22,12 +23,12 @@ enum Choice {
 /// The words for an exit.
 pub fn exit_title(exit: &RouteExit) -> String {
     match exit {
-        RouteExit::Usual => "Usual".into(),
-        RouteExit::Direct => "Direct".into(),
-        RouteExit::Ai => "AI exit".into(),
-        RouteExit::Everything => "Everything else".into(),
-        RouteExit::Downloads => "Downloads".into(),
-        RouteExit::Block => "Block".into(),
+        RouteExit::Usual => kairo_core::tr!("apps.exit.usual"),
+        RouteExit::Direct => kairo_core::tr!("apps.exit.direct"),
+        RouteExit::Ai => kairo_core::tr!("apps.exit.ai"),
+        RouteExit::Everything => kairo_core::tr!("apps.exit.everything"),
+        RouteExit::Downloads => kairo_core::tr!("apps.exit.downloads"),
+        RouteExit::Block => kairo_core::tr!("apps.exit.block"),
         RouteExit::Node(name) => {
             let p = places::split_flag(name);
             let country = places::place(&kairo_core::model::Node {
@@ -45,7 +46,7 @@ pub fn exit_title(exit: &RouteExit) -> String {
             if country == "Other" {
                 format!("{flag} {}", p.1.trim()).trim().to_owned()
             } else {
-                format!("{flag} {country}").trim().to_owned()
+                format!("{flag} {}", places::region_title(country)).trim().to_owned()
             }
         }
     }
@@ -65,7 +66,7 @@ fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
             Choice::Exit(RouteExit::Downloads),
             exit_title(&RouteExit::Downloads),
         ),
-        (Choice::Exit(RouteExit::Direct), "Direct".into()),
+        (Choice::Exit(RouteExit::Direct), exit_title(&RouteExit::Direct)),
     ];
     let preferred = store
         .state
@@ -94,13 +95,13 @@ fn choices(current: &RouteExit) -> Vec<(Choice, String)> {
                         .unwrap_or_default();
                     out.push((
                         Choice::Exit(exit),
-                        format!("{flag} {region}").trim().to_owned(),
+                        format!("{flag} {}", places::region_title(region)).trim().to_owned(),
                     ));
                 }
             }
         }
     });
-    out.push((Choice::Exit(RouteExit::Block), "Block".into()));
+    out.push((Choice::Exit(RouteExit::Block), exit_title(&RouteExit::Block)));
     // A node chosen earlier that is not its country's fastest now.
     if let RouteExit::Node(_) = current
         && !out.iter().any(|(c, _)| *c == Choice::Exit(current.clone()))
@@ -164,7 +165,7 @@ fn route_row(r: Route) -> impl IntoElement {
 fn remove_button(name: String, id: Stored<String>) -> impl IntoElement {
     let store = store();
     button()
-        .accessibility_label(format!("Remove {name}"))
+        .accessibility_label(t!("apps.remove", name = name))
         .items_center()
         .justify_center()
         .size(px(ui::touch_h(28.0)))
@@ -200,10 +201,10 @@ pub fn page() -> impl IntoElement {
             Page::Apps,
             move || {
                 let n = routes.with(|r| r.len());
-                format!("{n} {}", if n == 1 { "choice" } else { "choices" })
+                t!(&plural("apps.subtitle", n as u64), count = n)
             },
             vec![
-                toolbar::search("apps.search", "Search apps and sites", query),
+                toolbar::search("apps.search", t!("apps.search_placeholder"), query),
             ],
         ))
         .child(
@@ -223,13 +224,13 @@ pub fn page() -> impl IntoElement {
                         let row = if phone { row.flex_wrap() } else { row };
                         row.child(view().flex_1())
                             .child(
-                                ui::capsule("Add App", false)
+                                ui::capsule(t!("apps.add_app"), false)
                                     .h(px(ui::touch_h(30.0)))
                                     .px_4()
                                     .on_press(move || adding.set(Some(Adding::App))),
                             )
                             .child(
-                                ui::capsule("Add Site", false)
+                                ui::capsule(t!("apps.add_site"), false)
                                     .h(px(ui::touch_h(30.0)))
                                     .px_4()
                                     .on_press(move || adding.set(Some(Adding::Site))),
@@ -260,15 +261,15 @@ pub fn page() -> impl IntoElement {
                             if apps.is_empty() && sites.is_empty() {
                                 out = out.child(ui::empty_state(
                                     Icon::Layers,
-                                    "Nothing set apart",
+                                    t!("apps.empty"),
                                     None,
                                 ));
                             }
                             if !apps.is_empty() {
-                                out = out.child(section("Apps", apps));
+                                out = out.child(section(t!("apps.section.apps"), apps));
                             }
                             if !sites.is_empty() {
-                                out = out.child(section("Sites", sites));
+                                out = out.child(section(t!("apps.section.sites"), sites));
                             }
                             out.into_element()
                         })
@@ -286,7 +287,7 @@ pub fn page() -> impl IntoElement {
         .text_color(move || theme().foreground)
 }
 
-fn section(title: &'static str, routes: Vec<Route>) -> impl IntoElement {
+fn section(title: String, routes: Vec<Route>) -> impl IntoElement {
     view()
         .gap_2()
         .child(ui::section_label(title).px_1())
@@ -316,7 +317,7 @@ fn subscription_row() -> impl IntoElement {
             let title = if more == 0 {
                 names.join(", ")
             } else {
-                format!("{} and {more} more groups", names.join(", "))
+                t!("apps.subscription.more", names = names.join(", "), count = more)
             };
             (title, String::new())
         })
@@ -326,7 +327,7 @@ fn subscription_row() -> impl IntoElement {
         move || {
             view()
                 .gap_2()
-                .child(ui::section_label("From your subscription").px_1())
+                .child(ui::section_label(t!("apps.subscription.title")).px_1())
                 .child(ui::rows(vec![
                     ui::row_view()
                         .child(
@@ -340,7 +341,7 @@ fn subscription_row() -> impl IntoElement {
                                 ,
                         )
                         .child(
-                            ui::capsule("Groups", false)
+                            ui::capsule(Page::Proxies.title(), false)
                                 .h(px(30.0))
                                 .px_4()
                                 .on_press(move || store.page.set(Page::Proxies)),
@@ -385,13 +386,13 @@ fn add_card(kind: Adding, adding: Signal<Option<Adding>>) -> impl IntoElement {
     }));
     let problem = signal(None::<String>);
     let title = match kind {
-        Adding::App => "Add an app",
-        Adding::Site => "Add a site",
+        Adding::App => t!("apps.add.app_title"),
+        Adding::Site => t!("apps.add.site_title"),
     };
     let go = move || {
         let v = value.get_untracked().trim().to_owned();
         if v.is_empty() {
-            problem.set(Some("Type a name first.".into()));
+            problem.set(Some(t!("apps.add.name_first")));
             return;
         }
         let Choice::Exit(chosen) = exit.get_untracked();
@@ -464,7 +465,7 @@ fn add_card(kind: Adding, adding: Signal<Option<Adding>>) -> impl IntoElement {
                 .flex_row()
                 .items_center()
                 .gap_3()
-                .child(ui::muted("Goes through"))
+                .child(ui::muted(t!("apps.add.goes_through")))
                 .child(view().flex_1())
                 .child(ui::popup_button(
                     move || choices(&RouteExit::Usual),
@@ -484,8 +485,8 @@ fn add_card(kind: Adding, adding: Signal<Option<Adding>>) -> impl IntoElement {
                 .flex_row()
                 .gap_2()
                 .justify_end()
-                .child(ui::btn("Cancel", Variant::Secondary).on_press(move || adding.set(None)))
-                .child(ui::btn("Add", Variant::Primary).on_press(go)),
+                .child(ui::btn(t!("apps.add.cancel"), Variant::Secondary).on_press(move || adding.set(None)))
+                .child(ui::btn(t!("apps.add.add"), Variant::Primary).on_press(go)),
         )
 }
 

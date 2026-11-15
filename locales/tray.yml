@@ -1,0 +1,87 @@
+_version: 2
+
+# The tray / menu bar item (Linux, macOS, Windows): the state, the AI line.
+tray.status.connected:
+  en: Connected
+  zh: 已连接
+tray.status.connecting:
+  en: Connecting…
+  zh: 正在连接…
+tray.status.failed:
+  en: Couldn't connect
+  zh: 无法连接
+tray.status.off:
+  en: Not Connected
+  zh: 未连接
+tray.tooltip.connected:
+  en: "Kairo: connected"
+  zh: Kairo：已连接
+tray.ai.problem:
+  en: "AI: %{count} problem"
+  zh: "AI：%{count} 个问题"
+tray.ai.problems:
+  en: "AI: %{count} problems"
+  zh: "AI：%{count} 个问题"
+tray.ai.all_see:
+  en: "AI: all %{count} see %{country}"
+  zh: "AI：%{count} 个服务均识别为%{country}"
+tray.ai.reachable:
+  en: "AI: %{count} reachable"
+  zh: "AI：%{count} 个服务可访问"
+
+# The exits' submenus.
+tray.exit.rest:
+  en: Everything else
+  zh: 其他流量
+tray.exit.ai:
+  en: AI exit
+  zh: AI 出口
+tray.exit.line:
+  en: "%{exit}: %{place}"
+  zh: "%{exit}：%{place}"
+tray.fastest:
+  en: Fastest
+  zh: 最快
+tray.all_servers:
+  en: All Servers…
+  zh: 所有节点…
+tray.test_again:
+  en: Test Again
+  zh: 重新测速
+tray.health.good:
+  en: Good
+  zh: 良好
+tray.health.ok:
+  en: OK
+  zh: 一般
+tray.health.slow:
+  en: Slow
+  zh: 较慢
+
+# The mode.
+tray.mode.title:
+  en: Mode
+  zh: 模式
+tray.mode.line:
+  en: "Mode: %{mode}"
+  zh: "模式：%{mode}"
+tray.mode.rule:
+  en: Smart
+  zh: 智能分流
+tray.mode.global:
+  en: Everything
+  zh: 全局
+tray.mode.direct:
+  en: Direct
+  zh: 直连
+
+# The window, Settings and Quit.
+tray.open:
+  en: Open Kairo
+  zh: 打开 Kairo
+tray.settings:
+  en: Settings…
+  zh: 设置…
+tray.quit:
+  en: Quit Kairo
+  zh: 退出 Kairo

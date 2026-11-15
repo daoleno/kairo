@@ -40,3 +40,325 @@ page.dns:
 page.ai_service:
   en: AI Service
   zh: AI 服务
+
+# The menus: macOS's menu bar, the GTK header bar's main menu.
+menu.check_updates:
+  en: Check for Updates…
+  zh: 检查更新…
+menu.up_to_date:
+  en: Kairo is up to date
+  zh: Kairo 已是最新版本
+menu.settings:
+  en: Settings…
+  zh: 设置…
+menu.connect:
+  en: Connect
+  zh: 连接
+menu.disconnect:
+  en: Disconnect
+  zh: 断开
+menu.connection:
+  en: Connection
+  zh: 连接
+menu.location:
+  en: Location
+  zh: 地区
+menu.fastest:
+  en: Fastest
+  zh: 最快
+menu.all_locations:
+  en: All Locations…
+  zh: 所有地区…
+menu.mode.rule:
+  en: Smart Route
+  zh: 智能分流
+menu.mode.global:
+  en: All Traffic
+  zh: 全局
+menu.mode.direct:
+  en: Direct
+  zh: 直连
+menu.core:
+  en: Core
+  zh: 内核
+menu.core.start:
+  en: Start Core
+  zh: 启动内核
+menu.core.stop:
+  en: Stop Core
+  zh: 停止内核
+menu.core.restart:
+  en: Restart Core
+  zh: 重启内核
+menu.search:
+  en: Search Kairo…
+  zh: 搜索 Kairo…
+menu.go:
+  en: Go
+  zh: 前往
+menu.edit:
+  en: Edit
+  zh: 编辑
+menu.window:
+  en: Window
+  zh: 窗口
+menu.quit:
+  en: Quit
+  zh: 退出
+menu.show_sidebar:
+  en: Show Sidebar
+  zh: 显示侧边栏
+menu.main:
+  en: Main Menu
+  zh: 主菜单
+
+# The command palette (⌘K / Ctrl+K).
+palette.placeholder:
+  en: "Search Kairo: pages, actions, locations"
+  zh: 搜索 Kairo：页面、操作、地区
+palette.mode.rule:
+  en: "Mode: Smart"
+  zh: 模式：智能分流
+palette.mode.global:
+  en: "Mode: Everything"
+  zh: 模式：全局
+palette.mode.direct:
+  en: "Mode: Direct"
+  zh: 模式：直连
+palette.check_ai:
+  en: Check AI services
+  zh: 检查 AI 服务
+palette.rest_fastest:
+  en: "Everything else: Fastest"
+  zh: 其他流量：最快
+palette.test_exits:
+  en: Test Exits Again
+  zh: 出口重新测速
+palette.go_to:
+  en: "Go to %{page}"
+  zh: "前往：%{page}"
+palette.group.inspect:
+  en: Inspect
+  zh: 查看
+palette.group.page:
+  en: Page
+  zh: 页面
+palette.group.advanced:
+  en: Advanced
+  zh: 高级
+palette.add_subscription:
+  en: Add Subscription
+  zh: 添加订阅
+palette.all_connections:
+  en: Show All Connections
+  zh: 显示所有连接
+palette.use_tun:
+  en: Use Every App (TUN)
+  zh: 切换为所有应用（TUN）
+palette.copy_proxy:
+  en: Copy Proxy Line for Terminal
+  zh: 复制终端代理命令
+palette.update_subscriptions:
+  en: Update Subscriptions
+  zh: 更新订阅
+palette.subscriptions_updated:
+  en: Subscriptions updated
+  zh: 订阅已更新
+palette.close_all:
+  en: Close All Connections
+  zh: 关闭所有连接
+palette.update_geo:
+  en: Update GeoIP and GeoSite
+  zh: 更新 GeoIP 和 GeoSite
+palette.check_updates:
+  en: Check for Updates
+  zh: 检查更新
+palette.exit.rest:
+  en: Everything else
+  zh: 其他流量
+palette.exit.ai:
+  en: AI exit
+  zh: AI 出口
+
+# The window's shell and shared controls.
+shell.dismiss:
+  en: Dismiss
+  zh: 关闭
+shell.back:
+  en: Back
+  zh: 返回
+shell.clear:
+  en: Clear
+  zh: 清除
+shell.cancel:
+  en: Cancel
+  zh: 取消
+shell.timeout:
+  en: Timeout
+  zh: 超时
+shell.copied:
+  en: Copied
+  zh: 已复制
+shell.copied_for:
+  en: "Copied, for a terminal on %{machine}"
+  zh: "已复制，可用于 %{machine} 上的终端"
+
+# Kairo's updates: the sidebar's button (its tooltip), the banner.
+update.download:
+  en: "Download Kairo %{version}"
+  zh: "下载 Kairo %{version}"
+update.to:
+  en: "Update to %{version}"
+  zh: "更新到 %{version}"
+update.downloading:
+  en: Downloading…
+  zh: 正在下载…
+update.downloading_percent:
+  en: "Downloading… %{percent}%"
+  zh: "正在下载… %{percent}%"
+update.restart:
+  en: "Restart to Update to %{version}"
+  zh: "重启以更新到 %{version}"
+update.installing:
+  en: Installing…
+  zh: 正在安装…
+update.failed:
+  en: The update failed
+  zh: 更新失败
+update.try_again:
+  en: Try Again
+  zh: 重试
+update.dismiss:
+  en: Dismiss
+  zh: 忽略
+
+# The accents' names.
+accent.graphite:
+  en: Graphite
+  zh: 石墨色
+accent.ember:
+  en: Ember
+  zh: 余烬橙
+accent.iris:
+  en: Iris
+  zh: 鸢尾紫
+accent.gold:
+  en: Gold
+  zh: 金色
+
+# Kairo in a browser (kairo-server's page): the door, the link.
+web.reconnecting:
+  en: Reconnecting…
+  zh: 正在重新连接…
+web.not_encrypted:
+  en: Not encrypted
+  zh: 未加密
+web.setup.title:
+  en: Set a password
+  zh: 设置密码
+web.setup.hint:
+  en: Enter the code Kairo printed when it started on this machine (kairo-server status shows it).
+  zh: 输入 Kairo 在这台机器上启动时显示的设置码（kairo-server status 可以查看）。
+web.setup.code:
+  en: Setup code
+  zh: 设置码
+web.setup.code_length:
+  en: "The setup code has %{length} letters and digits; this has %{typed}"
+  zh: "设置码由 %{length} 位字母和数字组成，这里输入了 %{typed} 位"
+web.setup.password_short:
+  en: The new password needs at least 8 characters
+  zh: 新密码至少需要 8 个字符
+web.setup.passwords_differ:
+  en: The two new passwords differ
+  zh: 两次输入的新密码不一致
+web.setup.new_password:
+  en: New password
+  zh: 新密码
+web.setup.again:
+  en: New password again
+  zh: 再次输入新密码
+web.setup.busy:
+  en: Setting…
+  zh: 正在设置…
+web.setup.submit:
+  en: Set Password
+  zh: 设置密码
+web.sign_in.title:
+  en: Sign in to Kairo
+  zh: 登录 Kairo
+web.sign_in.password:
+  en: Password
+  zh: 密码
+web.sign_in.busy:
+  en: Signing in…
+  zh: 正在登录…
+web.sign_in.submit:
+  en: Sign In
+  zh: 登录
+web.away.title:
+  en: Kairo is not answering
+  zh: Kairo 没有响应
+web.away.retry:
+  en: Try Again
+  zh: 重试
+web.http_status:
+  en: "The server answered %{status}"
+  zh: "服务器返回了 %{status}"
+web.link.lost:
+  en: Lost the connection to Kairo
+  zh: 与 Kairo 的连接已断开
+web.link.none:
+  en: Not connected to Kairo
+  zh: 未连接到 Kairo
+web.link.unexpected:
+  en: "Unexpected answer: %{error}"
+  zh: "意外的响应：%{error}"
+
+# Starting Kairo (Windows' error dialogs).
+launcher.error.window:
+  en: "Cannot open a window: %{error}"
+  zh: "无法打开窗口：%{error}"
+launcher.error.ui_thread:
+  en: "Cannot start the UI thread: %{error}"
+  zh: "无法启动界面线程：%{error}"
+
+# The standard items of macOS's menus (NSH's own English stays where the text is English).
+menu.role.about:
+  en: About Kairo
+  zh: 关于 Kairo
+menu.role.hide:
+  en: Hide Kairo
+  zh: 隐藏 Kairo
+menu.role.hide_others:
+  en: Hide Others
+  zh: 隐藏其他
+menu.role.quit:
+  en: Quit Kairo
+  zh: 退出 Kairo
+menu.role.undo:
+  en: Undo
+  zh: 撤销
+menu.role.redo:
+  en: Redo
+  zh: 重做
+menu.role.cut:
+  en: Cut
+  zh: 剪切
+menu.role.copy:
+  en: Copy
+  zh: 拷贝
+menu.role.paste:
+  en: Paste
+  zh: 粘贴
+menu.role.select_all:
+  en: Select All
+  zh: 全选
+menu.role.minimize:
+  en: Minimize
+  zh: 最小化
+menu.role.zoom:
+  en: Zoom
+  zh: 缩放
+menu.role.close:
+  en: Close
+  zh: 关闭

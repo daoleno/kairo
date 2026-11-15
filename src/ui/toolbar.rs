@@ -446,7 +446,7 @@ fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
                 .gap_2()
                 .min_h(px(super::touch_h(28.0)))
                 .child(back.map(|to| {
-                    super::icon_btn(Icon::ChevronLeft, "Back")
+                    super::icon_btn(Icon::ChevronLeft, t!("shell.back"))
                         .on_press(move || {
                             if page.inspect() {
                                 // To the page the view was opened from, else Settings › Advanced.
@@ -466,7 +466,7 @@ fn phone_header(page: Page, subtitle: impl Fn() -> String + 'static, tools: Vec<
                 )
                 .child(view().flex_1())
                 .child((page == Page::Overview).then(|| {
-                    super::icon_btn(Icon::Settings, "Settings")
+                    super::icon_btn(Icon::Settings, Page::Settings.title())
                         .on_press(move || store.page.set(Page::Settings))
                         .mr(px(-8.0))
                 })),

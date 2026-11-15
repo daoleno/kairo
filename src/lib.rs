@@ -80,7 +80,7 @@ pub fn main_view(backend: backend::Backend) -> impl IntoElement {
     }
     // macOS has a menu bar; GTK apps on Linux keep their window free of one.
     if os() == Os::MacOs {
-        menus(store);
+        menus(store, shown);
     }
     for (i, page) in GO.into_iter().enumerate() {
         on_key(&format!("mod+{}", i + 1), move |_| store.page.set(page));
@@ -127,7 +127,7 @@ fn location_items(store: Store) -> Vec<MenuItem> {
         _ => u32::MAX,
     });
     let mut items = vec![
-        MenuItem::new("Fastest")
+        MenuItem::new(t!("menu.fastest"))
             .checked(auto)
             .on_select(move || store.run(store.svc().set_location(None))),
         MenuItem::separator(),
@@ -150,14 +150,24 @@ fn location_items(store: Store) -> Vec<MenuItem> {
         );
     }
     items.push(MenuItem::separator());
-    items.push(MenuItem::new("All Locations…").on_select(move || store.page.set(Page::Exits)));
+    items.push(MenuItem::new(t!("menu.all_locations")).on_select(move || store.page.set(Page::Exits)));
     items
 }
 
-fn menus(store: Store) {
+fn menus(store: Store, shown: Memo<String>) {
     use nsh_core::desktop::MenuRole;
     let mac = os() == Os::MacOs;
     effect(move || {
+        // In the language shown: `tr!` (the page titles) follows it once this has run.
+        let language = shown.get();
+        // A standard item: NSH's English (with the app's name), else ours.
+        let role = |r: MenuRole, key: &str| {
+            if language == "en" {
+                MenuItem::role(r)
+            } else {
+                MenuItem::role(r).label(t!(key))
+            }
+        };
         let mode = store.state.with(|s| s.settings.mode);
         let running = store.state.with(|s| s.core.is_running());
         let has_profile = store.state.with(|s| s.profiles.active.is_some());
@@ -167,49 +177,49 @@ fn menus(store: Store) {
             menus.push(MenuItem::submenu(
                 "Kairo",
                 [
-                    MenuItem::role(MenuRole::About),
+                    role(MenuRole::About, "menu.role.about"),
                     match store.state.with(|s| chrome::update_button(&s.update)) {
                         Some(b) => MenuItem::new(b.label).disabled(!b.enabled).on_select({
                             let svc = svc.clone();
                             move || chrome::update_pressed(&svc)
                         }),
-                        None => MenuItem::new("Check for Updates…").on_select({
+                        None => MenuItem::new(t!("menu.check_updates")).on_select({
                             let svc = svc.clone();
                             move || {
                                 store.run_then(svc.check_for_update(), move |r| {
                                     if let Ok(None) = r {
-                                        store.info("Kairo is up to date");
+                                        store.info(kairo_core::tr!("menu.up_to_date"));
                                     }
                                 })
                             }
                         }),
                     },
                     MenuItem::separator(),
-                    MenuItem::new("Settings…")
+                    MenuItem::new(t!("menu.settings"))
                         .shortcut("mod+,")
                         .on_select(move || store.page.set(Page::Settings)),
                     MenuItem::separator(),
-                    MenuItem::role(MenuRole::Hide),
-                    MenuItem::role(MenuRole::HideOthers),
+                    role(MenuRole::Hide, "menu.role.hide"),
+                    role(MenuRole::HideOthers, "menu.role.hide_others"),
                     MenuItem::separator(),
-                    MenuItem::role(MenuRole::Quit),
+                    role(MenuRole::Quit, "menu.role.quit"),
                 ],
             ));
         }
         let mut conn = vec![
-            MenuItem::new(if running { "Disconnect" } else { "Connect" })
+            MenuItem::new(if running { t!("menu.disconnect") } else { t!("menu.connect") })
                 .disabled(!has_profile)
                 .on_select({
                     let svc = svc.clone();
                     move || store.run(svc.connect(!running))
                 }),
             MenuItem::separator(),
-            MenuItem::submenu("Location", location_items(store)),
+            MenuItem::submenu(t!("menu.location"), location_items(store)),
         ];
         for (m, title) in [
-            (kairo_core::Mode::Rule, "Smart Route"),
-            (kairo_core::Mode::Global, "All Traffic"),
-            (kairo_core::Mode::Direct, "Direct"),
+            (kairo_core::Mode::Rule, t!("menu.mode.rule")),
+            (kairo_core::Mode::Global, t!("menu.mode.global")),
+            (kairo_core::Mode::Direct, t!("menu.mode.direct")),
         ] {
             let svc = svc.clone();
             conn.push(
@@ -220,9 +230,9 @@ fn menus(store: Store) {
         }
         conn.push(MenuItem::separator());
         conn.push(MenuItem::submenu(
-            "Core",
+            t!("menu.core"),
             [
-                MenuItem::new(if running { "Stop Core" } else { "Start Core" }).on_select({
+                MenuItem::new(if running { t!("menu.core.stop") } else { t!("menu.core.start") }).on_select({
                     let svc = svc.clone();
                     move || {
                         if running {
@@ -232,7 +242,7 @@ fn menus(store: Store) {
                         }
                     }
                 }),
-                MenuItem::new("Restart Core").disabled(!running).on_select({
+                MenuItem::new(t!("menu.core.restart")).disabled(!running).on_select({
                     let svc = svc.clone();
                     move || store.run(svc.restart_core())
                 }),
@@ -241,15 +251,15 @@ fn menus(store: Store) {
         if !mac {
             conn.push(MenuItem::separator());
             conn.push(
-                MenuItem::new("Settings…")
+                MenuItem::new(t!("menu.settings"))
                     .shortcut("mod+,")
                     .on_select(move || store.page.set(Page::Settings)),
             );
-            conn.push(MenuItem::role(MenuRole::Quit));
+            conn.push(role(MenuRole::Quit, "menu.role.quit"));
         }
-        menus.push(MenuItem::submenu("Connection", conn));
+        menus.push(MenuItem::submenu(t!("menu.connection"), conn));
         let mut go = vec![
-            MenuItem::new("Search Kairo…")
+            MenuItem::new(t!("menu.search"))
                 .shortcut("mod+k")
                 .on_select(crate::palette::open),
             MenuItem::separator(),
@@ -259,25 +269,25 @@ fn menus(store: Store) {
                 .shortcut(["mod+1", "mod+2", "mod+3", "mod+4", "mod+5"][i])
                 .on_select(move || store.page.set(page))
         }));
-        menus.push(MenuItem::submenu("Go", go));
+        menus.push(MenuItem::submenu(t!("menu.go"), go));
         menus.push(MenuItem::submenu(
-            "Edit",
+            t!("menu.edit"),
             [
-                MenuItem::role(MenuRole::Undo),
-                MenuItem::role(MenuRole::Redo),
+                role(MenuRole::Undo, "menu.role.undo"),
+                role(MenuRole::Redo, "menu.role.redo"),
                 MenuItem::separator(),
-                MenuItem::role(MenuRole::Cut),
-                MenuItem::role(MenuRole::Copy),
-                MenuItem::role(MenuRole::Paste),
-                MenuItem::role(MenuRole::SelectAll),
+                role(MenuRole::Cut, "menu.role.cut"),
+                role(MenuRole::Copy, "menu.role.copy"),
+                role(MenuRole::Paste, "menu.role.paste"),
+                role(MenuRole::SelectAll, "menu.role.select_all"),
             ],
         ));
         menus.push(MenuItem::submenu(
-            "Window",
+            t!("menu.window"),
             [
-                MenuItem::role(MenuRole::Minimize),
-                MenuItem::role(MenuRole::Zoom),
-                MenuItem::role(MenuRole::Close),
+                role(MenuRole::Minimize, "menu.role.minimize"),
+                role(MenuRole::Zoom, "menu.role.zoom"),
+                role(MenuRole::Close, "menu.role.close"),
             ],
         ));
         set_application_menu(menus);

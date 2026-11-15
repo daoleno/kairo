@@ -33,24 +33,24 @@ impl CoreStatus {
         matches!(self, CoreStatus::Running { .. })
     }
 
-    pub fn title(&self) -> &'static str {
+    pub fn title(&self) -> String {
         match self {
-            CoreStatus::Stopped => "Stopped",
-            CoreStatus::Starting => "Starting",
-            CoreStatus::Running { .. } => "Running",
-            CoreStatus::Stopping => "Stopping",
-            CoreStatus::Failed { .. } => "Stopped with an error",
+            CoreStatus::Stopped => crate::tr!("model.view.core.stopped"),
+            CoreStatus::Starting => crate::tr!("model.view.core.starting"),
+            CoreStatus::Running { .. } => crate::tr!("model.view.core.running"),
+            CoreStatus::Stopping => crate::tr!("model.view.core.stopping"),
+            CoreStatus::Failed { .. } => crate::tr!("model.view.core.failed"),
         }
     }
 
     /// The state as a person says it (the core runs: connected).
-    pub fn plain(&self) -> &'static str {
+    pub fn plain(&self) -> String {
         match self {
-            CoreStatus::Stopped => "Not Connected",
-            CoreStatus::Starting => "Connecting",
-            CoreStatus::Running { .. } => "Connected",
-            CoreStatus::Stopping => "Disconnecting",
-            CoreStatus::Failed { .. } => "Couldn't Connect",
+            CoreStatus::Stopped => crate::tr!("model.view.not_connected"),
+            CoreStatus::Starting => crate::tr!("model.view.connecting"),
+            CoreStatus::Running { .. } => crate::tr!("model.view.connected"),
+            CoreStatus::Stopping => crate::tr!("model.view.disconnecting"),
+            CoreStatus::Failed { .. } => crate::tr!("model.view.failed"),
         }
     }
 }
@@ -147,9 +147,9 @@ pub struct State {
 impl State {
     /// The connection as a person says it: nothing to connect through yet
     /// is "Not Set Up", whatever the core does meanwhile.
-    pub fn plain(&self) -> &'static str {
+    pub fn plain(&self) -> String {
         if self.profiles.active.is_none() {
-            "Not Set Up"
+            crate::tr!("model.view.not_set_up")
         } else {
             self.core.plain()
         }

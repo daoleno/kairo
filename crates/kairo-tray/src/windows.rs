@@ -133,15 +133,19 @@ fn data(hwnd: HWND, icon: HICON, tip: &str) -> NOTIFYICONDATAW {
     nid
 }
 
-fn tooltip(running: bool) -> &'static str {
-    if running { "Kairo: connected" } else { "Kairo" }
+fn tooltip(running: bool) -> String {
+    if running {
+        kairo_core::tr!("tray.tooltip.connected")
+    } else {
+        "Kairo".into()
+    }
 }
 
 fn add_icon(hwnd: HWND, ctx: &Ctx) {
     let nid = data(
         hwnd,
         if ctx.running { ctx.icon } else { ctx.dim_icon },
-        tooltip(ctx.running),
+        &tooltip(ctx.running),
     );
     // SAFETY: a valid structure for a window of this thread.
     unsafe {
@@ -184,10 +188,15 @@ fn build(m: &Model) -> Option<HMENU> {
     // SAFETY: menus are created, filled and destroyed by the caller.
     unsafe {
         let menu = CreatePopupMenu().ok()?;
+        let status = if m.running {
+            kairo_core::tr!("tray.status.connected")
+        } else {
+            m.status.clone()
+        };
         item(
             menu,
             ID_CORE,
-            if m.running { "Connected" } else { &m.status },
+            &status,
             m.has_profile,
             m.running,
         );
@@ -198,7 +207,7 @@ fn build(m: &Model) -> Option<HMENU> {
         for e in &m.exits {
             let Ok(sub) = CreatePopupMenu() else { continue };
             if let Some(on) = e.fastest {
-                item(sub, ID_FASTEST, "Fastest", true, on);
+                item(sub, ID_FASTEST, &kairo_core::tr!("tray.fastest"), true, on);
                 separator(sub);
             }
             let base = if e.id == ExitId::Ai { ID_AI } else { ID_REST };
@@ -206,26 +215,26 @@ fn build(m: &Model) -> Option<HMENU> {
                 item(sub, base + i, &Model::choice_label(c), true, c.checked);
             }
             separator(sub);
-            item(sub, ID_ALL, "All Servers…", true, false);
-            item(sub, ID_TEST, "Test Again", true, false);
-            let title = menu_text(&format!("{}: {}", e.title, e.place));
+            item(sub, ID_ALL, &kairo_core::tr!("tray.all_servers"), true, false);
+            item(sub, ID_TEST, &kairo_core::tr!("tray.test_again"), true, false);
+            let title = menu_text(&Model::exit_line(e));
             let _ = AppendMenuW(menu, MF_POPUP | MF_STRING, sub.0 as usize, &title);
         }
         separator(menu);
-        item(menu, 0, "Mode", false, false);
+        item(menu, 0, &kairo_core::tr!("tray.mode.title"), false, false);
         for (i, mode) in Mode::ALL.iter().enumerate() {
             item(
                 menu,
                 ID_MODE + i,
-                Model::route_title(*mode),
+                &Model::route_title(*mode),
                 true,
                 *mode == m.mode,
             );
         }
         separator(menu);
-        item(menu, ID_SHOW, "Open Kairo", true, false);
-        item(menu, ID_SETTINGS, "Settings…", true, false);
-        item(menu, ID_QUIT, "Quit Kairo", true, false);
+        item(menu, ID_SHOW, &kairo_core::tr!("tray.open"), true, false);
+        item(menu, ID_SETTINGS, &kairo_core::tr!("tray.settings"), true, false);
+        item(menu, ID_QUIT, &kairo_core::tr!("tray.quit"), true, false);
         Some(menu)
     }
 }
@@ -324,7 +333,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let nid = data(
                         hwnd,
                         if ctx.running { ctx.icon } else { ctx.dim_icon },
-                        tooltip(ctx.running),
+                        &tooltip(ctx.running),
                     );
                     // SAFETY: a valid structure for an icon this window added.
                     unsafe {
@@ -450,15 +459,21 @@ pub fn start(svc: Service, hooks: Hooks) -> Result<(), String> {
     if let Ok(mut r) = RUNNING.lock() {
         *r = Some((hwnd, handle));
     }
-    // Dim the icon while the core is stopped.
+    // Dim the icon while the core is stopped; its tooltip in a new language
+    // (the menu is made each time it opens).
     let rt = svc.runtime();
     rt.spawn(async move {
         let mut state = svc.state();
+        let mut language = kairo_core::i18n::watch();
         let mut last = None;
+        // The language of the tooltip (none yet: the first pass says it again).
+        let mut said: Option<String> = None;
         loop {
             let running = state.borrow().core.is_running();
-            if last != Some(running) {
+            let now = language.borrow_and_update().clone();
+            if last != Some(running) || said.as_ref() != Some(&now) {
                 last = Some(running);
+                said = Some(now);
                 // SAFETY: posting to a window of another thread is what PostMessage is for.
                 unsafe {
                     let _ = PostMessageW(
@@ -469,8 +484,9 @@ pub fn start(svc: Service, hooks: Hooks) -> Result<(), String> {
                     );
                 }
             }
-            if state.changed().await.is_err() {
-                break;
+            tokio::select! {
+                r = state.changed() => if r.is_err() { break },
+                r = language.changed() => if r.is_err() { break },
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }

@@ -221,7 +221,7 @@ fn toast() -> impl IntoElement {
                         }))
                         .child(text(message).text_size(px(size::body())).flex_shrink(1.0))
                         .child(
-                            ui::icon_btn(Icon::Close, "Dismiss")
+                            ui::icon_btn(Icon::Close, t!("shell.dismiss"))
                                 .size(px(20.0))
                                 .on_press(move || store.toast.set(None)),
                         ),
@@ -334,7 +334,7 @@ fn update_failure(store: crate::store::Store) -> impl IntoElement {
                 .gap_2()
                 .rounded(px(16.0))
                 .bg(move || ui::warning().opacity(0.14))
-                .child(ui::body("The update failed").font_weight(FontWeight::SEMIBOLD))
+                .child(ui::body(t!("update.failed")).font_weight(FontWeight::SEMIBOLD))
                 .child(ui::muted(message))
                 .child(
                     view()
@@ -342,14 +342,14 @@ fn update_failure(store: crate::store::Store) -> impl IntoElement {
                         .flex_wrap()
                         .gap_2()
                         .child(
-                            ui::btn("Try Again", ui::Variant::Primary).on_press(move || {
+                            ui::btn(t!("update.try_again"), ui::Variant::Primary).on_press(move || {
                                 let svc = store.svc();
                                 svc.dismiss_update_failure();
                                 store.run(svc.check_for_update());
                             }),
                         )
                         .child(
-                            ui::btn("Dismiss", ui::Variant::Secondary)
+                            ui::btn(t!("update.dismiss"), ui::Variant::Secondary)
                                 .on_press(move || store.svc().dismiss_update_failure()),
                         ),
                 )
