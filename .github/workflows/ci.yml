@@ -100,6 +100,31 @@ jobs:
           echo "KAIRO_TEST_CORE=$RUNNER_TEMP\\core\\mihomo.exe" >> "$GITHUB_ENV"
       - run: cargo test --workspace
 
+  ui:
+    name: UI · the headless tests (tests/*.test.tsx) against a real core and the fixture
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: System libraries (nsh builds the app for this host too)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: nsh (it runs the test files)
+        run: |
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: The pinned mihomo core (the one the packages ship)
+        run: |
+          scripts/fetch-mihomo.sh linux-x86_64 "$RUNNER_TEMP/core"
+          echo "KAIRO_TEST_CORE=$RUNNER_TEMP/core/mihomo" >> "$GITHUB_ENV"
+      - name: The tests, in a user + network namespace of their own (the fixture also at a public address)
+        run: |
+          # Ubuntu 24.04 confines unprivileged user namespaces by default.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          scripts/ui-test.sh
+
   android:
     name: Android · the arm64 APK builds (debug-signed)
     runs-on: ubuntu-24.04

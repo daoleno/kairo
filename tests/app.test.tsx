@@ -4,10 +4,13 @@
 // touched. The tests share the one Kairo service of the runner, in order:
 // the subscription added first is what the later ones see.
 import { expect, open, test } from "nsh/test";
-import { FIXTURE, MIXED } from "./ports";
+import { FIXTURE, MIXED, PUBLIC } from "./ports";
 
 const SUB = `http://127.0.0.1:${FIXTURE}/sub`;
-const NOTICE = `http://127.0.0.1:${FIXTURE}/notice`;
+// A provider's notice from an address Kairo does not count as this machine's: from
+// one that is, anything wrong is the one "No subscription could be read" (no page may
+// read local services through Kairo; the e2e tests check that one).
+const NOTICE = `http://${PUBLIC}:${FIXTURE}/notice`;
 const desktop = { platform: "linux", width: 1180, height: 760 } as const;
 const slow = { timeout: 20000 };
 

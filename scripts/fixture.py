@@ -10,7 +10,8 @@ also keeps sending requests through Kairo's mixed port so the live views move.
     python3 -I scripts/fixture.py --port 18080 [--traffic 17897]
 
 Subscription URL: http://127.0.0.1:<port>/sub
-A provider's notice instead of a config: http://127.0.0.1:<port>/notice
+A provider's notice instead of a config: http://127.0.0.1:<port>/notice (with --public ADDR,
+also at http://ADDR:<port>/notice: from this machine Kairo shows no provider's words)
 /down-on and /down-off: while on, /sub answers 502 (for tests)
 /notice-on and /notice-off: while on, /sub answers with a provider's long notice
 """
@@ -222,6 +223,8 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=18080)
     ap.add_argument("--traffic", type=int, default=0, help="Kairo's mixed port")
+    ap.add_argument("--public", default="", help="an address of no local network (in a network namespace of its own) "
+                    "where the origin also answers: Kairo reads what is wrong with a subscription there as its provider's")
     args = ap.parse_args()
     delays = [20, 45, 80, 140, 260, 520]
     ports = []
@@ -232,6 +235,8 @@ async def main():
     dead_port = args.port + 1 + len(delays)  # nothing listens here
     origin = f"127.0.0.1:{args.port}"
     await asyncio.start_server(lambda r, w: origin_handler(r, w, lambda: subscription(ports, dead_port, origin) + hosts_block(args.port)), "127.0.0.1", args.port)
+    if args.public:
+        await asyncio.start_server(lambda r, w: origin_handler(r, w, lambda: subscription(ports, dead_port, origin) + hosts_block(args.port)), args.public, args.port)
     print(f"subscription: http://{origin}/sub  proxies: {ports}", flush=True)
     if args.traffic:
         asyncio.ensure_future(traffic(args.traffic, origin))

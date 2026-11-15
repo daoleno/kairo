@@ -105,7 +105,7 @@ on macOS.
 scripts/fetch-mihomo.sh        # target/mihomo/: the pinned core (scripts/mihomo.env), checksum verified
 cargo run                      # the app (GTK 4 on Linux, AppKit on macOS), with that core
 nsh check                      # cargo check of every crate
-scripts/ui-test.sh             # nsh test: all unit, e2e and headless UI tests
+scripts/ui-test.sh             # nsh test: the headless UI tests, in a network namespace (cargo test runs the rest)
 scripts/tun-e2e.sh             # TUN end to end, in a network namespace
 scripts/package-linux.sh       # dist/: a tarball with the binary, the core, .desktop file, icons and install.sh
 scripts/package-deb.sh         # dist/: a .deb from that tree

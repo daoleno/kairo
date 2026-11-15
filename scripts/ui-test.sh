@@ -5,8 +5,36 @@
 # script writes for the run and puts back at the end. The core:
 # KAIRO_TEST_CORE, else target/mihomo/mihomo (scripts/fetch-mihomo.sh).
 # Never touches the system proxy.
+#
+# It runs in a user + network namespace of its own (unshare -rn, as
+# scripts/tun-e2e.sh): only `lo`, with 127.0.0.1 and PUBLIC (203.0.113.10, a
+# documentation address no network uses). The fixture answers there too, so a
+# provider's notice comes from an address Kairo does not count as this
+# machine's (from one that is, it shows no provider's words). Nothing in it
+# reaches the internet: everything is built first, outside it (a run that
+# matches no test), and the run inside is offline. Delays are measured against
+# the fixture's /generate_204 (testUrl), not a site on the internet.
 set -e
 cd "$(dirname "$0")/.."
+PUBLIC=203.0.113.10
+if [ -z "$KAIRO_UI_NETNS" ]; then
+  # The build alone (a filter no test matches), in a home of its own all the same:
+  # an app that starts must never meet this machine's Kairo or its core.
+  build_home=$(mktemp -d "${TMPDIR:-/tmp}/kairo-ui-build.XXXXXX")
+  for f in tests/*.test.tsx; do
+    KAIRO_HOME="$build_home" KAIRO_NO_SYSPROXY=1 KAIRO_NO_UPDATE=1 KAIRO_NO_ICON_FETCH=1 \
+      nsh test --filter "nothing is named this: the build alone" "$f" >/dev/null
+  done
+  rm -rf "$build_home"
+  unshare -rn true 2>/dev/null || {
+    echo "no user + network namespace (Ubuntu 24.04: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)" >&2
+    exit 1
+  }
+  KAIRO_UI_NETNS=1 exec unshare -rn sh "$PWD/scripts/ui-test.sh" "$@"
+fi
+ip link set lo up
+ip addr add "$PUBLIC/32" dev lo
+export CARGO_NET_OFFLINE=true
 KAIRO_TEST_CORE=${KAIRO_TEST_CORE:-$PWD/target/mihomo/mihomo}
 [ -x "$KAIRO_TEST_CORE" ] || { echo "no core: run scripts/fetch-mihomo.sh or set KAIRO_TEST_CORE" >&2; exit 1; }
 home=$(mktemp -d "${TMPDIR:-/tmp}/kairo-ui-test.XXXXXX")
@@ -38,11 +66,12 @@ cat > tests/ports.ts <<TS
 // Written by scripts/ui-test.sh for one run; the committed values are only defaults.
 export const FIXTURE = $fixture_port;
 export const MIXED = $mixed;
+export const PUBLIC = "$PUBLIC";
 TS
 cat > "$home/settings.json" <<JSON
-{"mixedPort": $mixed, "controllerPort": $controller, "corePath": "$KAIRO_TEST_CORE", "testTimeoutMs": 2000, "autoLocation": true}
+{"mixedPort": $mixed, "controllerPort": $controller, "corePath": "$KAIRO_TEST_CORE", "testTimeoutMs": 2000, "autoLocation": true, "testUrl": "http://$PUBLIC:$fixture_port/generate_204"}
 JSON
-python3 -I scripts/fixture.py --port "$fixture_port" > "$home/fixture.log" 2>&1 &
+python3 -I scripts/fixture.py --port "$fixture_port" --public "$PUBLIC" > "$home/fixture.log" 2>&1 &
 fixture=$!
 # The core outlives the app that started it (as after a crash): stop it too.
 cleanup() {
@@ -53,4 +82,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 sleep 1
-KAIRO_HOME="$home" KAIRO_NO_SYSPROXY=1 KAIRO_NO_UPDATE=1 KAIRO_NO_ICON_FETCH=1 nsh test "$@"
+# The test files, one after another on the one home (the first adds the subscription
+# the later ones see); the crates' own tests (cargo test) need the internet and run on their own.
+failed=0
+for f in tests/*.test.tsx; do
+  KAIRO_HOME="$home" KAIRO_NO_SYSPROXY=1 KAIRO_NO_UPDATE=1 KAIRO_NO_ICON_FETCH=1 nsh test "$@" "$f" || failed=1
+done
+exit $failed
