@@ -79,7 +79,7 @@ Download the latest release from [Releases](https://github.com/daoleno/kairo/rel
 - **Android 9+ (arm64)**: install `Kairo-<version>-android-arm64-v8a.apk` (sideload; allow installs from your
   browser or file manager when Android asks).
 - **Debian / Ubuntu 24.04+**: `sudo apt install ./kairo_<version>_amd64.deb` (or `_arm64`).
-- **Other Linux** (GTK 4.14+, libadwaita 1.5+, WebKitGTK 6.0): unpack the `.tar.gz` and run `./install.sh`, which installs
+- **Other Linux** (GTK 4.14+, libadwaita 1.5+, WebKitGTK 6.0, GStreamer 1.0): unpack the `.tar.gz` and run `./install.sh`, which installs
   to `~/.local`; `./install.sh /usr/local` installs system-wide with sudo.
 - **A Linux machine with no screen** (x86_64, arm64): unpack `Kairo-server-<version>-linux-<arch>.tar.gz` and
   run `./install.sh`. It installs `kairo-server` and a user service; the UI is a page behind a password, at
