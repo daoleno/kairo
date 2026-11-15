@@ -538,7 +538,7 @@ fn app_row(r: AppRow) -> impl IntoElement {
                     .chain((r.more > 0).then(|| ui::muted(format!("+{}", r.more)).into_element())),
             ),
         )
-        .child(cell(2).child(ui::muted(r.goes.clone()).text_size(px(size::body()))))
+        .child(cell(2).child(ui::muted(r.goes.clone()).text_size(px(size::body())).number_of_lines(1).flex_1().min_w(px(0.0))))
         .child(
             cell(3).child(
                 ui::body(if r.local || r.total == 0 {
