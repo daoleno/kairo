@@ -308,13 +308,13 @@ fn kind_view(kind: Kind, rows: Memo<Vec<AppRow>>) -> impl IntoElement {
             let list: Vec<AppRow> = rows.with(|r| r.iter().filter(|a| a.kind == kind).cloned().collect());
             untracked(move || {
                 if list.is_empty() {
-                    return ui::muted(t!("apps.kind.none", kind = kind.title()))
+                    return ui::muted(t!("apps.kind.none", kind = kind.in_sentence()))
                         .px_1()
                         .into_element();
                 }
                 view()
                     .gap_2()
-                    .child(ui::section_label(t!("apps.kind.section", kind = kind.title())).px_1())
+                    .child(ui::section_label(t!("apps.kind.section", kind = kind.in_sentence()).trim().to_owned()).px_1())
                     .child(ui::rows(list.into_iter().map(k::app_row).collect()))
                     .into_element()
             })
@@ -866,7 +866,7 @@ fn picker(kind: Kind) -> impl IntoElement {
                     move || follows() && !sub(),
                     move || k::follow_location(kind),
                     icon(Icon::Globe, 15.0).text_color(move || theme().muted_foreground).into_element(),
-                    ui::body(t!("kinds.exit.same_as", kind = Kind::Other.title())),
+                    ui::body(t!("kinds.exit.same_as", kind = Kind::Other.in_sentence()).trim().to_owned()),
                     ui::muted(""),
                     None,
                     None::<fn() -> Health>,

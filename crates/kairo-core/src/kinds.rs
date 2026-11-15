@@ -59,6 +59,18 @@ impl Kind {
         })
     }
 
+    /// The kind's name inside a sentence. Chinese puts a space between
+    /// Chinese and Latin letters, so there a Latin name ("AI") gets one on
+    /// each side; trim the sentence after.
+    pub fn in_sentence(self) -> String {
+        let title = self.title();
+        if title.is_ascii() && crate::i18n::language().starts_with("zh") {
+            format!(" {title} ")
+        } else {
+            title
+        }
+    }
+
     /// The hidden group Kairo makes for the kind when it needs one.
     pub fn group(self) -> &'static str {
         match self {

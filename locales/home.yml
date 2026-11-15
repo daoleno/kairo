@@ -154,6 +154,9 @@ exits.subtitle.fastest:
 exits.subtitle.chosen:
   en: "Chosen · %{node}"
   zh: "手动选择 · %{node}"
+exits.subtitle.pinned_today:
+  en: "%{node} · pinned today"
+  zh: "%{node} · 今天已固定"
 exits.subtitle.pinned:
   en: "%{node} · pinned %{when}"
   zh: "%{node} · 已固定 %{when}"
@@ -368,7 +371,7 @@ ai.lanes.direct:
   zh: "直连：%{names}"
 ai.lanes.direct_more:
   en: "Direct: %{names} and %{count} more"
-  zh: "直连：%{names} 等另外 %{count} 个"
+  zh: "直连：%{names} 及另外 %{count} 个"
 # Between names in a list: ", " in English, "、" in Chinese.
 ai.lanes.sep:
   en: ", "
@@ -536,7 +539,7 @@ kinds.by.game:
   zh: "Steam 游戏库文件夹 %{folder} 中的游戏"
 kinds.by.more:
   en: "%{sites} and %{count} more"
-  zh: "%{sites} 等另外 %{count} 个"
+  zh: "%{sites} 及另外 %{count} 个"
 kinds.by.catalog_program:
   en: "the program %{name}"
   zh: "程序 %{name}"
@@ -590,7 +593,7 @@ kinds.m.lost:
   zh: "丢包"
 kinds.m.lost_pct:
   en: "%{pct}% of the tries"
-  zh: "%{pct}% 的尝试"
+  zh: "%{pct}%"
 kinds.m.first_byte:
   en: "First byte"
   zh: "首字节"

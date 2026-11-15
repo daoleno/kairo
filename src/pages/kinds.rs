@@ -128,6 +128,9 @@ pub fn subtitle(kind: Kind) -> String {
         return tr!("kinds.as_subscription");
     }
     if let Some(since) = pinned_since(&state, kind) {
+        if (kairo_core::unix() - since).max(0) < 86400 {
+            return tr!("exits.subtitle.pinned_today", node = node);
+        }
         return tr!("exits.subtitle.pinned", node = node, when = pinned_for(since));
     }
     if on_fastest(&state, kind) {
@@ -442,12 +445,12 @@ pub fn all_rows(min: u64) -> Memo<Vec<AppRow>> {
 /// The words for an app's exit.
 pub fn exit_title(exit: &AppExit, kind: Kind) -> String {
     match exit {
-        AppExit::Kind => tr!("kinds.exit.same_as", kind = kind.title()),
+        AppExit::Kind => tr!("kinds.exit.same_as", kind = kind.in_sentence()).trim().to_owned(),
         AppExit::Subscription => tr!("kinds.as_subscription"),
         AppExit::Direct => tr!("kinds.exit.direct"),
         AppExit::Block => tr!("kinds.exit.block"),
         AppExit::Everything => Kind::Other.title(),
-        AppExit::Of(k) => tr!("kinds.exit.same_as", kind = k.title()),
+        AppExit::Of(k) => tr!("kinds.exit.same_as", kind = k.in_sentence()).trim().to_owned(),
         AppExit::Node(name) => node_title(name),
     }
 }
@@ -712,7 +715,7 @@ fn measured_row(ok: Option<bool>, title: String, value: String) -> AnyElement {
 
 /// What the kind's check measured, a line each.
 fn measured_rows(kind: Kind, c: &KindCheck) -> Vec<AnyElement> {
-    let through = tr!("kinds.m.through", kind = kind.title());
+    let through = tr!("kinds.m.through", kind = kind.in_sentence());
     match &c.measured {
         Measured::Streaming { reachable, catalog, country: cc, mbps } => {
             use kind_check::Catalog;
@@ -831,7 +834,7 @@ fn sheet_card(id: String) -> impl IntoElement {
             let measured: Vec<AnyElement> = if kind == Kind::Ai {
                 match &ai_check {
                     Some(c) => vec![
-                        measured_row(Some(c.reachable), tr!("kinds.m.reachable"), if c.reachable { tr!("kinds.m.through", kind = Kind::Ai.title()) } else { tr!("kinds.m.no_answer") }),
+                        measured_row(Some(c.reachable), tr!("kinds.m.reachable"), if c.reachable { tr!("kinds.m.through", kind = Kind::Ai.in_sentence()) } else { tr!("kinds.m.no_answer") }),
                         measured_row(
                             c.country.code().map(|_| true),
                             tr!("kinds.m.sees"),
