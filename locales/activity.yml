@@ -182,7 +182,7 @@ connections.age.minutes:
   zh: "%{n} 分"
 connections.age.hours:
   en: "%{h} h %{m} m"
-  zh: "%{h} 小时 %{m} 分"
+  zh: "%{h}时%{m}分"
 connections.age.days:
   en: "%{n} d"
   zh: "%{n} 天"
