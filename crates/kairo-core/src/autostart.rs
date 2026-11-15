@@ -16,7 +16,7 @@ fn home() -> PathBuf {
 fn executable() -> Result<String, String> {
     crate::paths::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
-        .ok_or_else(|| "cannot find this program".to_string())
+        .ok_or_else(|| crate::tr!("engine.autostart.no_program"))
 }
 
 #[cfg(target_os = "linux")]
@@ -68,8 +68,20 @@ pub fn entry(exe: &str, minimized: bool) -> String {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>{ID}</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>{exe}</string>{extra}\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>ProcessType</key>\n  <string>Interactive</string>\n  <key>AssociatedBundleIdentifiers</key>\n  <array>\n    <string>dev.kairo.app</string>\n  </array>\n</dict>\n</plist>\n"
         )
     } else {
+        // A line a piece (the entry's keys, not words of Kairo's: tests/i18n-allow.txt).
         format!(
-            "[Desktop Entry]\nType=Application\nName=Kairo\nComment=mihomo client\nExec=\"{exe}\"{flag}\nIcon={ID}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+            concat!(
+                "[Desktop Entry]",
+                "\n",
+                "Type=Application\nName=Kairo",
+                "\n",
+                "Comment=mihomo client",
+                "\n",
+                "Exec=\"{exe}\"{flag}\nIcon={ID}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+            ),
+            exe = exe,
+            flag = flag,
+            ID = ID,
         )
     }
 }
@@ -103,7 +115,7 @@ pub fn set(on: bool, minimized: bool) -> Result<(), String> {
     }
     #[allow(unreachable_code)]
     if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
-        return Err("not supported on this platform".into());
+        return Err(crate::tr!("engine.autostart.unsupported"));
     }
     let path = entry_path();
     if on {
@@ -155,8 +167,23 @@ pub fn restore_entry(exe: &str, kairo_home: Option<&str>) -> String {
         let env = kairo_home
             .map(|h| format!("env KAIRO_HOME=\"{h}\" "))
             .unwrap_or_default();
+        // A line a piece (the entry's keys, not words of Kairo's: tests/i18n-allow.txt).
         format!(
-            "[Desktop Entry]\nType=Application\nName=Kairo network check\nComment=Puts the system proxy back if Kairo could not\nExec={env}\"{exe}\" --restore-network\nNoDisplay=true\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+            concat!(
+                "[Desktop Entry]",
+                "\n",
+                "Type=Application",
+                "\n",
+                "Name=Kairo network check",
+                "\n",
+                "Comment=Puts the system proxy back if Kairo could not",
+                "\n",
+                "Exec={env}\"{exe}\" --restore-network",
+                "\n",
+                "NoDisplay=true\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+            ),
+            env = env,
+            exe = exe,
         )
     }
 }
@@ -214,6 +241,19 @@ mod tests {
             "\"C:\\Users\\a b\\kairo.exe\" --minimized"
         );
         assert_eq!(super::run_value("k.exe", None), "\"k.exe\"");
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn the_desktop_entries_are_what_they_were() {
+        assert_eq!(
+            super::entry("/k", true),
+            "[Desktop Entry]\nType=Application\nName=Kairo\nComment=mihomo client\nExec=\"/k\" --minimized\nIcon=dev.kairo.app\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+        );
+        assert_eq!(
+            super::restore_entry("/k", Some("/h")),
+            "[Desktop Entry]\nType=Application\nName=Kairo network check\nComment=Puts the system proxy back if Kairo could not\nExec=env KAIRO_HOME=\"/h\" \"/k\" --restore-network\nNoDisplay=true\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+        );
     }
 
     #[test]

@@ -221,7 +221,7 @@ impl Service {
         self.stats_manual(0);
         self.run(async move {
             let Some((group, _)) = svc.ai_group() else {
-                return Err("This subscription has no AI group to pin".into());
+                return Err(crate::tr!("engine.ai_ops.no_ai_group"));
             };
             let listed = svc
                 .0
@@ -232,7 +232,7 @@ impl Service {
                 .find(|g| g.name == group)
                 .is_some_and(|g| g.members.iter().any(|m| m.name == name));
             if !listed {
-                return Err(format!("{name} is not one of the AI group's choices"));
+                return Err(crate::tr!("engine.ai_ops.not_a_choice", name = name));
             }
             let fingerprint = svc
                 .0
@@ -241,7 +241,7 @@ impl Service {
                 .expect("ai cfg")
                 .as_ref()
                 .and_then(|c| ai::fingerprint(c, &name))
-                .ok_or_else(|| format!("{name} is not a server of this subscription"))?;
+                .ok_or_else(|| crate::tr!("engine.service.not_a_server", name = name))?;
             svc.modify(|s| {
                 s.settings.ai.exit = Some(AiExit {
                     name,
@@ -307,7 +307,7 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             if !svc.running() {
-                return Err("Connect first".into());
+                return Err(crate::tr!("engine.service.connect_first"));
             }
             svc.run_ai_check(true).await;
             Ok(())

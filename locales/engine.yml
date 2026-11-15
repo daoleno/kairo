@@ -1,0 +1,430 @@
+_version: 2
+
+# Updates (update.rs): checks, downloads and installs; the update card's and the notices' words.
+engine.update.signature_invalid:
+  en: "The update's signature is not valid"
+  zh: "更新的签名无效"
+engine.update.manifest_unreadable:
+  en: "The update manifest is unreadable: %{error}"
+  zh: "无法读取更新清单：%{error}"
+engine.update.checksum_mismatch:
+  en: "The download's checksum does not match (%{detail})"
+  zh: "下载文件的校验和不匹配（%{detail}）"
+engine.update.manifest_expired:
+  en: "The update manifest has expired: no update is offered"
+  zh: "更新清单已过期：暂无可用更新"
+engine.update.checksum_expected:
+  en: "expected %{expected}, got %{actual}"
+  zh: "应为 %{expected}，实际为 %{actual}"
+engine.update.checksum_listed:
+  en: "SHA256SUMS says %{listed}, got %{actual}"
+  zh: "SHA256SUMS 记录为 %{listed}，实际为 %{actual}"
+engine.update.checksum_unlisted:
+  en: "%{name} is not in SHA256SUMS"
+  zh: "SHA256SUMS 中没有 %{name}"
+engine.update.unreachable:
+  en: "Could not reach %{host}: %{error}"
+  zh: "无法连接 %{host}：%{error}"
+engine.update.http_status:
+  en: "%{host} answered HTTP %{status}"
+  zh: "%{host} 返回了 HTTP %{status}"
+engine.update.manual_only:
+  en: "This copy of Kairo cannot update itself: use the release page"
+  zh: "此 Kairo 无法自行更新：请前往发布页面"
+engine.update.nothing_to_download:
+  en: "No update is waiting to be downloaded"
+  zh: "没有待下载的更新"
+engine.update.download_failed:
+  en: "Kairo %{version} could not be downloaded. Check the connection and try again."
+  zh: "无法下载 Kairo %{version}。请检查网络连接后重试。"
+engine.update.download_corrupt:
+  en: "Kairo %{version} did not download correctly and was thrown away. Try again."
+  zh: "Kairo %{version} 未能正确下载，已被丢弃。请重试。"
+engine.update.withdrawn:
+  en: "The update is no longer on offer"
+  zh: "此更新已不再提供"
+engine.update.cannot_update_itself:
+  en: "This copy of Kairo cannot update itself"
+  zh: "此 Kairo 无法自行更新"
+engine.update.keep_failed:
+  en: "Could not keep the update: %{error}"
+  zh: "无法保存更新：%{error}"
+engine.update.nothing_waiting:
+  en: "No update is waiting"
+  zh: "没有待安装的更新"
+engine.update.changed_on_disk:
+  en: "The downloaded update changed on disk; it was removed"
+  zh: "已下载的更新在磁盘上被改动，已将其删除"
+engine.update.command_failed:
+  en: "%{program} failed: %{error}"
+  zh: "%{program} 失败：%{error}"
+engine.update.translocated:
+  en: "Kairo is running from a temporary location. Move it to Applications, open it from there, and update again."
+  zh: "Kairo 正从临时位置运行。请将它移到「应用程序」文件夹，从那里打开后再更新。"
+engine.update.no_parent:
+  en: "no parent"
+  zh: "没有上级文件夹"
+engine.update.cannot_write:
+  en: "Kairo cannot write to %{dir}"
+  zh: "Kairo 无法写入 %{dir}"
+engine.update.missing_files:
+  en: "The update is missing files"
+  zh: "更新缺少文件"
+engine.update.move_old_failed:
+  en: "Could not move the old Kairo aside: %{error}"
+  zh: "无法移开旧版 Kairo：%{error}"
+engine.update.place_new_failed:
+  en: "Could not put the new Kairo in place: %{error}"
+  zh: "无法放入新版 Kairo：%{error}"
+engine.update.unpack_failed:
+  en: "Could not unpack the update: %{error}"
+  zh: "无法解压更新：%{error}"
+engine.update.no_file:
+  en: "The update has no %{file}"
+  zh: "更新中没有 %{file}"
+engine.update.no_core:
+  en: "The update has no core"
+  zh: "更新中没有内核"
+engine.update.no_page:
+  en: "The update has no page"
+  zh: "更新中没有网页"
+engine.update.page_failed:
+  en: "The page: %{error}"
+  zh: "网页：%{error}"
+engine.update.read_failed:
+  en: "Could not read the update: %{error}"
+  zh: "无法读取更新：%{error}"
+engine.update.file_outside:
+  en: "The update has a file outside its folder"
+  zh: "更新中有文件位于其文件夹之外"
+engine.update.android_other_key:
+  en: "Android refused the update: it is signed with a different key than the Kairo installed on this phone (a test build, perhaps). Uninstall Kairo, then install this version from the release page; add your subscription again."
+  zh: "Android 拒绝了此更新：它的签名密钥与这台手机上已安装的 Kairo 不同（可能是测试版本）。请卸载 Kairo，再从发布页面安装此版本，然后重新添加订阅。"
+engine.update.android_storage:
+  en: "There is not enough free storage on this phone to install the update."
+  zh: "这台手机的可用存储空间不足，无法安装此更新。"
+engine.update.android_blocked:
+  en: "Android, or a security app on this phone, blocked the update."
+  zh: "Android 或这台手机上的安全应用阻止了此更新。"
+engine.update.android_invalid:
+  en: "Android did not accept the downloaded update as a valid app."
+  zh: "Android 未将下载的更新识别为有效的应用。"
+engine.update.android_failed:
+  en: "Android could not install the update."
+  zh: "Android 无法安装此更新。"
+engine.update.android_failed_because:
+  en: "Android could not install the update (%{reason})."
+  zh: "Android 无法安装此更新（%{reason}）。"
+engine.update.apt_failed:
+  en: "apt-get failed"
+  zh: "apt-get 失败"
+engine.update.relaunch_failed:
+  en: "Could not start the new Kairo: %{error}"
+  zh: "无法启动新版 Kairo：%{error}"
+
+# The system's password prompt (TUN's permission, a .deb update): polkit, the macOS dialog, UAC.
+engine.prompt.cancelled:
+  en: "Cancelled"
+  zh: "已取消"
+engine.prompt.no_polkit_agent:
+  en: "No polkit agent could ask for the password"
+  zh: "没有可用的 polkit 代理来询问密码"
+
+# The service (service.rs): connecting, settings, subscriptions; the error cards', notices' and status lines' words.
+engine.service.internal_error:
+  en: "internal error: %{error}"
+  zh: "内部错误：%{error}"
+engine.service.port_taken:
+  en: "Port %{port} is used by %{who}, and Kairo found no free port near it. Quit %{who} or choose another port in Settings."
+  zh: "端口 %{port} 已被 %{who} 占用，Kairo 在附近也找不到空闲端口。请退出 %{who}，或在设置中选择其他端口。"
+engine.service.port_moved:
+  en: "Port %{port} is used by %{who}, so Kairo is on %{free}."
+  zh: "端口 %{port} 已被 %{who} 占用，Kairo 改用 %{free}。"
+engine.service.save_settings_failed:
+  en: "Could not save settings: %{error}"
+  zh: "无法保存设置：%{error}"
+engine.service.save_profiles_failed:
+  en: "Could not save profiles: %{error}"
+  zh: "无法保存订阅：%{error}"
+engine.service.tun_off_after_update:
+  en: "TUN is off: the updated core needs permission again. Turn TUN on to grant it."
+  zh: "TUN 已关闭：更新后的内核需要重新授权。打开 TUN 即可授权。"
+engine.service.core_does_not_run:
+  en: "The core at %{path} does not run"
+  zh: "%{path} 处的内核无法运行"
+engine.service.stopped:
+  en: "The service stopped"
+  zh: "服务已停止"
+engine.service.core_restarting:
+  en: "The core stopped unexpectedly and is restarting: %{reason}"
+  zh: "内核意外停止，正在重启：%{reason}"
+engine.service.core_missing:
+  en: "The core is missing (%{path})"
+  zh: "找不到内核（%{path}）"
+engine.service.start_failed:
+  en: "Could not start the core: %{error}"
+  zh: "无法启动内核：%{error}"
+engine.service.controller_silent:
+  en: "The core started but its controller never answered"
+  zh: "内核已启动，但其控制器始终没有响应"
+engine.service.profile_file_missing:
+  en: "The active profile's file is missing: %{error}"
+  zh: "找不到当前订阅的文件：%{error}"
+engine.service.config_rejected:
+  en: "The core rejected the config: %{error}"
+  zh: "内核拒绝了此配置：%{error}"
+engine.service.launch_at_login_failed:
+  en: "Launch at login: %{error}"
+  zh: "登录时打开：%{error}"
+engine.service.sysproxy_not_set:
+  en: "The system proxy could not be set"
+  zh: "无法设置系统代理"
+engine.service.sysproxy_needs_core:
+  en: "The system proxy turns on when the core is running"
+  zh: "系统代理会在内核运行时开启"
+engine.service.tun_needs_permission:
+  en: "TUN needs permission first"
+  zh: "TUN 需要先获得权限"
+engine.service.sysproxy_failed:
+  en: "System proxy: %{error}"
+  zh: "系统代理：%{error}"
+engine.service.no_locations:
+  en: "This subscription has no locations to choose from"
+  zh: "此订阅没有可选的地区"
+engine.service.not_a_location:
+  en: "%{name} is not one of this subscription's locations"
+  zh: "%{name} 不是此订阅中的地区"
+engine.service.no_location_answered:
+  en: "No location answered. Check the network, or update the subscription"
+  zh: "没有地区响应。请检查网络，或更新订阅"
+engine.service.too_many_profiles:
+  en: "Kairo keeps at most %{max} subscriptions: delete one first"
+  zh: "Kairo 最多保留 %{max} 个订阅：请先删除一个"
+engine.service.invalid_url:
+  en: "Enter a valid URL"
+  zh: "请输入有效的 URL"
+engine.service.http_only:
+  en: "Subscriptions use http or https"
+  zh: "订阅只支持 http 或 https"
+engine.service.local_profile:
+  en: "Local"
+  zh: "本地"
+engine.service.no_such_profile:
+  en: "No such profile"
+  zh: "没有这个订阅"
+engine.service.local_no_update:
+  en: "Local profiles have nothing to update from"
+  zh: "本地订阅没有可更新的来源"
+engine.service.no_such_subscription:
+  en: "There is no such subscription"
+  zh: "没有这个订阅"
+engine.service.no_such_group:
+  en: "No such group"
+  zh: "没有这个策略组"
+engine.service.updating_geo:
+  en: "Updating geo databases"
+  zh: "正在更新地理数据库"
+engine.service.no_update_ready:
+  en: "No update is ready"
+  zh: "没有可安装的更新"
+engine.service.connect_first:
+  en: "Connect first"
+  zh: "请先连接"
+engine.service.not_a_server:
+  en: "%{name} is not a server of this subscription"
+  zh: "%{name} 不是此订阅中的节点"
+
+# The AI exit (service/ai_ops.rs).
+engine.ai_ops.no_ai_group:
+  en: "This subscription has no AI group to pin"
+  zh: "此订阅没有可固定节点的 AI 策略组"
+engine.ai_ops.not_a_choice:
+  en: "%{name} is not one of the AI group's choices"
+  zh: "%{name} 不在 AI 策略组的选项中"
+
+# The Downloads exit (service/downloads_ops.rs).
+engine.downloads_ops.exit_gone_fastest:
+  en: "The server %{was} you chose for downloads is no longer in the subscription. Downloads follow the fastest server now."
+  zh: "你为下载选择的节点 %{was} 已不在订阅中。下载现在改走最快的节点。"
+engine.downloads_ops.exit_gone_location:
+  en: "The server %{was} you chose for downloads is no longer in the subscription. Downloads follow the Location now."
+  zh: "你为下载选择的节点 %{was} 已不在订阅中。下载现在改走所选地区。"
+engine.downloads_ops.no_exit_ai_off:
+  en: "Downloads have no exit of their own while the AI layer is off"
+  zh: "AI 层关闭时，下载没有单独的出口"
+engine.downloads_ops.not_a_choice:
+  en: "%{name} is not one of the Downloads group's choices"
+  zh: "%{name} 不在下载策略组的选项中"
+engine.downloads_ops.switch_off:
+  en: "Downloads are not sent to their own exit while that switch is off"
+  zh: "此开关关闭时，下载不会走单独的出口"
+
+# TUN on Windows (elevated.rs): the one-time permission (UAC) and starting the core as SYSTEM.
+engine.elevated.cannot_pass:
+  en: "cannot pass %{arg} to the core host"
+  zh: "无法将 %{arg} 传给内核宿主程序"
+engine.elevated.not_granted:
+  en: "Windows did not give Kairo the permission"
+  zh: "Windows 未授予 Kairo 权限"
+engine.elevated.unknown_user:
+  en: "Could not tell which Windows user this is"
+  zh: "无法确定当前的 Windows 用户"
+engine.elevated.start_refused:
+  en: "Windows would not start the core: %{error}"
+  zh: "Windows 无法启动内核：%{error}"
+engine.elevated.no_helper:
+  en: "This copy of Kairo has no TUN helper next to it. Reinstall Kairo to get it back."
+  zh: "此 Kairo 旁边没有 TUN 辅助程序。请重新安装 Kairo 以恢复它。"
+engine.elevated.no_program:
+  en: "Cannot find Kairo's own program"
+  zh: "找不到 Kairo 自身的程序"
+engine.elevated.powershell_no_input:
+  en: "powershell: no input"
+  zh: "powershell：无法写入输入"
+engine.elevated.no_input:
+  en: "no input"
+  zh: "无法写入输入"
+engine.elevated.task_failed:
+  en: "scheduled task: %{error}"
+  zh: "计划任务：%{error}"
+engine.elevated.failed:
+  en: "failed"
+  zh: "失败"
+engine.elevated.service_failed:
+  en: "service: %{error}"
+  zh: "服务：%{error}"
+engine.elevated.service_rights_failed:
+  en: "service rights: %{error}"
+  zh: "服务权限：%{error}"
+engine.elevated.arg_missing:
+  en: "--%{name} is missing"
+  zh: "缺少 --%{name}"
+engine.elevated.not_a_sid:
+  en: "not a user SID"
+  zh: "不是用户 SID"
+
+# The system proxy (sysproxy.rs).
+engine.sysproxy.unsupported:
+  en: "This desktop has no system proxy Kairo can set"
+  zh: "此桌面环境没有 Kairo 能设置的系统代理"
+
+# TUN's permission on Linux and macOS (tun.rs).
+engine.tun.no_setcap:
+  en: "setcap is not installed (libcap)"
+  zh: "未安装 setcap（libcap）"
+engine.tun.did_not_stick:
+  en: "The permission did not stick (is the core on a filesystem without capabilities?)"
+  zh: "权限未能生效（内核所在的文件系统是否不支持文件能力？）"
+engine.tun.mac_prompt:
+  en: "Kairo needs permission to start TUN mode."
+  zh: "Kairo 需要权限才能启动 TUN 模式。"
+engine.tun.unsupported:
+  en: "TUN is not supported on this platform"
+  zh: "此平台不支持 TUN"
+
+# Launch at login (autostart.rs).
+engine.autostart.no_program:
+  en: "cannot find this program"
+  zh: "找不到本程序"
+engine.autostart.unsupported:
+  en: "not supported on this platform"
+  zh: "此平台不支持"
+
+# The core Kairo ships (core_bin.rs).
+engine.core_bin.not_bundled:
+  en: "The mihomo core is missing from this installation of Kairo. Reinstall Kairo to get it back."
+  zh: "此 Kairo 安装中缺少 mihomo 内核。请重新安装 Kairo 以恢复它。"
+engine.core_bin.broken:
+  en: "The mihomo core bundled with Kairo does not run: %{detail}"
+  zh: "Kairo 自带的 mihomo 内核无法运行：%{detail}"
+engine.core_bin.copy_failed:
+  en: "Could not copy the core: %{error}"
+  zh: "无法复制内核：%{error}"
+engine.core_bin.not_pinned:
+  en: "it is %{version}, not the core this Kairo ships (%{pinned})"
+  zh: "它是 %{version}，不是此 Kairo 自带的内核（%{pinned}）"
+engine.core_bin.older:
+  en: "it is %{version}, older than the folder's %{installed}"
+  zh: "它是 %{version}，比文件夹中的 %{installed} 旧"
+engine.core_bin.cannot_replace:
+  en: "The core at %{core} does not run, and %{bundled} is not one to replace it with: %{why}"
+  zh: "%{core} 处的内核无法运行，而 %{bundled} 不能用来替换它：%{why}"
+
+# The core's process (supervisor.rs): why it stopped.
+engine.supervisor.exit_code:
+  en: "The core exited with code %{code}"
+  zh: "内核已退出，退出代码 %{code}"
+engine.supervisor.signal:
+  en: "The core was stopped by signal %{signal}"
+  zh: "内核被信号 %{signal} 终止"
+engine.supervisor.stopped:
+  en: "The core stopped"
+  zh: "内核已停止"
+engine.supervisor.tun_needs_permission:
+  en: "TUN needs permission first (Settings, Every app)"
+  zh: "TUN 需要先获得权限（设置，所有应用）"
+engine.supervisor.task_did_not_start:
+  en: "The core did not start through its task"
+  zh: "内核未能通过其计划任务启动"
+engine.supervisor.task_did_not_start_said:
+  en: "The core did not start through its task: %{tail}"
+  zh: "内核未能通过其计划任务启动：%{tail}"
+
+# Android's VPN and installer (android.rs).
+engine.android.no_bridge:
+  en: "Kairo's Android bridge is not set up"
+  zh: "Kairo 的 Android 桥接尚未就绪"
+engine.android.vpn_denied:
+  en: "The VPN permission was not given"
+  zh: "未获得 VPN 权限"
+engine.android.vpn_failed:
+  en: "Android could not set up the VPN"
+  zh: "Android 无法建立 VPN"
+engine.android.vpn_error:
+  en: "The VPN could not start (%{code})"
+  zh: "VPN 无法启动（%{code}）"
+engine.android.dup_failed:
+  en: "The VPN's descriptor could not be duplicated"
+  zh: "无法复制 VPN 的文件描述符"
+engine.android.installer_failed:
+  en: "The installer failed"
+  zh: "安装程序失败"
+
+# The core's controller (controller.rs).
+engine.controller.unreachable:
+  en: "The core is not reachable"
+  zh: "无法访问内核"
+engine.controller.timeout:
+  en: "Timed out"
+  zh: "连接超时"
+engine.controller.secret_rejected:
+  en: "The controller rejected Kairo's secret"
+  zh: "控制器拒绝了 Kairo 的密钥"
+
+# The config (config.rs): the subscription's YAML, its override, the core's check.
+engine.config.profile_not_yaml:
+  en: "The profile is not valid YAML: %{error}"
+  zh: "订阅配置不是有效的 YAML：%{error}"
+engine.config.override_not_yaml:
+  en: "The override is not valid YAML: %{error}"
+  zh: "覆写配置不是有效的 YAML：%{error}"
+engine.config.not_a_mapping:
+  en: "the top level is not a mapping"
+  zh: "顶层不是键值映射"
+engine.config.run_failed:
+  en: "Could not run the core: %{error}"
+  zh: "无法运行内核：%{error}"
+engine.config.check_timeout:
+  en: "The core took too long to check the config"
+  zh: "内核检查配置超时"
+
+# Files, Windows, ports (paths.rs, winapi.rs, ports.rs).
+engine.paths.not_a_profile_id:
+  en: "not a subscription of Kairo's"
+  zh: "不是 Kairo 的订阅"
+engine.winapi.error:
+  en: "%{what}: Windows error %{code}"
+  zh: "%{what}：Windows 错误 %{code}"
+engine.ports.another_program:
+  en: "another program"
+  zh: "其他程序"

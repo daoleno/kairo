@@ -31,7 +31,7 @@ pub const INTERNET_SETTINGS: &str =
 pub const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
 fn err(what: &str, code: windows::Win32::Foundation::WIN32_ERROR) -> String {
-    format!("{what}: Windows error {}", code.0)
+    crate::tr!("engine.winapi.error", what = what, code = code.0)
 }
 
 /// An open `HKEY_CURRENT_USER` subkey, closed on drop.

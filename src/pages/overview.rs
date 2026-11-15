@@ -1,15 +1,17 @@
 //! Dates in the user's words, for the pages that show a subscription.
 
+use nsh_core::prelude::*;
+
 pub fn expiry_text(expire: Option<i64>) -> String {
     match expire {
-        None => "No expiry".into(),
+        None => t!("overview.no_expiry"),
         Some(t) => {
             let days = (t - kairo_core::profile::now()) / 86400;
             let date = date_of(t);
             if days < 0 {
-                format!("Expired {date}")
+                t!("overview.expired", date = date)
             } else {
-                format!("Expires {date} · {days} d left")
+                t!("overview.expires", date = date, days = days)
             }
         }
     }

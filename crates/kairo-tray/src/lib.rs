@@ -35,7 +35,8 @@ pub struct Choice {
     /// The server to go through (empty for nothing: see [`ExitMenu::fastest`]).
     pub name: String,
     pub label: String,
-    /// Good, OK, Slow or "".
+    /// Good, OK, Slow or "" (what [`health_word`] gives: shown through
+    /// [`health_label`]).
     pub health: &'static str,
     pub checked: bool,
 }
@@ -51,7 +52,7 @@ pub enum ExitId {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExitMenu {
     pub id: ExitId,
-    pub title: &'static str,
+    pub title: String,
     /// Where it goes now ("🇭🇰 Hong Kong").
     pub place: String,
     /// `Some(on)` when it has "Fastest" (the AI exit never does).
@@ -71,6 +72,8 @@ pub struct Model {
     /// "AI: all 6 see Japan", "AI: 2 problems".
     pub ai: String,
     pub exits: Vec<ExitMenu>,
+    /// The language its words are in (another one is another menu).
+    pub language: String,
 }
 
 /// A flag for a menu: Taiwan's is left out (Apple's emoji font omits it on
@@ -94,7 +97,8 @@ pub(crate) fn without_flags(text: &str) -> String {
         .to_owned()
 }
 
-/// How a delay reads in a menu.
+/// How good a delay is: "Good", "OK", "Slow" or "" (a value; a menu shows
+/// it through [`health_label`]).
 pub fn health_word(delay: Option<u32>) -> &'static str {
     match delay {
         None => "",
@@ -102,6 +106,16 @@ pub fn health_word(delay: Option<u32>) -> &'static str {
         Some(d) if d < 200 => "Good",
         Some(d) if d < 500 => "OK",
         Some(_) => "Slow",
+    }
+}
+
+/// A [`health_word`] in the language shown.
+pub fn health_label(health: &str) -> String {
+    match health {
+        "Good" => kairo_core::tr!("tray.health.good"),
+        "OK" => kairo_core::tr!("tray.health.ok"),
+        "Slow" => kairo_core::tr!("tray.health.slow"),
+        other => other.to_owned(),
     }
 }
 
@@ -130,20 +144,21 @@ pub fn ai_line(state: &kairo_core::State) -> String {
             .collect::<std::collections::BTreeSet<_>>()
             .len();
     if problems > 0 {
-        return format!(
-            "AI: {problems} {}",
-            if problems == 1 { "problem" } else { "problems" }
-        );
+        return if problems == 1 {
+            kairo_core::tr!("tray.ai.problem", count = problems)
+        } else {
+            kairo_core::tr!("tray.ai.problems", count = problems)
+        };
     }
     let codes: std::collections::BTreeSet<&str> =
         checks.iter().filter_map(|c| c.country.code()).collect();
     match (codes.len(), codes.iter().next()) {
-        (1, Some(code)) => format!(
-            "AI: all {} see {}",
-            checks.len(),
-            ai_check::country_name(code)
+        (1, Some(code)) => kairo_core::tr!(
+            "tray.ai.all_see",
+            count = checks.len(),
+            country = ai_check::country_name(code)
         ),
-        _ => format!("AI: {} reachable", checks.len()),
+        _ => kairo_core::tr!("tray.ai.reachable", count = checks.len()),
     }
 }
 
@@ -171,7 +186,7 @@ impl Model {
                 if p.region == "Other" {
                     p.title.clone()
                 } else {
-                    p.region.to_owned()
+                    places::region_title(p.region)
                 }
             )
         };
@@ -196,7 +211,7 @@ impl Model {
                         best.delay.filter(|d| *d > 0).unwrap_or(u32::MAX),
                         Choice {
                             name: best.name.clone(),
-                            label: format!("{}{region}", menu_flag(&flag)),
+                            label: format!("{}{}", menu_flag(&flag), places::region_title(region)),
                             health: health_word(best.delay),
                             checked: now.is_some_and(|n| list.iter().any(|p| p.name == n.name)),
                         },
@@ -210,7 +225,7 @@ impl Model {
         if main.is_some() {
             exits.push(ExitMenu {
                 id: ExitId::Rest,
-                title: "Everything else",
+                title: kairo_core::tr!("tray.exit.rest"),
                 place: rest_place
                     .as_ref()
                     .map(label_of)
@@ -225,7 +240,7 @@ impl Model {
             if s.ai.enabled && !state.ai.group.is_empty() {
                 exits.push(ExitMenu {
                     id: ExitId::Ai,
-                    title: "AI exit",
+                    title: kairo_core::tr!("tray.exit.ai"),
                     place: ai_place
                         .as_ref()
                         .map(label_of)
@@ -236,10 +251,10 @@ impl Model {
             }
         }
         let status = match &state.core {
-            CoreStatus::Running { .. } => "Connected".to_owned(),
-            CoreStatus::Starting => "Connecting…".into(),
-            CoreStatus::Failed { .. } => "Couldn't connect".into(),
-            _ => "Not Connected".into(),
+            CoreStatus::Running { .. } => kairo_core::tr!("tray.status.connected"),
+            CoreStatus::Starting => kairo_core::tr!("tray.status.connecting"),
+            CoreStatus::Failed { .. } => kairo_core::tr!("tray.status.failed"),
+            _ => kairo_core::tr!("tray.status.off"),
         };
         Model {
             status,
@@ -254,6 +269,7 @@ impl Model {
                 String::new()
             },
             exits,
+            language: kairo_core::i18n::language(),
         }
     }
 
@@ -262,17 +278,22 @@ impl Model {
         if c.health.is_empty() {
             c.label.clone()
         } else {
-            format!("{}    {}", c.label, c.health)
+            format!("{}    {}", c.label, health_label(c.health))
         }
     }
 
     /// The mode in plain words.
-    pub fn route_title(m: Mode) -> &'static str {
-        match m {
-            Mode::Rule => "Smart",
-            Mode::Global => "Everything",
-            Mode::Direct => "Direct",
-        }
+    pub fn route_title(m: Mode) -> String {
+        kairo_core::tr!(match m {
+            Mode::Rule => "tray.mode.rule",
+            Mode::Global => "tray.mode.global",
+            Mode::Direct => "tray.mode.direct",
+        })
+    }
+
+    /// The line of an exit's submenu: the exit and where it goes now.
+    pub fn exit_line(e: &ExitMenu) -> String {
+        kairo_core::tr!("tray.exit.line", exit = e.title, place = e.place)
     }
 }
 

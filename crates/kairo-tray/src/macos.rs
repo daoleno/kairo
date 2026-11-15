@@ -137,11 +137,16 @@ fn symbol(item: Retained<NSMenuItem>, name: &str) -> Retained<NSMenuItem> {
 fn build(target: &Target, menu: &NSMenu, m: &Model) {
     let mtm = MainThreadMarker::from(target);
     menu.removeAllItems();
+    let status = if m.running {
+        kairo_core::tr!("tray.status.connected")
+    } else {
+        m.status.clone()
+    };
     menu.addItem(&symbol(
         item(
             target,
             mtm,
-            if m.running { "Connected" } else { &m.status },
+            &status,
             TAG_CORE,
             m.has_profile,
             Some(m.running),
@@ -156,17 +161,17 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
         let holder = item(
             target,
             mtm,
-            &format!("{}: {}", e.title, e.place),
+            &Model::exit_line(e),
             0,
             true,
             None,
         );
         unsafe { holder.setAction(None) };
-        let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(e.title));
+        let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(&e.title));
         sub.setAutoenablesItems(false);
         if let Some(on) = e.fastest {
             sub.addItem(&symbol(
-                item(target, mtm, "Fastest", TAG_FASTEST, true, Some(on)),
+                item(target, mtm, &kairo_core::tr!("tray.fastest"), TAG_FASTEST, true, Some(on)),
                 "bolt",
             ));
             sub.addItem(&NSMenuItem::separatorItem(mtm));
@@ -183,18 +188,18 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
             ));
         }
         sub.addItem(&NSMenuItem::separatorItem(mtm));
-        sub.addItem(&item(target, mtm, "All Servers…", TAG_ALL, true, None));
-        sub.addItem(&item(target, mtm, "Test Again", TAG_TEST, true, None));
+        sub.addItem(&item(target, mtm, &kairo_core::tr!("tray.all_servers"), TAG_ALL, true, None));
+        sub.addItem(&item(target, mtm, &kairo_core::tr!("tray.test_again"), TAG_TEST, true, None));
         holder.setSubmenu(Some(&sub));
         menu.addItem(&holder);
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&item(target, mtm, "Mode", 0, false, None));
+    menu.addItem(&item(target, mtm, &kairo_core::tr!("tray.mode.title"), 0, false, None));
     for (i, mode) in Mode::ALL.iter().enumerate() {
         menu.addItem(&item(
             target,
             mtm,
-            Model::route_title(*mode),
+            &Model::route_title(*mode),
             TAG_MODE + i as isize,
             true,
             Some(*mode == m.mode),
@@ -202,15 +207,15 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     menu.addItem(&symbol(
-        item(target, mtm, "Open Kairo", TAG_SHOW, true, None),
+        item(target, mtm, &kairo_core::tr!("tray.open"), TAG_SHOW, true, None),
         "macwindow",
     ));
     menu.addItem(&symbol(
-        item(target, mtm, "Settings…", TAG_SETTINGS, true, None),
+        item(target, mtm, &kairo_core::tr!("tray.settings"), TAG_SETTINGS, true, None),
         "gearshape",
     ));
     menu.addItem(&symbol(
-        item(target, mtm, "Quit Kairo", TAG_QUIT, true, None),
+        item(target, mtm, &kairo_core::tr!("tray.quit"), TAG_QUIT, true, None),
         "xmark.circle",
     ));
 }
@@ -255,12 +260,32 @@ fn install(svc: Service, hooks: Hooks, mtm: MainThreadMarker) {
     status.setMenu(Some(&menu));
     HELD.with(|h| *h.borrow_mut() = Some((status, target, menu)));
 
-    // Dim the glyph while the core is stopped.
+    // Dim the glyph while the core is stopped; say the menu again in a new
+    // language (it is also made again each time it opens).
     let rt = svc.runtime();
     rt.spawn(async move {
         let mut state = svc.state();
+        let mut language = kairo_core::i18n::watch();
         let mut last = None;
+        // The language the menu was built in (none yet: the first pass builds it again).
+        let mut said: Option<String> = None;
         loop {
+            let now = language.borrow_and_update().clone();
+            if said.as_ref() != Some(&now) {
+                said = Some(now);
+                dispatch2::DispatchQueue::main().exec_async(|| {
+                    if MainThreadMarker::new().is_none() {
+                        return;
+                    }
+                    HELD.with(|h| {
+                        if let Some((_, target, menu)) = h.borrow().as_ref() {
+                            let model = Model::of(&target.ivars().svc);
+                            *target.ivars().model.borrow_mut() = model.clone();
+                            build(target, menu, &model);
+                        }
+                    });
+                });
+            }
             let running = state.borrow().core.is_running();
             if last != Some(running) {
                 last = Some(running);
@@ -277,8 +302,9 @@ fn install(svc: Service, hooks: Hooks, mtm: MainThreadMarker) {
                     });
                 });
             }
-            if state.changed().await.is_err() {
-                break;
+            tokio::select! {
+                r = state.changed() => if r.is_err() { break },
+                r = language.changed() => if r.is_err() { break },
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }

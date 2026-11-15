@@ -16,6 +16,7 @@ use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, size};
@@ -43,7 +44,7 @@ pub fn show_advanced(store: crate::store::Store) {
 /// built: the store comes from the context here, not when the button is pressed).
 pub fn back() -> toolbar::Spec {
     let store = store();
-    toolbar::button("back", "Back", Glyph::Back, Icon::ChevronLeft, move || {
+    toolbar::button("back", t!("settings.back"), Glyph::Back, Icon::ChevronLeft, move || {
         go_back(store)
     })
 }
@@ -82,18 +83,19 @@ impl Draft {
     }
 
     fn apply(&self, base: &Settings) -> Result<Settings, String> {
-        let port = |s: &str, what: &str| {
+        let port = |s: &str, error: fn() -> String| {
             s.trim()
                 .parse::<u16>()
                 .ok()
                 .filter(|p| *p > 0)
-                .ok_or_else(|| format!("{what} must be a port (1–65535)"))
+                .ok_or_else(error)
         };
         let mut next = base.clone();
-        next.mixed_port = port(&self.mixed_port, "The proxy port")?;
-        next.controller_port = port(&self.controller_port, "The controller port")?;
+        next.mixed_port = port(&self.mixed_port, || kairo_core::tr!("settings.error.proxy_port"))?;
+        next.controller_port =
+            port(&self.controller_port, || kairo_core::tr!("settings.error.controller_port"))?;
         if self.secret.trim().is_empty() {
-            return Err("The controller secret can't be empty".into());
+            return Err(kairo_core::tr!("settings.error.secret_empty"));
         }
         next.secret = self.secret.trim().to_owned();
         next.bypass = self
@@ -105,7 +107,7 @@ impl Draft {
         next.test_url = self.test_url.trim().to_owned();
         next.test_timeout_ms =
             self.test_timeout_ms.trim().parse().map_err(|_| {
-                "The delay test timeout must be a number of milliseconds".to_string()
+                kairo_core::tr!("settings.error.timeout")
             })?;
         let core = self.core_path.trim();
         next.core_path = (!core.is_empty()).then(|| core.to_owned());
@@ -164,7 +166,7 @@ pub fn page() -> impl IntoElement {
     let apply = move || match draft.get_untracked().apply(&store.svc().settings()) {
         Ok(next) => store.run_then(store.svc().update_settings(next), move |r| {
             if r.is_ok() {
-                store.info("Settings applied");
+                store.info(t!("settings.applied"));
             }
         }),
         Err(e) => store.error(e),
@@ -177,9 +179,9 @@ pub fn page() -> impl IntoElement {
             String::new,
             vec![toolbar::choice(
                 "settings.tab",
-                "Settings",
+                Page::Settings.title(),
                 Glyph::Sliders,
-                vec!["General", "Advanced"],
+                vec![t!("settings.tab.general"), t!("settings.tab.advanced")],
                 move || match tab.get() {
                     Tab::General => 0,
                     Tab::Advanced => 1,
@@ -221,12 +223,12 @@ pub fn page() -> impl IntoElement {
                 .border_color(move || theme().border)
                 .bg(move || ui::subtle())
                 .child(ui::dot(move || ui::warning()))
-                .child(ui::body("Unapplied changes").flex_1())
+                .child(ui::body(t!("settings.unapplied")).flex_1())
                 .child(
-                    ui::btn("Revert", Variant::Secondary)
+                    ui::btn(t!("settings.revert"), Variant::Secondary)
                         .on_press(move || draft.set(saved.get_untracked())),
                 )
-                .child(ui::btn("Apply", Variant::Primary).on_press(apply))
+                .child(ui::btn(t!("settings.apply"), Variant::Primary).on_press(apply))
         }))
 }
 
@@ -234,7 +236,7 @@ pub fn page() -> impl IntoElement {
 fn flag(
     settings: Memo<Settings>,
     get: fn(&Settings) -> bool,
-    label: &'static str,
+    label: impl Into<SharedString>,
     put: fn(&mut Settings, bool),
 ) -> AnyElement {
     let store = store();
@@ -263,7 +265,7 @@ fn general(settings: Memo<Settings>) -> impl IntoElement {
     view()
         .gap_5()
         .child(ui::group(
-            Some("General"),
+            Some(t!("settings.tab.general")),
             general_rows(settings, mac),
         ))
         .child(connection_group(settings))
@@ -278,13 +280,13 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
     let rows: Vec<AnyElement> = 
             vec![
                 ui::setting_row(
-                    "Appearance",
+                    t!("settings.appearance.title"),
                     None,
                     ui::segmented(
                         vec![
-                            (Theme::System, "System"),
-                            (Theme::Light, "Light"),
-                            (Theme::Dark, "Dark"),
+                            (Theme::System, t!("settings.appearance.system")),
+                            (Theme::Light, t!("settings.appearance.light")),
+                            (Theme::Dark, t!("settings.appearance.dark")),
                         ],
                         move || settings.with(|s| s.theme),
                         move |t| {
@@ -314,41 +316,41 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
                 .into_element(),
                 ui::setting_row(
                     if mac {
-                        "Open at login"
+                        t!("settings.login.open")
                     } else {
-                        "Launch at login"
+                        t!("settings.login.launch")
                     },
                     None,
                     flag(
                         settings,
                         |s| s.launch_at_login,
-                        "Open at login",
+                        t!("settings.login.open"),
                         |s, on| s.launch_at_login = on,
                     ),
                 )
                 .into_element(),
                 ui::setting_row(
-                    "Start minimized",
+                    t!("settings.start_minimized"),
                     None,
                     flag(
                         settings,
                         |s| s.start_minimized,
-                        "Start minimized",
+                        t!("settings.start_minimized"),
                         |s, on| s.start_minimized = on,
                     ),
                 )
                 .into_element(),
                 ui::setting_row(
                     if mac {
-                        "Keep running in the menu bar"
+                        t!("settings.keep_running.menu_bar")
                     } else {
-                        "Keep running in the tray"
+                        t!("settings.keep_running.tray")
                     },
                     None,
                     flag(
                         settings,
                         |s| s.close_to_tray,
-                        "Keep running in the tray",
+                        t!("settings.keep_running.tray"),
                         |s, on| s.close_to_tray = on,
                     ),
                 )
@@ -384,7 +386,7 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
         store.run_then(store.svc().grant_tun(), move |r| {
             granting.set(false);
             if r.is_ok() {
-                store.info("Permission granted");
+                store.info(t!("settings.tun.granted"));
                 if then_tun {
                     store.run(store.svc().set_tun(true));
                 }
@@ -404,10 +406,10 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
             Some(Privilege::Granted) => store.run(store.svc().set_tun(true)),
             Some(Privilege::Needed) => allow(true),
             Some(Privilege::Unsupported) => store.error(match ui::machine() {
-                Some(m) => format!("Every app (TUN) is not available on {m}"),
-                None => "Every app (TUN) is not available on this system".into(),
+                Some(m) => t!("settings.tun.unsupported_on", machine = m),
+                None => t!("settings.tun.unsupported"),
             }),
-            None => store.error("Install the core to use Every app (TUN)"),
+            None => store.error(t!("settings.tun.install_core")),
         },
     };
     // On Android every app is in the VPN: there is nothing to follow or grant.
@@ -417,54 +419,65 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
     // A server's page changes the server's apps: it says so.
     let machine = ui::machine();
     let grant = store.svc().tun_grant();
-    let here = machine.clone().unwrap_or_else(|| "This desktop".into());
+    let here = machine.clone();
     ui::group_titled(
         Some(match &machine {
-            Some(m) => format!("Connection on {m}").into(),
-            None => "Connection".into(),
+            Some(m) => t!("settings.connection.title_on", machine = m).into(),
+            None => t!("settings.connection.title").into(),
         }),
         vec![
             ui::setting_row_dyn(
-                "Apps follow",
+                t!("settings.connection.apps_follow"),
                 move || -> SharedString {
                     if !settings.with(|s| s.tun) && !store.state.with(|s| s.sysproxy_supported) {
-                        format!("{here} has no system proxy setting Kairo can use; choose Every app (TUN).").into()
+                        match &here {
+                            Some(m) => t!("settings.connection.no_sysproxy_on", machine = m),
+                            None => t!("settings.connection.no_sysproxy"),
+                        }
+                        .into()
                     } else {
                         "".into()
                     }
                 },
                 ui::segmented(
-                    vec![(Follow::System, "System settings"), (Follow::Tun, "Every app (TUN)")],
+                    vec![
+                        (Follow::System, t!("settings.connection.system")),
+                        (Follow::Tun, t!("settings.connection.tun")),
+                    ],
                     move || if settings.with(|s| s.tun) { Follow::Tun } else { Follow::System },
                     follow,
                 ),
             )
             .into_element(),
             ui::setting_row_dyn(
-                "Every app permission",
+                t!("settings.permission.title"),
                 move || -> SharedString {
                     match (privilege.get(), &grant) {
-                        (None, _) => "Install the core to use Every app (TUN).".into(),
+                        (None, _) => t!("settings.permission.install_core").into(),
                         // A server: its owner runs the command there.
-                        (Some(Privilege::Needed), Some(cmd)) => format!("Run on {}: {cmd}", machine.as_deref().unwrap_or("it")).into(),
+                        (Some(Privilege::Needed), Some(cmd)) => match machine.as_deref() {
+                            Some(m) => t!("settings.permission.run_on", machine = m, command = cmd),
+                            None => t!("settings.permission.run_on_it", command = cmd),
+                        }
+                        .into(),
                         (Some(Privilege::Granted | Privilege::Needed), _) => "".into(),
-                        (Some(Privilege::Unsupported), _) => "Not available on this platform".into(),
+                        (Some(Privilege::Unsupported), _) => t!("settings.permission.unsupported").into(),
                     }
                 },
                 dynamic(move || {
                     let p = privilege.get();
                     let remote = store.svc().is_remote();
                     untracked(move || match p {
-                        Some(Privilege::Granted) => ui::muted("Granted").into_element(),
-                        Some(Privilege::Needed) if remote => ui::btn("Check Again", Variant::Secondary)
+                        Some(Privilege::Granted) => ui::muted(t!("settings.permission.granted")).into_element(),
+                        Some(Privilege::Needed) if remote => ui::btn(t!("settings.permission.check_again"), Variant::Secondary)
                             .disabled(move || granting.get())
                             .on_press(move || allow(false))
                             .into_element(),
-                        Some(Privilege::Needed) => ui::btn_icon(Icon::Shield, "Allow", Variant::Secondary)
+                        Some(Privilege::Needed) => ui::btn_icon(Icon::Shield, t!("settings.permission.allow"), Variant::Secondary)
                             .disabled(move || granting.get())
                             .on_press(move || allow(false))
                             .into_element(),
-                        _ => ui::muted("Unavailable").into_element(),
+                        _ => ui::muted(t!("settings.permission.unavailable")).into_element(),
                     })
                 }),
             )
@@ -486,18 +499,18 @@ fn ai_group(settings: Memo<Settings>) -> impl IntoElement {
         }
     };
     ui::group(
-        Some("AI"),
+        Some(t!("settings.ai.title")),
         vec![
             ui::setting_row(
-                "AI tools use one exit",
+                t!("settings.ai.one_exit"),
                 None,
-                ui::toggle(ai(|a| a.enabled), "AI tools use one exit", set(|a, v| a.enabled = v)),
+                ui::toggle(ai(|a| a.enabled), t!("settings.ai.one_exit"), set(|a, v| a.enabled = v)),
             )
             .into_element(),
             ui::setting_row(
-                "Domestic AI goes direct",
+                t!("settings.ai.domestic_direct"),
                 None,
-                ui::toggle(ai(|a| a.domestic_direct), "Domestic AI goes direct", set(|a, v| a.domestic_direct = v)),
+                ui::toggle(ai(|a| a.domestic_direct), t!("settings.ai.domestic_direct"), set(|a, v| a.domestic_direct = v)),
             )
             .into_element(),
         ],
@@ -536,10 +549,10 @@ fn sessions_group() -> AnyElement {
                     let detail = session_detail(&s, now);
                     let id = s.id.clone();
                     let control = if s.current {
-                        ui::btn("Sign Out", Variant::Secondary)
+                        ui::btn(t!("settings.sessions.sign_out"), Variant::Secondary)
                             .on_press(move || store.run(store.svc().sign_out()))
                     } else {
-                        ui::btn("Sign Out", Variant::Secondary).on_press(move || {
+                        ui::btn(t!("settings.sessions.sign_out"), Variant::Secondary).on_press(move || {
                             store.run_then(store.svc().revoke_session(id.clone()), move |_| again())
                         })
                     };
@@ -550,19 +563,19 @@ fn sessions_group() -> AnyElement {
                 rows.push(
                     ui::setting_row(
                         if others > SESSIONS_SHOWN {
-                            SharedString::from(format!("All {others} other browsers"))
+                            SharedString::from(t!("settings.sessions.all_others_n", count = others))
                         } else {
-                            "All other browsers".into()
+                            t!("settings.sessions.all_others").into()
                         },
                         None,
-                        ui::btn("Sign Out", Variant::Secondary).on_press(move || {
+                        ui::btn(t!("settings.sessions.sign_out"), Variant::Secondary).on_press(move || {
                             store.run_then(store.svc().revoke_other_sessions(), move |_| again())
                         }),
                     )
                     .into_element(),
                 );
             }
-            ui::group(Some("Signed-in browsers"), rows).into_element()
+            ui::group(Some(t!("settings.sessions.title")), rows).into_element()
         })
     })
     .into_element()
@@ -571,15 +584,18 @@ fn sessions_group() -> AnyElement {
 /// "This browser · 192.168.1.20", or where and when another was last used.
 fn session_detail(s: &SessionInfo, now: i64) -> String {
     if s.current {
-        return format!("This browser · {}", s.address);
+        return t!("settings.sessions.this_browser", address = s.address);
     }
     let offset = kairo_core::time::local_offset_seconds();
     let when = if now - s.last_seen < 120 {
-        "active now".to_owned()
+        t!("settings.sessions.active_now")
     } else if (s.last_seen + offset).div_euclid(86_400) == (now + offset).div_euclid(86_400) {
-        "active today".to_owned()
+        t!("settings.sessions.active_today")
     } else {
-        format!("last active {}", date_text(s.last_seen + offset, now + offset))
+        t!(
+            "settings.sessions.last_active",
+            date = date_text(s.last_seen + offset, now + offset)
+        )
     };
     format!("{} · {when}", s.address)
 }
@@ -587,21 +603,23 @@ fn session_detail(s: &SessionInfo, now: i64) -> String {
 /// What the updater is doing, in a line.
 fn update_text(u: &UpdateStatus) -> String {
     match u {
-        UpdateStatus::Idle => "Updates".into(),
-        UpdateStatus::Checking => "Checking for updates…".into(),
-        UpdateStatus::UpToDate { checked } => format!("Kairo is up to date · checked at {checked}"),
+        UpdateStatus::Idle => t!("settings.update.idle"),
+        UpdateStatus::Checking => t!("settings.update.checking"),
+        UpdateStatus::UpToDate { checked } => t!("settings.update.up_to_date_at", time = checked),
         UpdateStatus::Downloading {
             version,
             progress: Some(p),
-        } => format!("Downloading Kairo {version} · {:.0}%", p * 100.0),
-        UpdateStatus::Downloading { version, .. } => format!("Downloading Kairo {version}…"),
-        UpdateStatus::Available { version } => format!("Kairo {version} is available"),
-        UpdateStatus::Ready { version } => format!("Kairo {version} is ready"),
-        UpdateStatus::Manual { version, .. } => {
-            format!("Kairo {version} is out (this copy cannot update itself)")
-        }
-        UpdateStatus::Installing { version } => format!("Installing Kairo {version}…"),
-        UpdateStatus::Failed { message } => format!("Update failed: {message}"),
+        } => t!(
+            "settings.update.downloading_progress",
+            version = version,
+            percent = format!("{:.0}%", p * 100.0)
+        ),
+        UpdateStatus::Downloading { version, .. } => t!("settings.update.downloading", version = version),
+        UpdateStatus::Available { version } => t!("settings.update.available", version = version),
+        UpdateStatus::Ready { version } => t!("settings.update.ready", version = version),
+        UpdateStatus::Manual { version, .. } => t!("settings.update.manual", version = version),
+        UpdateStatus::Installing { version } => t!("settings.update.installing", version = version),
+        UpdateStatus::Failed { message } => t!("settings.update.failed", message = message),
     }
 }
 
@@ -617,14 +635,14 @@ pub fn update_button() -> impl IntoElement {
             | UpdateStatus::Installing { .. }
             | UpdateStatus::Available { .. }
             | UpdateStatus::Ready { .. }
-            | UpdateStatus::Manual { .. } => ui::btn("Check for Updates", Variant::Secondary)
+            | UpdateStatus::Manual { .. } => ui::btn(t!("settings.update.check"), Variant::Secondary)
                 .disabled(true)
                 .into_element(),
-            _ => ui::btn("Check for Updates", Variant::Secondary)
+            _ => ui::btn(t!("settings.update.check"), Variant::Secondary)
                 .on_press(move || {
                     store.run_then(store.svc().check_for_update(), move |r| {
                         if let Ok(None) = r {
-                            store.info("Kairo is up to date");
+                            store.info(t!("settings.update.up_to_date"));
                         }
                     })
                 })
@@ -636,7 +654,7 @@ pub fn update_button() -> impl IntoElement {
 fn about_group() -> impl IntoElement {
     let store = store();
     ui::group(
-        Some("About"),
+        Some(t!("settings.about.title")),
         vec![
             ui::setting_row(
                 concat!("Kairo ", env!("CARGO_PKG_VERSION")),
@@ -658,7 +676,7 @@ fn text_field(
     apply: impl Fn() + Copy + 'static,
     get: fn(&Draft) -> String,
     put: fn(&mut Draft, String),
-    placeholder: &'static str,
+    placeholder: String,
     w: f32,
 ) -> nsh_base::Input {
     nsh_base::input()
@@ -689,7 +707,7 @@ fn advanced(
     let field =
         move |get: fn(&Draft) -> String,
               put: fn(&mut Draft, String),
-              placeholder: &'static str,
+              placeholder: String,
               w: f32| { text_field(draft, apply, get, put, placeholder, w) };
     let home = store.svc().paths().home.clone();
     let revealed = signal(false);
@@ -700,15 +718,15 @@ fn advanced(
     view()
         .gap_5()
         .child(ui::group(
-            Some("Advanced"),
+            Some(t!("settings.tab.advanced")),
             vec![
                 ui::setting_row(
-                    "Port (HTTP + SOCKS)",
+                    t!("settings.advanced.port"),
                     None,
                     field(
                         |d| d.mixed_port.clone(),
                         |d, v| d.mixed_port = v,
-                        "7897",
+                        "7897".into(),
                         90.0,
                     )
                     .text_right()
@@ -716,12 +734,12 @@ fn advanced(
                 )
                 .into_element(),
                 ui::setting_row(
-                    "Allow other devices on the network",
+                    t!("settings.advanced.allow_lan"),
                     None,
                     flag(
                         settings,
                         |s| s.allow_lan,
-                        "Allow other devices on the network",
+                        t!("settings.advanced.allow_lan"),
                         |s, on| s.allow_lan = on,
                     ),
                 )
@@ -733,18 +751,18 @@ fn advanced(
                 )
                 .into_element(),
                 ui::setting_row(
-                    "Skip the proxy for",
+                    t!("settings.advanced.bypass"),
                     None,
                     field(
                         |d| d.bypass.clone(),
                         |d, v| d.bypass = v,
-                        "localhost, 127.0.0.1, ::1",
+                        "localhost, 127.0.0.1, ::1".into(),
                         280.0,
                     ),
                 )
                 .into_element(),
                 ui::setting_row(
-                    "Controller",
+                    t!("settings.advanced.controller"),
                     None,
                     view()
                         .flex_row()
@@ -756,7 +774,7 @@ fn advanced(
                             field(
                                 |d| d.controller_port.clone(),
                                 |d, v| d.controller_port = v,
-                                "9097",
+                                "9097".into(),
                                 76.0,
                             )
                             .text_right(),
@@ -768,19 +786,19 @@ fn advanced(
                                     field(
                                         |d| d.secret.clone(),
                                         |d, v| d.secret = v,
-                                        "secret",
+                                        t!("settings.advanced.secret_placeholder"),
                                         240.0,
                                     )
                                 },
                             )
                             .otherwise(move || secret_mask(revealed, remote)),
                         )
-                        .child(ui::btn("New Secret", Variant::Secondary).on_press(move || {
+                        .child(ui::btn(t!("settings.advanced.new_secret"), Variant::Secondary).on_press(move || {
                             store.run_then(store.svc().new_secret(), move |r| {
                                 if let Ok(secret) = r {
                                     // The server's stays there: nothing to show.
                                     if remote {
-                                        store.info("New secret made");
+                                        store.info(t!("settings.advanced.new_secret_made"));
                                         return;
                                     }
                                     draft.update(|d| d.secret = secret);
@@ -793,7 +811,7 @@ fn advanced(
                 core_row(draft, apply, remote),
                 geo_row(),
                 ui::setting_row(
-                    "Delay test",
+                    t!("settings.advanced.delay_test"),
                     None,
                     view()
                         .flex_row()
@@ -804,14 +822,14 @@ fn advanced(
                         .child(field(
                             |d| d.test_url.clone(),
                             |d, v| d.test_url = v,
-                            "https://www.gstatic.com/generate_204",
+                            "https://www.gstatic.com/generate_204".into(),
                             280.0,
                         ))
                         .child(
                             field(
                                 |d| d.test_timeout_ms.clone(),
                                 |d, v| d.test_timeout_ms = v,
-                                "5000",
+                                "5000".into(),
                                 70.0,
                             )
                             .text_right(),
@@ -821,20 +839,20 @@ fn advanced(
                 .into_element(),
                 if remote {
                     ui::setting_row(
-                        "Config folder",
+                        t!("settings.advanced.config_folder"),
                         None,
                         ui::muted(home.display().to_string()).selectable(true),
                     )
                     .into_element()
                 } else {
                 ui::setting_row(
-                    "Config folder",
+                    t!("settings.advanced.config_folder"),
                     None,
                     ui::btn(
                         if cfg!(target_os = "macos") {
-                            "Open in Finder"
+                            t!("settings.advanced.open_in_finder")
                         } else {
-                            "Open Folder"
+                            t!("settings.advanced.open_folder")
                         },
                         Variant::Secondary,
                     )
@@ -855,7 +873,7 @@ fn advanced(
 /// The secret, hidden until asked for (a server's is never shown).
 fn secret_mask(revealed: Signal<bool>, remote: bool) -> impl IntoElement {
     button()
-        .accessibility_label("Show secret")
+        .accessibility_label(t!("settings.advanced.show_secret"))
         .on_press(move || {
             if !remote {
                 revealed.set(true)
@@ -879,6 +897,18 @@ fn secret_mask(revealed: Signal<bool>, remote: bool) -> impl IntoElement {
         )
 }
 
+/// The key of the core's state in a line ("running", "stopped with an error"),
+/// here and in Diagnostics.
+pub(crate) fn core_state_key(core: &CoreStatus) -> &'static str {
+    match core {
+        CoreStatus::Running { .. } => "settings.core.state.running",
+        CoreStatus::Starting => "settings.core.state.starting",
+        CoreStatus::Stopping => "settings.core.state.stopping",
+        CoreStatus::Stopped => "settings.core.state.stopped",
+        CoreStatus::Failed { .. } => "settings.core.state.failed",
+    }
+}
+
 /// The core: its version and state, Restart, and a core of one's own.
 fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static, remote: bool) -> AnyElement {
     let store = store();
@@ -889,44 +919,38 @@ fn core_row(draft: Signal<Draft>, apply: impl Fn() + Copy + 'static, remote: boo
                 Some(v) => format!("mihomo {v}"),
                 None => "mihomo".to_owned(),
             };
-            let state = match &s.core {
-                CoreStatus::Running { .. } => "running",
-                CoreStatus::Starting => "starting",
-                CoreStatus::Stopping => "stopping",
-                CoreStatus::Stopped => "stopped",
-                CoreStatus::Failed { .. } => "stopped with an error",
-            };
-            let custom = if s.settings.core_path.is_some() {
-                " · your own core"
+            let state = t!(core_state_key(&s.core));
+            if s.settings.core_path.is_some() {
+                format!("{version} · {state} · {}", t!("settings.core.own")).into()
             } else {
-                ""
-            };
-            format!("{version} · {state}{custom}").into()
+                format!("{version} · {state}").into()
+            }
         })
     };
     let custom = move || draft.with(|d| !d.core_path.trim().is_empty());
     ui::setting_row_dyn(
-        "Core",
+        t!("settings.core.title"),
         line,
         view()
             .flex_row()
             .items_center()
             .gap_2()
             .child(
-                ui::btn("Restart", Variant::Secondary)
+                ui::btn(t!("settings.core.restart"), Variant::Secondary)
                     .disabled(move || !store.state.with(|s| s.core.is_running()))
                     .on_press(move || store.run(store.svc().restart_core())),
             )
             .child(when(move || custom() && !remote, move || {
-                ui::btn("Use Kairo's", Variant::Secondary)
+                ui::btn(t!("settings.core.use_kairos"), Variant::Secondary)
                     .on_press(move || draft.update(|d| d.core_path.clear()))
             }))
-            .child((!remote).then(|| ui::btn("Custom", Variant::Secondary).on_press(move || {
+            .child((!remote).then(|| ui::btn(t!("settings.core.custom"), Variant::Secondary).on_press(move || {
+                let (title, choose) = (t!("settings.core.choose_title"), t!("settings.core.choose"));
                 spawn(async move {
                     let picked = pick_paths(
                         OpenDialog::files()
-                            .title("Choose a mihomo binary")
-                            .button_label("Choose"),
+                            .title(title)
+                            .button_label(choose),
                     )
                     .await;
                     if let Ok(Some(paths)) = picked
@@ -959,26 +983,26 @@ fn geo_row() -> AnyElement {
     });
     let detail = move || -> SharedString {
         match updated.get() {
-            Some(secs) => format!(
-                "Updated {}",
-                date_text(
+            Some(secs) => t!(
+                "settings.geo.updated_on",
+                date = date_text(
                     secs + kairo_core::time::local_offset_seconds(),
                     kairo_core::unix() + kairo_core::time::local_offset_seconds()
                 )
             )
             .into(),
-            None => "Not downloaded yet".into(),
+            None => t!("settings.geo.not_downloaded").into(),
         }
     };
     ui::setting_row_dyn(
-        "GeoIP and GeoSite",
+        t!("settings.geo.title"),
         detail,
         ui::btn(
             move || -> SharedString {
                 if updating.get() {
-                    "Updating…".into()
+                    t!("settings.geo.updating").into()
                 } else {
-                    "Update".into()
+                    t!("settings.geo.update").into()
                 }
             },
             Variant::Secondary,
@@ -990,7 +1014,7 @@ fn geo_row() -> AnyElement {
                 updating.set(false);
                 tick.update(|t| *t += 1);
                 if r.is_ok() {
-                    store.info("GeoIP and GeoSite updated");
+                    store.info(t!("settings.geo.updated"));
                 }
             });
         }),
@@ -1002,15 +1026,26 @@ fn geo_row() -> AnyElement {
 /// local seconds.
 fn date_text(local_secs: i64, local_now: i64) -> String {
     const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "settings.date.month.jan",
+        "settings.date.month.feb",
+        "settings.date.month.mar",
+        "settings.date.month.apr",
+        "settings.date.month.may",
+        "settings.date.month.jun",
+        "settings.date.month.jul",
+        "settings.date.month.aug",
+        "settings.date.month.sep",
+        "settings.date.month.oct",
+        "settings.date.month.nov",
+        "settings.date.month.dec",
     ];
     let (year, month, day) = civil(local_secs.div_euclid(86_400));
     let (now_year, _, _) = civil(local_now.div_euclid(86_400));
-    let name = MONTHS[(month as usize).clamp(1, 12) - 1];
+    let name = kairo_core::tr!(MONTHS[(month as usize).clamp(1, 12) - 1]);
     if year == now_year {
-        format!("{name} {day}")
+        kairo_core::tr!("settings.date.this_year", month = name, day = day)
     } else {
-        format!("{name} {day}, {year}")
+        kairo_core::tr!("settings.date.other_year", month = name, day = day, year = year)
     }
 }
 
@@ -1044,7 +1079,7 @@ fn thousands(n: usize) -> String {
 /// The count and a Show button that opens `page`.
 fn open(
     store: crate::store::Store,
-    label: &'static str,
+    label: impl Into<SharedString>,
     page: Page,
     count: impl Fn() -> SharedString + 'static,
 ) -> View {
@@ -1053,7 +1088,7 @@ fn open(
         .items_center()
         .gap_3()
         .child(ui::muted(count))
-        .child(ui::btn(label, Variant::Secondary).on_press(move || store.page.set(page)))
+        .child(ui::btn(label.into(), Variant::Secondary).on_press(move || store.page.set(page)))
 }
 
 /// "The subscription's groups", Rules, Diagnostics and DNS: read-only views
@@ -1086,24 +1121,23 @@ fn inspect_group() -> impl IntoElement {
         }
     });
     ui::group(
-        Some("Inspect"),
+        Some(t!("settings.inspect.title")),
         vec![
             ui::setting_row(
-                "The subscription's groups",
+                t!("settings.inspect.groups"),
                 None,
-                open(store, "Show", Page::Proxies, move || -> SharedString {
+                open(store, t!("settings.inspect.show"), Page::Proxies, move || -> SharedString {
                     match groups.get() {
                         0 => "".into(),
-                        1 => "1 group".into(),
-                        n => format!("{n} groups").into(),
+                        n => t!(&plural("settings.inspect.groups_count", n as u64), count = n).into(),
                     }
                 }),
             )
             .into_element(),
             ui::setting_row(
-                "Rules",
+                Page::Rules.title(),
                 None,
-                open(store, "Show", Page::Rules, move || -> SharedString {
+                open(store, t!("settings.inspect.show"), Page::Rules, move || -> SharedString {
                     match rules.get() {
                         Some(n) => thousands(n).into(),
                         None => "".into(),
@@ -1112,15 +1146,15 @@ fn inspect_group() -> impl IntoElement {
             )
             .into_element(),
             ui::setting_row(
-                "Diagnostics",
+                Page::Logs.title(),
                 None,
-                open(store, "Show", Page::Logs, || "".into()),
+                open(store, t!("settings.inspect.show"), Page::Logs, || "".into()),
             )
             .into_element(),
             ui::setting_row(
-                "DNS",
+                Page::Dns.title(),
                 None,
-                ui::btn("Look Up", Variant::Secondary).on_press(move || store.page.set(Page::Dns)),
+                ui::btn(t!("settings.inspect.look_up"), Variant::Secondary).on_press(move || store.page.set(Page::Dns)),
             )
             .into_element(),
         ],

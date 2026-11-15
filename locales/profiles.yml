@@ -1,0 +1,419 @@
+_version: 2
+
+# Subscriptions: where a subscription comes from, and when it was updated.
+profiles.host_unknown:
+  en: Subscription
+  zh: 订阅
+profiles.source.file:
+  en: Imported file
+  zh: 导入的文件
+profiles.updated.never:
+  en: Never updated
+  zh: 从未更新
+profiles.updated.just_now:
+  en: Updated just now
+  zh: 刚刚更新
+profiles.updated.minutes:
+  en: "Updated %{n} min ago"
+  zh: "%{n} 分钟前更新"
+profiles.updated.hours:
+  en: "Updated %{n} h ago"
+  zh: "%{n} 小时前更新"
+profiles.updated.days:
+  en: "Updated %{n} d ago"
+  zh: "%{n} 天前更新"
+# How often a subscription updates (its menu, the Add dialog).
+profiles.interval.by_hand:
+  en: Only by hand
+  zh: 仅手动
+profiles.interval.hour:
+  en: Every hour
+  zh: 每小时
+profiles.interval.day:
+  en: Every day
+  zh: 每天
+profiles.interval.week:
+  en: Every week
+  zh: 每周
+profiles.interval.days:
+  en: "Every %{n} days"
+  zh: "每 %{n} 天"
+profiles.interval.hours:
+  en: "Every %{n} hours"
+  zh: "每 %{n} 小时"
+# "Updated 2 h ago · every 12 h"
+profiles.schedule.by_hand:
+  en: "%{ago} · by hand"
+  zh: "%{ago} · 手动更新"
+profiles.schedule.every:
+  en: "%{ago} · every %{h} h"
+  zh: "%{ago} · 每 %{h} 小时"
+profiles.schedule.file:
+  en: Not updated automatically
+  zh: 不自动更新
+# A date: "Dec 2".
+profiles.date.jan:
+  en: "Jan %{day}"
+  zh: "1月%{day}日"
+profiles.date.feb:
+  en: "Feb %{day}"
+  zh: "2月%{day}日"
+profiles.date.mar:
+  en: "Mar %{day}"
+  zh: "3月%{day}日"
+profiles.date.apr:
+  en: "Apr %{day}"
+  zh: "4月%{day}日"
+profiles.date.may:
+  en: "May %{day}"
+  zh: "5月%{day}日"
+profiles.date.jun:
+  en: "Jun %{day}"
+  zh: "6月%{day}日"
+profiles.date.jul:
+  en: "Jul %{day}"
+  zh: "7月%{day}日"
+profiles.date.aug:
+  en: "Aug %{day}"
+  zh: "8月%{day}日"
+profiles.date.sep:
+  en: "Sep %{day}"
+  zh: "9月%{day}日"
+profiles.date.oct:
+  en: "Oct %{day}"
+  zh: "10月%{day}日"
+profiles.date.nov:
+  en: "Nov %{day}"
+  zh: "11月%{day}日"
+profiles.date.dec:
+  en: "Dec %{day}"
+  zh: "12月%{day}日"
+# The usage line: "37 of 100 GB · expires Dec 2".
+profiles.used_of:
+  en: "%{used} of %{total}"
+  zh: "已用 %{used} / %{total}"
+profiles.usage.none:
+  en: No usage data
+  zh: 暂无用量数据
+profiles.usage.used:
+  en: "%{size} used"
+  zh: "已用 %{size}"
+profiles.usage.no_expiry:
+  en: no expiry
+  zh: 长期有效
+profiles.usage.expired:
+  en: "expired %{date}"
+  zh: "已于 %{date}到期"
+profiles.usage.expires:
+  en: "expires %{date}"
+  zh: "%{date}到期"
+# Subscription usage: the four tiles.
+profiles.usage.title:
+  en: Subscription usage
+  zh: 订阅用量
+profiles.usage.show:
+  en: Usage
+  zh: 用量
+profiles.usage.hide:
+  en: Hide usage
+  zh: 收起用量
+profiles.tile.used:
+  en: Used
+  zh: 已用
+profiles.tile.of_total:
+  en: "of %{total}"
+  zh: "共 %{total}"
+profiles.tile.no_limit:
+  en: no limit
+  zh: 不限量
+profiles.tile.left:
+  en: Left
+  zh: 剩余
+profiles.tile.no_limit_value:
+  en: No limit
+  zh: 不限量
+# "22 days to Dec 2"
+profiles.tile.days_to.one:
+  en: "%{count} day to %{date}"
+  zh: "距 %{date}还有 %{count} 天"
+profiles.tile.days_to.other:
+  en: "%{count} days to %{date}"
+  zh: "距 %{date}还有 %{count} 天"
+profiles.tile.pace:
+  en: Recent pace
+  zh: 近期日均
+profiles.tile.pace_unmeasured:
+  en: not measured yet
+  zh: 尚未统计
+profiles.tile.pace_measured:
+  en: over the last days
+  zh: 按最近几天计算
+profiles.tile.per_day:
+  en: "%{size}/day"
+  zh: "%{size}/天"
+# What to use per day for the rest to last until the plan expires.
+profiles.tile.last_until:
+  en: "To last until %{date}"
+  zh: "若要用到 %{date}"
+profiles.tile.last_until_expiry:
+  en: To last until expiry
+  zh: 用到到期日
+profiles.tile.at_most_per_day:
+  en: "≤ %{size}/day"
+  zh: "≤ %{size}/天"
+# "63 GB over 22 days"
+profiles.tile.over_days.one:
+  en: "%{size} over %{count} day"
+  zh: "%{count} 天共 %{size}"
+profiles.tile.over_days.other:
+  en: "%{size} over %{count} days"
+  zh: "%{count} 天共 %{size}"
+# A provider's failed update, in plain words (the HTTP status after "Your provider says").
+profiles.http.too_many_requests:
+  en: Too Many Requests
+  zh: 请求过多
+profiles.http.internal_server_error:
+  en: Internal Server Error
+  zh: 服务器内部错误
+profiles.http.bad_gateway:
+  en: Bad Gateway
+  zh: 网关错误
+profiles.http.service_unavailable:
+  en: Service Unavailable
+  zh: 服务不可用
+profiles.http.gateway_timeout:
+  en: Gateway Timeout
+  zh: 网关超时
+profiles.http.server_error:
+  en: Server Error
+  zh: 服务器错误
+profiles.provider_says:
+  en: "Your provider says: “%{code} %{reason}”"
+  zh: "服务商提示：「%{code} %{reason}」"
+# After the subscription's name: "Backup couldn't update · …. Using the saved copy."
+profiles.banner:
+  en: "couldn't update · %{headline}. Using the saved copy."
+  zh: "无法更新 · %{headline}。正在使用已保存的副本。"
+profiles.banner.retry:
+  en: Retry
+  zh: 重试
+profiles.banner.retrying:
+  en: Retrying…
+  zh: 正在重试…
+profiles.banner.close:
+  en: Close
+  zh: 关闭
+# The page: toolbar, list, rows.
+profiles.count.one:
+  en: "%{count} subscription"
+  zh: "%{count} 个订阅"
+profiles.count.other:
+  en: "%{count} subscriptions"
+  zh: "%{count} 个订阅"
+profiles.update_all:
+  en: Update All
+  zh: 全部更新
+profiles.add.button:
+  en: Add
+  zh: 添加
+profiles.empty:
+  en: No subscriptions yet
+  zh: 还没有订阅
+profiles.updating:
+  en: Updating…
+  zh: 正在更新…
+profiles.use:
+  en: Use
+  zh: 使用
+profiles.update:
+  en: Update
+  zh: 更新
+profiles.more:
+  en: More
+  zh: 更多
+profiles.in_use:
+  en: In use
+  zh: 使用中
+# ⋯: Rename, Change Link, Update Interval, Remove.
+profiles.menu.rename:
+  en: Rename…
+  zh: 重命名…
+profiles.menu.change_link:
+  en: Change Link…
+  zh: 更改链接…
+profiles.menu.interval:
+  en: Update Interval
+  zh: 更新间隔
+profiles.menu.remove:
+  en: Remove…
+  zh: 移除…
+profiles.remove.title:
+  en: "Remove “%{name}”?"
+  zh: "移除「%{name}」？"
+profiles.remove.active:
+  en: "Kairo deletes its saved copy. It is the one in use: Kairo switches to another subscription, or disconnects when there is none."
+  zh: "Kairo 会删除已保存的副本。这是正在使用的订阅：Kairo 会切换到另一个订阅；没有其他订阅时将断开连接。"
+profiles.remove.other:
+  en: Kairo deletes its saved copy. You can add it again later.
+  zh: Kairo 会删除已保存的副本。之后可以重新添加。
+profiles.remove.confirm:
+  en: Remove
+  zh: 移除
+profiles.cancel:
+  en: Cancel
+  zh: 取消
+profiles.save:
+  en: Save
+  zh: 保存
+# Add a Subscription.
+profiles.add.title:
+  en: Add a Subscription
+  zh: 添加订阅
+profiles.form.link:
+  en: Link
+  zh: 链接
+profiles.form.name:
+  en: Name
+  zh: 名称
+profiles.form.name_from_provider:
+  en: From the provider
+  zh: 使用服务商提供的名称
+profiles.form.update:
+  en: Update
+  zh: 更新
+profiles.form.interval_provider:
+  en: As the provider says
+  zh: 按服务商设置
+profiles.add.import:
+  en: Import a File
+  zh: 导入文件
+profiles.add.downloading:
+  en: Downloading…
+  zh: 正在下载…
+profiles.add.try_again:
+  en: Try Again
+  zh: 重试
+profiles.added:
+  en: Subscription added
+  zh: 已添加订阅
+profiles.imported:
+  en: Config imported
+  zh: 已导入配置
+profiles.import.filter:
+  en: Clash / mihomo config
+  zh: Clash / mihomo 配置
+profiles.import.title:
+  en: Import a Config
+  zh: 导入配置
+profiles.import.no_dialog:
+  en: "No file dialog: %{error}"
+  zh: "无法打开文件对话框：%{error}"
+# Rename, Change Link.
+profiles.rename.title:
+  en: Rename
+  zh: 重命名
+profiles.link.title:
+  en: Change Link
+  zh: 更改链接
+profiles.link.now:
+  en: "Now: %{host}"
+  zh: "当前：%{host}"
+profiles.link.save:
+  en: Save and Update
+  zh: 保存并更新
+
+# Groups (Settings › Advanced › Inspect): the subscription's groups and providers.
+groups.filter:
+  en: Filter nodes
+  zh: 筛选节点
+groups.sort.label:
+  en: Sort
+  zh: 排序
+groups.sort.config:
+  en: Config Order
+  zh: 配置顺序
+groups.sort.delay:
+  en: Delay
+  zh: 延迟
+groups.sort.name:
+  en: Name
+  zh: 名称
+groups.refresh:
+  en: Refresh
+  zh: 刷新
+groups.empty:
+  en: No groups
+  zh: 没有策略组
+groups.core_not_running:
+  en: The core is not running
+  zh: 内核未运行
+groups.start_core:
+  en: Start Core
+  zh: 启动内核
+groups.section.groups:
+  en: Groups
+  zh: 策略组
+groups.section.providers:
+  en: Providers
+  zh: 代理集合
+# A group's type (mihomo's Selector, URLTest, Fallback, LoadBalance, Relay).
+groups.kind.select:
+  en: Select
+  zh: 手动选择
+groups.kind.url_test:
+  en: URL Test
+  zh: 自动选择
+groups.kind.fallback:
+  en: Fallback
+  zh: 故障转移
+groups.kind.load_balance:
+  en: Load Balance
+  zh: 负载均衡
+groups.kind.relay:
+  en: Relay
+  zh: 链式代理
+# "URL Test · 12 members"
+groups.members:
+  en: "%{kind} · %{count} members"
+  zh: "%{kind} · %{count} 个成员"
+groups.testing:
+  en: Testing…
+  zh: 正在测速…
+groups.test_all:
+  en: Test All
+  zh: 全部测速
+groups.test:
+  en: Test
+  zh: 测速
+# A node that is itself a group, in the type column.
+groups.node.group:
+  en: Group
+  zh: 策略组
+# A provider: "HTTP · 3/12 alive", "HTTP · 12 nodes · 3 alive · updated 2026-11-02".
+groups.provider.alive:
+  en: "%{vehicle} · %{alive}/%{count} alive"
+  zh: "%{vehicle} · %{alive}/%{count} 可用"
+groups.provider.summary:
+  en: "%{vehicle} · %{count} nodes · %{alive} alive"
+  zh: "%{vehicle} · %{count} 个节点 · %{alive} 个可用"
+groups.provider.summary_updated:
+  en: "%{vehicle} · %{count} nodes · %{alive} alive · updated %{date}"
+  zh: "%{vehicle} · %{count} 个节点 · %{alive} 个可用 · 更新于 %{date}"
+groups.checking:
+  en: Checking…
+  zh: 正在检查…
+groups.health_check:
+  en: Health Check
+  zh: 健康检查
+groups.provider.update:
+  en: Update
+  zh: 更新
+groups.provider.updated:
+  en: Provider updated
+  zh: 已更新代理集合
+groups.provider.subscription:
+  en: Subscription
+  zh: 订阅
+groups.provider.usage:
+  en: "%{used} of %{total} · %{expiry}"
+  zh: "%{used} / %{total} · %{expiry}"

@@ -110,7 +110,7 @@ pub fn tun_fd() -> Option<i32> {
 pub fn establish() -> Result<i32, String> {
     let bridge = BRIDGE
         .get()
-        .ok_or("Kairo's Android bridge is not set up")?;
+        .ok_or_else(|| crate::tr!("engine.android.no_bridge"))?;
     let mut env = bridge
         .vm
         .attach_current_thread()
@@ -124,16 +124,16 @@ pub fn establish() -> Result<i32, String> {
             format!("JNI: {e}")
         })?;
     match fd {
-        -1 => Err("The VPN permission was not given".into()),
-        -2 => Err("Android could not set up the VPN".into()),
-        fd if fd < 0 => Err(format!("The VPN could not start ({fd})")),
+        -1 => Err(crate::tr!("engine.android.vpn_denied")),
+        -2 => Err(crate::tr!("engine.android.vpn_failed")),
+        fd if fd < 0 => Err(crate::tr!("engine.android.vpn_error", code = fd)),
         fd => {
             // A duplicate: it has no FD_CLOEXEC, so the core inherits it, and
             // it stays open when the service closes its own copy.
             // SAFETY: duplicating a descriptor the service just gave us.
             let own = unsafe { libc::dup(fd) };
             if own < 0 {
-                return Err("The VPN's descriptor could not be duplicated".into());
+                return Err(crate::tr!("engine.android.dup_failed"));
             }
             let old = TUN_FD.swap(own, Ordering::SeqCst);
             if old >= 0 {
@@ -150,7 +150,7 @@ pub fn establish() -> Result<i32, String> {
 pub fn install_apk(path: &std::path::Path) -> Result<(), String> {
     let bridge = BRIDGE
         .get()
-        .ok_or("Kairo's Android bridge is not set up")?;
+        .ok_or_else(|| crate::tr!("engine.android.no_bridge"))?;
     let mut env = bridge
         .vm
         .attach_current_thread()
@@ -172,7 +172,7 @@ pub fn install_apk(path: &std::path::Path) -> Result<(), String> {
         Ok(msg) => Err(env
             .get_string(&JString::from(msg))
             .map(Into::into)
-            .unwrap_or_else(|_| "The installer failed".into())),
+            .unwrap_or_else(|_| crate::tr!("engine.android.installer_failed"))),
         Err(e) => {
             let _ = env.exception_clear();
             Err(format!("JNI: {e}"))

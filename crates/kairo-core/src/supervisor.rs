@@ -48,9 +48,9 @@ impl Exit {
             .map(|l| crate::config::explain(l));
         match (last_error, self.code, self.signal) {
             (Some(e), _, _) => e,
-            (None, Some(c), _) => format!("The core exited with code {c}"),
-            (None, None, Some(s)) => format!("The core was stopped by signal {s}"),
-            _ => "The core stopped".into(),
+            (None, Some(c), _) => crate::tr!("engine.supervisor.exit_code", code = c),
+            (None, None, Some(s)) => crate::tr!("engine.supervisor.signal", signal = s),
+            _ => crate::tr!("engine.supervisor.stopped"),
         }
     }
 }
@@ -106,7 +106,7 @@ impl CoreProcess {
     pub async fn spawn_elevated(paths: &Paths) -> std::io::Result<CoreProcess> {
         stop_stale(paths).await;
         let (route, name) = crate::elevated::current().ok_or_else(|| {
-            std::io::Error::other("TUN needs permission first (Settings, Every app)")
+            std::io::Error::other(crate::tr!("engine.supervisor.tun_needs_permission"))
         })?;
         let log = paths.logs_dir().join("core.log");
         let _ = std::fs::create_dir_all(paths.logs_dir());
@@ -134,10 +134,11 @@ impl CoreProcess {
         }
         let _ = std::fs::remove_file(paths.core_pid());
         let tail = tail_of(&log, 3).join(" ");
-        Err(std::io::Error::other(format!(
-            "The core did not start through its task{}",
-            if tail.is_empty() { String::new() } else { format!(": {tail}") }
-        )))
+        Err(std::io::Error::other(if tail.is_empty() {
+            crate::tr!("engine.supervisor.task_did_not_start")
+        } else {
+            crate::tr!("engine.supervisor.task_did_not_start_said", tail = tail)
+        }))
     }
 
     /// The last lines it printed.

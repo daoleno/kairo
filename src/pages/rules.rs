@@ -9,6 +9,7 @@ use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, size};
@@ -106,17 +107,17 @@ pub fn page() -> impl IntoElement {
             move || {
                 let (n, all) = (shown.with(|s| s.len()), rules.with(|r| r.len()));
                 if n == all {
-                    format!("{all} {}", if all == 1 { "rule" } else { "rules" })
+                    t!(&plural("rules.count", all as u64), count = all)
                 } else {
-                    format!("{n} of {all}")
+                    t!("rules.count_of", shown = n, total = all)
                 }
             },
             vec![
                 crate::pages::settings::back(),
-                toolbar::search("rules.search", "Filter rules", query),
+                toolbar::search("rules.search", t!("rules.tool.filter"), query),
                 toolbar::button(
                     "rules.update",
-                    "Update Rule Sets",
+                    t!("rules.tool.update_sets"),
                     Glyph::Refresh,
                     Icon::Refresh,
                     update_all,
@@ -138,7 +139,7 @@ pub fn page() -> impl IntoElement {
                 .border_b_1()
                 .border_color(move || theme().border)
                 .child(ui::segmented(
-                    vec![(Tab::Rules, "Rules"), (Tab::RuleSets, "Rule Sets")],
+                    vec![(Tab::Rules, t!("rules.tab.rules")), (Tab::RuleSets, t!("rules.tab.sets"))],
                     move || tab.get(),
                     move |t| tab.set(t),
                 ))
@@ -166,7 +167,7 @@ pub fn page() -> impl IntoElement {
             .otherwise(|| {
                 ui::empty_state(
                     Icon::Rules,
-                    "The core is not running",
+                    t!("rules.core_not_running"),
                     None,
                 )
             }),
@@ -192,9 +193,9 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
                 .bg(move || ui::subtle())
                 .style_when(ui::phone, |s| s.hidden())
                 .child(head("#", Some(W_INDEX)))
-                .child(head("Type", Some(W_KIND)))
-                .child(head("Payload", None))
-                .child(head("Target", Some(W_TARGET))),
+                .child(head(t!("rules.column.type"), Some(W_KIND)))
+                .child(head(t!("rules.column.payload"), None))
+                .child(head(t!("rules.column.target"), Some(W_TARGET))),
         )
         .child(
             when(
@@ -323,9 +324,9 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
                     Icon::Rules,
                     move || -> SharedString {
                         if query.with(|q| q.is_empty()) {
-                            "No rules".into()
+                            t!("rules.empty").into()
                         } else {
-                            "Nothing matches".into()
+                            t!("rules.nothing_matches").into()
                         }
                     },
                     None,
@@ -334,8 +335,8 @@ fn rule_list(shown: Memo<Arc<Vec<(usize, Rule)>>>, query: Signal<String>) -> imp
         )
 }
 
-fn head(label: &'static str, w: Option<f32>) -> Text {
-    let t = text(label)
+fn head(label: impl Into<SharedString>, w: Option<f32>) -> Text {
+    let t = text(label.into())
         .text_size(px(size::small()))
         .font_weight(FontWeight::MEDIUM)
         .text_color(move || theme().muted_foreground);
@@ -375,7 +376,7 @@ fn provider_list(
             .max_w(px(900.0))
             .child(when(
                 move || providers.with(|p| p.is_empty()),
-                || ui::muted("This configuration has no rule sets."),
+                || ui::muted(t!("rules.no_sets")),
             ))
             .child(when(
                 move || providers.with(|p| !p.is_empty()),
@@ -416,15 +417,15 @@ fn provider_list(
                                                             p.vehicle.clone(),
                                                         ];
                                                         parts.retain(|s| !s.is_empty());
-                                                        parts.push(format!(
-                                                            "{} {}",
-                                                            p.rule_count,
-                                                            if p.rule_count == 1 { "rule" } else { "rules" }
+                                                        parts.push(t!(
+                                                            &plural("rules.count", p.rule_count as u64),
+                                                            count = p.rule_count
                                                         ));
                                                         if let Some(at) = p.updated_at.as_deref() {
-                                                            parts.push(format!(
-                                                                "updated {}",
-                                                                at.replace('T', " ")
+                                                            parts.push(t!(
+                                                                "rules.set.updated",
+                                                                time = at
+                                                                    .replace('T', " ")
                                                                     .split('.')
                                                                     .next()
                                                                     .unwrap_or("")
@@ -436,7 +437,7 @@ fn provider_list(
                                                 })),
                                         )
                                         .child(
-                                            ui::icon_btn(Icon::Refresh, "Update")
+                                            ui::icon_btn(Icon::Refresh, t!("rules.set.update"))
                                                 .disabled(busy)
                                                 .on_press(move || update(name.clone())),
                                         ),

@@ -170,6 +170,18 @@ impl Sidebar {
         }
         self.ivars().quiet.set(false);
     }
+
+    /// Its rows made again in the language shown, `page`'s still selected
+    /// (the reload is not the person choosing a row).
+    fn relabel(&self, page: Page) {
+        let Some(table) = self.ivars().table.borrow().clone() else {
+            return;
+        };
+        self.ivars().quiet.set(true);
+        table.reloadData();
+        self.ivars().quiet.set(false);
+        self.select(page);
+    }
 }
 
 fn pin_label(cell: &NSView, label: &NSTextField, leading: f64) {
@@ -358,9 +370,13 @@ fn make_item(delegate: &Toolbar, id: &NSString, tool: &Tool) -> Retained<NSToolb
 fn update_item(delegate: &Toolbar, item: &NSToolbarItem, tool: &Tool) {
     let mtm = delegate.mtm();
     match tool {
-        Tool::Search { value, .. } => {
+        Tool::Search {
+            value, placeholder, ..
+        } => {
             if let Some(item) = item.downcast_ref::<NSSearchToolbarItem>() {
                 let field = item.searchField();
+                // In the language shown.
+                field.setPlaceholderString(Some(&NSString::from_str(placeholder)));
                 // Never while it is being typed in: the page's value lags the field.
                 if field.currentEditor().is_none() && field.stringValue().to_string() != *value {
                     field.setStringValue(&NSString::from_str(value));
@@ -664,9 +680,10 @@ pub fn install(svc: Service) {
     });
 }
 
-/// Keeps the chrome in step: the page (title, selection) and the core's state
-/// (subtitle).
+/// Keeps the chrome in step: the page (title, selection), the core's state
+/// (subtitle) and the language shown (the sidebar's rows).
 fn follow(svc: Service) {
+    let mut language = kairo_core::i18n::watch();
     let mut pages = chrome::bridge().page.subscribe();
     let mut state = svc.state();
     let mut live = svc.live();
@@ -679,7 +696,12 @@ fn follow(svc: Service) {
                 .build()
                 .expect("runtime");
             rt.block_on(async move {
+                // The language the sidebar's rows are in (none yet: the first pass says them again).
+                let mut said: Option<String> = None;
                 loop {
+                    let now = language.borrow_and_update().clone();
+                    let relabel = said.as_ref() != Some(&now);
+                    said = Some(now);
                     let page = *pages.borrow_and_update();
                     let s = state.borrow_and_update().clone();
                     let l = live.borrow_and_update().clone();
@@ -691,7 +713,11 @@ fn follow(svc: Service) {
                                 set_appearance(&i.window, theme);
                                 i.window.setTitle(&NSString::from_str(&page.title()));
                                 i.window.setSubtitle(&NSString::from_str(&bar.subtitle));
-                                i.sidebar.select(page);
+                                if relabel {
+                                    i.sidebar.relabel(page);
+                                } else {
+                                    i.sidebar.select(page);
+                                }
                                 i.footer.update(&s, &l);
                                 if let Some(toolbar) = i.window.toolbar() {
                                     show_tools(&toolbar, &i.toolbar, bar.tools);
@@ -704,6 +730,7 @@ fn follow(svc: Service) {
                         r = state.changed() => if r.is_err() { break },
                         r = live.changed() => if r.is_err() { break },
                         r = tools.changed() => if r.is_err() { break },
+                        r = language.changed() => if r.is_err() { break },
                     }
                 }
             });
@@ -880,7 +907,7 @@ impl Footer {
                 self.ring.setHidden(true);
             }
         }
-        self.status.setStringValue(&NSString::from_str(s.plain()));
+        self.status.setStringValue(&NSString::from_str(&s.plain()));
         self.mode.setStringValue(&NSString::from_str(&format!(
             "· {}",
             s.settings.mode.route()

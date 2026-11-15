@@ -108,27 +108,28 @@ pub fn grant(core: &Path) -> Result<(), String> {
         let setcap = ["/usr/bin/setcap", "/usr/sbin/setcap", "/sbin/setcap"]
             .into_iter()
             .find(|p| Path::new(p).exists())
-            .ok_or("setcap is not installed (libcap)")?;
+            .ok_or_else(|| crate::tr!("engine.tun.no_setcap"))?;
         let out = Command::new("pkexec")
             .args([setcap, "cap_net_admin,cap_net_bind_service=+ep", &path])
             .output()
             .map_err(|e| format!("pkexec: {e}"))?;
         return match out.status.code() {
             Some(0) if has_net_admin(core) => Ok(()),
-            Some(0) => Err(
-                "The permission did not stick (is the core on a filesystem without capabilities?)"
-                    .into(),
-            ),
-            Some(126) => Err("Cancelled".into()),
-            Some(127) => Err("No polkit agent could ask for the password".into()),
+            Some(0) => Err(crate::tr!("engine.tun.did_not_stick")),
+            Some(126) => Err(crate::tr!("engine.prompt.cancelled")),
+            Some(127) => Err(crate::tr!("engine.prompt.no_polkit_agent")),
             _ => Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()),
         };
     }
     #[cfg(target_os = "macos")]
     {
         let quoted = path.replace('\'', "'\\''");
+        // The dialog's words, in an AppleScript string: `\` and `"` escaped.
+        let prompt = crate::tr!("engine.tun.mac_prompt")
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
         let script = format!(
-            "do shell script \"chown root:admin '{quoted}' && chmod u+s,a+x '{quoted}'\" with administrator privileges with prompt \"Kairo needs permission to start TUN mode.\""
+            "do shell script \"chown root:admin '{quoted}' && chmod u+s,a+x '{quoted}'\" with administrator privileges with prompt \"{prompt}\""
         );
         let out = Command::new("/usr/bin/osascript")
             .args(["-e", &script])
@@ -139,7 +140,7 @@ pub fn grant(core: &Path) -> Result<(), String> {
         } else {
             let err = String::from_utf8_lossy(&out.stderr);
             Err(if err.contains("-128") {
-                "Cancelled".into()
+                crate::tr!("engine.prompt.cancelled")
             } else {
                 err.trim().to_owned()
             })
@@ -148,6 +149,6 @@ pub fn grant(core: &Path) -> Result<(), String> {
     #[allow(unreachable_code)]
     {
         let _ = (path, Command::new("true"));
-        Err("TUN is not supported on this platform".into())
+        Err(crate::tr!("engine.tun.unsupported"))
     }
 }

@@ -12,7 +12,8 @@ use serde_json::Value;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Accent {
     pub name: &'static str,
-    pub title: &'static str,
+    /// The key of its name for a person ([`Accent::title`]).
+    pub title_key: &'static str,
     pub light: [&'static str; 3],
     pub dark: [&'static str; 3],
 }
@@ -20,29 +21,36 @@ pub struct Accent {
 pub const ACCENTS: [Accent; 4] = [
     Accent {
         name: "graphite",
-        title: "Graphite",
+        title_key: "accent.graphite",
         light: ["#1d1d1f", "#ffffff", "#1d1d1f"],
         dark: ["#f2f2f4", "#1d1d1f", "#f2f2f4"],
     },
     Accent {
         name: "ember",
-        title: "Ember",
+        title_key: "accent.ember",
         light: ["#e0552f", "#ffffff", "#c2431f"],
         dark: ["#ff6a3d", "#ffffff", "#ff8a65"],
     },
     Accent {
         name: "iris",
-        title: "Iris",
+        title_key: "accent.iris",
         light: ["#6b55d6", "#ffffff", "#5a43c4"],
         dark: ["#9d8bff", "#17112e", "#b2a5ff"],
     },
     Accent {
         name: "gold",
-        title: "Gold",
+        title_key: "accent.gold",
         light: ["#b07d12", "#ffffff", "#8f6409"],
         dark: ["#e3b34f", "#241a00", "#ebc46e"],
     },
 ];
+
+impl Accent {
+    /// Its name in the language shown.
+    pub fn title(&self) -> String {
+        kairo_core::tr!(self.title_key)
+    }
+}
 
 /// The default, when nothing else is asked for.
 pub const DEFAULT: &str = "ember";

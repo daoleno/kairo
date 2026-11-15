@@ -47,17 +47,18 @@ const W_CLOSE: f32 = 32.0;
 
 /// The connection's exit and node, in words: `AI exit · Tokyo 03`.
 pub fn goes_through(c: &Connection, names: &kairo_core::activity::ExitNames) -> String {
+    use crate::pages::activity::exit_title;
     use kairo_core::activity::{ExitKind, exit_of};
     let kind = exit_of(c, names);
     match kind {
-        ExitKind::Direct | ExitKind::Blocked | ExitKind::Local => kind.title().to_owned(),
+        ExitKind::Direct | ExitKind::Blocked | ExitKind::Local => exit_title(kind),
         _ => {
             let node = c.outbound();
             let node = kairo_core::places::split_flag(node).1.trim().to_owned();
             if node.is_empty() {
-                kind.title().to_owned()
+                exit_title(kind)
             } else {
-                format!("{} · {node}", kind.title())
+                format!("{} · {node}", exit_title(kind))
             }
         }
     }
@@ -70,10 +71,10 @@ pub fn age(start: &str, now: i64) -> String {
     };
     let s = (now - t).max(0);
     match s {
-        0..=59 => format!("{s} s"),
-        60..=3599 => format!("{} m", s / 60),
-        3600..=86399 => format!("{} h {} m", s / 3600, s % 3600 / 60),
-        _ => format!("{} d", s / 86400),
+        0..=59 => kairo_core::tr!("connections.age.seconds", n = s),
+        60..=3599 => kairo_core::tr!("connections.age.minutes", n = s / 60),
+        3600..=86399 => kairo_core::tr!("connections.age.hours", h = s / 3600, m = s % 3600 / 60),
+        _ => kairo_core::tr!("connections.age.days", n = s / 86400),
     }
 }
 
@@ -144,11 +145,11 @@ pub fn list(
                             Icon::Connections,
                             move || -> SharedString {
                                 if !store.state.with(|s| s.core.is_running()) {
-                                    "Not connected".into()
+                                    t!("activity.empty.not_connected").into()
                                 } else if query.with(|q| !q.is_empty()) {
-                                    "Nothing matches".into()
+                                    t!("activity.empty.no_match").into()
                                 } else {
-                                    "No connections".into()
+                                    t!("connections.empty").into()
                                 }
                             },
                             None,
@@ -164,7 +165,7 @@ pub fn list(
 }
 
 fn head(
-    label: &'static str,
+    label: String,
     w: Option<f32>,
     right: bool,
     sort: Option<(Signal<Order>, Order)>,
@@ -212,10 +213,10 @@ fn head(
 /// A phone's stand-in for the column headings: how the list is ordered.
 fn sort_bar(order: Signal<Order>) -> impl IntoElement {
     let name = move || match order.get() {
-        Order::Newest => "Newest",
-        Order::Download => "Download speed",
-        Order::Upload => "Upload speed",
-        Order::Total => "Total",
+        Order::Newest => t!("connections.sort.newest"),
+        Order::Download => t!("connections.sort.download"),
+        Order::Upload => t!("connections.sort.upload"),
+        Order::Total => t!("activity.column.total"),
     };
     view()
         .flex_row()
@@ -225,25 +226,25 @@ fn sort_bar(order: Signal<Order>) -> impl IntoElement {
         .py_1()
         .border_b_1()
         .border_color(move || theme().border)
-        .child(ui::muted("Sorted by").flex_1())
+        .child(ui::muted(t!("connections.sorted_by")).flex_1())
         .child(
             button()
                 .flex_row()
                 .items_center()
                 .gap_1()
                 .h(px(ui::touch_h(40.0)))
-                .accessibility_label("Sort connections")
+                .accessibility_label(t!("connections.sort.label"))
                 .on_press(move || {
-                    let pick = |o: Order, title: &'static str| {
+                    let pick = |o: Order, title: String| {
                         Choice::new(title)
                             .checked(order.get_untracked() == o)
                             .on_select(move || order.set(o))
                     };
                     menu::open(vec![
-                        pick(Order::Newest, "Newest"),
-                        pick(Order::Download, "Download speed"),
-                        pick(Order::Upload, "Upload speed"),
-                        pick(Order::Total, "Total"),
+                        pick(Order::Newest, t!("connections.sort.newest")),
+                        pick(Order::Download, t!("connections.sort.download")),
+                        pick(Order::Upload, t!("connections.sort.upload")),
+                        pick(Order::Total, t!("activity.column.total")),
                     ]);
                 })
                 .child(
@@ -270,29 +271,29 @@ fn header_row(
         .border_b_1()
         .border_color(move || theme().border)
         .bg(move || ui::subtle())
-        .child(head("Host", None, false, None))
+        .child(head(t!("connections.column.host"), None, false, None))
         .child(when(
             move || wide() && processes.get(),
-            move || head("Process", Some(W_PROCESS()), false, None),
+            move || head(t!("connections.column.process"), Some(W_PROCESS()), false, None),
         ))
-        .child(head("Goes through", Some(W_CHAIN()), false, None))
+        .child(head(t!("activity.column.goes_through"), Some(W_CHAIN()), false, None))
         .child(head(
-            "Down",
+            t!("connections.column.down"),
             Some(W_SPEED()),
             true,
             Some((order, Order::Download)),
         ))
         .child(when(wide, move || {
-            head("Up", Some(W_SPEED()), true, Some((order, Order::Upload)))
+            head(t!("connections.column.up"), Some(W_SPEED()), true, Some((order, Order::Upload)))
         }))
         .child(head(
-            "Total",
+            t!("activity.column.total"),
             Some(W_TOTAL()),
             true,
             Some((order, Order::Total)),
         ))
         .child(when(wide, move || {
-            head("Time", Some(W_TIME()), false, None)
+            head(t!("connections.column.time"), Some(W_TIME()), false, None)
         }))
         .child(view().w(px(W_CLOSE)))
 }
@@ -435,7 +436,7 @@ fn table(
                 )
                 .child(
                     view().w(px(W_CLOSE)).items_end().child(
-                        ui::icon_btn(Icon::Close, "Close Connection")
+                        ui::icon_btn(Icon::Close, t!("connections.close"))
                             .size(px(22.0))
                             .on_press(move || store.run(store.svc().close_connection(id()))),
                     ),
@@ -518,7 +519,7 @@ fn phone_row(
                 ),
         )
         .child(
-            ui::icon_btn(Icon::Close, "Close Connection")
+            ui::icon_btn(Icon::Close, t!("connections.close"))
                 .on_press(move || store.run(store.svc().close_connection(id()))),
         )
 }
@@ -554,22 +555,24 @@ fn footer() -> impl IntoElement {
             store
                 .live
                 .with(|l| {
-                    let memory = if l.memory > 0 {
-                        format!(" · Core memory {}", kairo_core::bytes(l.memory))
+                    let down = kairo_core::bytes(l.download_total);
+                    let up = kairo_core::bytes(l.upload_total);
+                    if l.memory > 0 {
+                        t!(
+                            "connections.footer.memory",
+                            down = down,
+                            up = up,
+                            memory = kairo_core::bytes(l.memory)
+                        )
                     } else {
-                        String::new()
-                    };
-                    format!(
-                        "Downloaded {} · Uploaded {}{memory}",
-                        kairo_core::bytes(l.download_total),
-                        kairo_core::bytes(l.upload_total)
-                    )
+                        t!("connections.footer", down = down, up = up)
+                    }
                 })
                 .into()
         })))
 }
 
-fn detail_row(label: &'static str, value: String) -> impl IntoElement {
+fn detail_row(label: String, value: String) -> impl IntoElement {
     let has_flag = kairo_core::places::find_flag(&value).1.is_some();
     view().gap_0p5().child(ui::muted(label)).child(if has_flag {
         // A node's flag is a picture (not every platform draws the emoji).
@@ -610,9 +613,9 @@ fn inspector(
                 .px_4()
                 .border_b_1()
                 .border_color(move || theme().border)
-                .child(ui::section_label("Details").flex_1())
+                .child(ui::section_label(t!("connections.details")).flex_1())
                 .child(
-                    ui::icon_btn(Icon::Close, "Close Details")
+                    ui::icon_btn(Icon::Close, t!("connections.close_details"))
                         .size(px(22.0))
                         .on_press(move || selected.set(None)),
                 ),
@@ -622,7 +625,7 @@ fn inspector(
             untracked(move || match c {
                 None => ui::empty_state(
                     Icon::Connections,
-                    "Closed",
+                    t!("connections.closed"),
                     None,
                 )
                 .into_element(),
@@ -634,13 +637,13 @@ fn inspector(
                             view()
                                 .p_4()
                                 .gap_3()
-                                .child(detail_row("Host", format!("{}:{}", c.host, c.port)))
-                                .child(detail_row("Destination IP", c.destination_ip.clone()))
-                                .child(detail_row("Source", c.source.clone()))
-                                .child(detail_row("Network", c.network.to_uppercase()))
-                                .child(detail_row("Inbound", c.inbound.clone()))
+                                .child(detail_row(t!("connections.column.host"), format!("{}:{}", c.host, c.port)))
+                                .child(detail_row(t!("connections.detail.destination_ip"), c.destination_ip.clone()))
+                                .child(detail_row(t!("connections.detail.source"), c.source.clone()))
+                                .child(detail_row(t!("connections.detail.network"), c.network.to_uppercase()))
+                                .child(detail_row(t!("connections.detail.inbound"), c.inbound.clone()))
                                 .child(detail_row(
-                                    "Process",
+                                    t!("connections.column.process"),
                                     if c.process_path.is_empty() {
                                         c.process.clone()
                                     } else {
@@ -648,7 +651,7 @@ fn inspector(
                                     },
                                 ))
                                 .child(detail_row(
-                                    "Rule",
+                                    t!("connections.detail.rule"),
                                     if c.rule_payload.is_empty() {
                                         c.rule.clone()
                                     } else {
@@ -656,7 +659,7 @@ fn inspector(
                                     },
                                 ))
                                 .child(detail_row(
-                                    "Chain",
+                                    t!("connections.detail.chain"),
                                     c.chains
                                         .iter()
                                         .rev()
@@ -665,7 +668,7 @@ fn inspector(
                                         .join(" → "),
                                 ))
                                 .child(detail_row(
-                                    "Traffic",
+                                    t!("connections.detail.traffic"),
                                     format!(
                                         "↓ {}  ↑ {}",
                                         kairo_core::bytes(c.download),
@@ -673,7 +676,7 @@ fn inspector(
                                     ),
                                 ))
                                 .child(detail_row(
-                                    "Started",
+                                    t!("connections.detail.started"),
                                     c.start
                                         .replace('T', " ")
                                         .split('.')
@@ -685,7 +688,7 @@ fn inspector(
                                 .child(
                                     ui::btn_icon(
                                         Icon::Close,
-                                        "Close Connection",
+                                        t!("connections.close"),
                                         Variant::Destructive,
                                     )
                                     .self_start()
@@ -706,7 +709,7 @@ fn always_buttons(c: &Connection) -> impl IntoElement {
     use kairo_core::routes::{RouteExit, RouteKind};
     let store = store();
     let site = kairo_core::activity::site_of(&c.host);
-    let one = move |label: &'static str, exit: RouteExit| {
+    let one = move |label: String, exit: RouteExit| {
         let site = site.clone();
         ui::btn(label, Variant::Secondary).on_press(move || {
             store.run_then(
@@ -718,20 +721,20 @@ fn always_buttons(c: &Connection) -> impl IntoElement {
                 ),
                 move |r| {
                     if r.is_ok() {
-                        store.info("Saved in Apps & Sites");
+                        store.info(t!("activity.route.saved"));
                     }
                 },
             )
         })
     };
-    view().gap_2().child(ui::muted("For this site")).child(
+    view().gap_2().child(ui::muted(t!("connections.for_site"))).child(
         view()
             .flex_row()
             .flex_wrap()
             .gap_2()
-            .child(one("Always Direct", RouteExit::Direct))
-            .child(one("Always AI Exit", RouteExit::Ai))
-            .child(one("Block", RouteExit::Block)),
+            .child(one(t!("activity.route.direct"), RouteExit::Direct))
+            .child(one(t!("activity.route.ai"), RouteExit::Ai))
+            .child(one(t!("activity.route.block"), RouteExit::Block)),
     )
 }
 

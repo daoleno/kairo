@@ -13,6 +13,7 @@ use crate::ui::menu::{self, Choice};
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
+use crate::i18n::plural;
 use crate::store::{Page, Snap, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, Variant, size};
@@ -35,6 +36,25 @@ pub struct AppRow {
 
 /// How many names show in "Talks to" before "+N".
 const TALKS: usize = 4;
+
+/// How Activity names an exit (`ExitKind` is data; this is its text). Also
+/// outside the window (the table is made in tests): `tr!`.
+pub fn exit_title(kind: ExitKind) -> String {
+    kairo_core::tr!(match kind {
+        ExitKind::Ai => "activity.exit.ai",
+        ExitKind::Rest => "activity.exit.rest",
+        ExitKind::Downloads => "activity.exit.downloads",
+        ExitKind::Direct => "activity.exit.direct",
+        ExitKind::Blocked => "activity.exit.blocked",
+        ExitKind::Local => {
+            if cfg!(target_os = "android") {
+                "activity.exit.local_phone"
+            } else {
+                "activity.exit.local_computer"
+            }
+        }
+    })
+}
 
 /// The by-app table from the tally.
 pub fn app_rows(apps: &[(&str, &AppFlow)], query: &str) -> Vec<AppRow> {
@@ -76,15 +96,15 @@ pub fn app_rows(apps: &[(&str, &AppFlow)], query: &str) -> Vec<AppRow> {
             let local = !exits.is_empty() && exits.iter().all(|(k, _)| *k == ExitKind::Local);
             let goes = exits
                 .iter()
-                .map(|(k, _)| k.title())
+                .map(|(k, _)| exit_title(*k))
                 .collect::<Vec<_>>()
                 .join(" · ");
             AppRow {
                 name: (*name).to_owned(),
                 open: if a.open == 0 {
-                    "idle".into()
+                    kairo_core::tr!("activity.idle")
                 } else {
-                    format!("{} open", a.open)
+                    kairo_core::tr!("activity.open", count = a.open)
                 },
                 talks,
                 more,
@@ -113,29 +133,29 @@ pub fn page() -> impl IntoElement {
             move || {
                 let n = apps.with(|a| a.len());
                 let c = total();
-                format!(
-                    "{n} {} · {c} {}",
-                    if n == 1 { "app" } else { "apps" },
-                    if c == 1 { "connection" } else { "connections" }
+                kairo_core::tr!(
+                    "activity.subtitle",
+                    apps = kairo_core::tr!(&plural("activity.apps", n as u64), count = n),
+                    connections = kairo_core::tr!(&plural("activity.connections", c as u64), count = c)
                 )
             },
             vec![
                 toolbar::choice(
                     "activity.view",
-                    "View",
+                    kairo_core::tr!("activity.view.title"),
                     Glyph::Sort,
-                    vec!["By App", "All Connections"],
+                    vec![kairo_core::tr!("activity.view.by_app"), kairo_core::tr!("activity.view.all")],
                     move || usize::from(all.get()),
                     move |i| all.set(i == 1),
                 ),
-                toolbar::search("activity.search", "Search host or app", query),
+                toolbar::search("activity.search", kairo_core::tr!("activity.search"), query),
                 toolbar::button_dyn(
                     "activity.pause",
                     move || {
                         if paused.with(Option::is_some) {
-                            "Resume"
+                            kairo_core::tr!("activity.resume")
                         } else {
-                            "Pause"
+                            kairo_core::tr!("activity.pause")
                         }
                     },
                     move || {
@@ -155,7 +175,7 @@ pub fn page() -> impl IntoElement {
                 ),
                 toolbar::button(
                     "activity.close-all",
-                    "Close All",
+                    kairo_core::tr!("activity.close_all"),
                     Glyph::CloseAll,
                     Icon::Close,
                     move || {
@@ -202,9 +222,9 @@ fn bypass_banner() -> impl IntoElement {
                 let t = tools();
                 match t.len() {
                     0 => "".into(),
-                    1 => format!("{} goes around Kairo", t[0]).into(),
-                    2 => format!("{} and {} go around Kairo", t[0], t[1]).into(),
-                    n => format!("{}, {} and {} more go around Kairo", t[0], t[1], n - 2).into(),
+                    1 => t!("activity.bypass.one", tool = t[0]).into(),
+                    2 => t!("activity.bypass.two", first = t[0], second = t[1]).into(),
+                    n => t!("activity.bypass.more", first = t[0], second = t[1], count = n - 2).into(),
                 }
             };
             view()
@@ -231,7 +251,7 @@ fn bypass_banner() -> impl IntoElement {
                         })
                     },
                     move || {
-                        ui::capsule("Use Every App", true)
+                        ui::capsule(t!("activity.bypass.use_tun"), true)
                             .h(px(30.0))
                             .px_4()
                             .on_press(move || {
@@ -240,7 +260,7 @@ fn bypass_banner() -> impl IntoElement {
                     },
                 ))
                 .child(
-                    ui::capsule("Copy for terminal", false)
+                    ui::capsule(t!("activity.bypass.copy_terminal"), false)
                         .h(px(30.0))
                         .px_4()
                         .on_press(move || ui::copy_terminal_env(store)),
@@ -273,7 +293,7 @@ fn by_app(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElement {
             .pt(px(if phone { 12.0 } else { 0.0 }))
             .pb_6()
             .child(view().pb_3().child(crate::pages::stats::overview()))
-            .child(ui::section_label("By app").px_1().pb_1())
+            .child(ui::section_label(t!("activity.by_app")).px_1().pb_1())
             .child(when(move || phone, move || phone_list(rows, query)))
             .child(when(move || !phone, move || {
                 ui::card_soft()
@@ -283,10 +303,10 @@ fn by_app(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElement {
                             .items_center()
                             .px_5()
                             .h(px(30.0))
-                            .child(head(0, "App"))
-                            .child(head(1, "Talks to"))
-                            .child(head(2, "Goes through"))
-                            .child(head(3, "Total"))
+                            .child(head(0, t!("activity.column.app")))
+                            .child(head(1, t!("activity.column.talks_to")))
+                            .child(head(2, t!("activity.column.goes_through")))
+                            .child(head(3, t!("activity.column.total")))
                             .child(cell(4)),
                     )
                     .child(dynamic(move || {
@@ -297,11 +317,11 @@ fn by_app(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElement {
                                     Icon::Connections,
                                                                         move || -> SharedString {
                                         if !store.state.with(|s| s.core.is_running()) {
-                                            "Not connected".into()
+                                            t!("activity.empty.not_connected").into()
                                         } else if query.with(|q| !q.is_empty()) {
-                                            "Nothing matches".into()
+                                            t!("activity.empty.no_match").into()
                                         } else {
-                                            "Nothing yet".into()
+                                            t!("activity.empty.nothing_yet").into()
                                         }
                                     },
                                     None,
@@ -332,11 +352,11 @@ fn phone_list(rows: Memo<Vec<AppRow>>, query: Signal<String>) -> impl IntoElemen
                         Icon::Connections,
                                                 move || -> SharedString {
                             if !store.state.with(|s| s.core.is_running()) {
-                                "Not connected".into()
+                                t!("activity.empty.not_connected").into()
                             } else if query.with(|q| !q.is_empty()) {
-                                "Nothing matches".into()
+                                t!("activity.empty.no_match").into()
                             } else {
-                                "Nothing yet".into()
+                                t!("activity.empty.nothing_yet").into()
                             }
                         },
                         None,
@@ -371,7 +391,7 @@ fn phone_app(r: AppRow) -> impl IntoElement {
                         .child(ui::muted(r.open.clone()).text_size(px(size::small()))),
                 )
                 .child(
-                    ui::icon_btn(Icon::More, "Choices for this app")
+                    ui::icon_btn(Icon::More, t!("activity.app_menu"))
                         .mr(px(-8.0))
                         .on_press(move || row_menu(menu_name.with(|n| n.clone()))),
                 ),
@@ -422,7 +442,7 @@ fn row_menu(n: String) {
                     .set_route(RouteKind::App { name: n.clone() }, exit.clone()),
                 move |r| {
                     if r.is_ok() {
-                        store.info("Saved in Apps & Sites");
+                        store.info(t!("activity.route.saved"));
                     }
                 },
             )
@@ -440,16 +460,16 @@ fn row_menu(n: String) {
         }
     };
     let items = vec![
-        Choice::new("Always Direct").on_select(app(RouteExit::Direct, n.clone())),
-        Choice::new("Always AI Exit").on_select(app(RouteExit::Ai, n.clone())),
-        Choice::new("Block").on_select(app(RouteExit::Block, n.clone())),
+        Choice::new(t!("activity.route.direct")).on_select(app(RouteExit::Direct, n.clone())),
+        Choice::new(t!("activity.route.ai")).on_select(app(RouteExit::Ai, n.clone())),
+        Choice::new(t!("activity.route.block")).on_select(app(RouteExit::Block, n.clone())),
         Choice::separator(),
-        Choice::new("Show Connections").on_select(show),
+        Choice::new(t!("activity.show_connections")).on_select(show),
     ];
     menu::open(items);
 }
 
-fn head(i: usize, t: &'static str) -> impl IntoElement {
+fn head(i: usize, t: String) -> impl IntoElement {
     cell(i).child(
         ui::muted(t)
             .text_size(px(size::small()))
@@ -540,7 +560,7 @@ fn app_row(r: AppRow) -> impl IntoElement {
                                     ),
                                     move |r| {
                                         if r.is_ok() {
-                                            store.info("Saved in Apps & Sites");
+                                            store.info(t!("activity.route.saved"));
                                         }
                                     },
                                 )
@@ -558,13 +578,13 @@ fn app_row(r: AppRow) -> impl IntoElement {
                             }
                         };
                         let items = vec![
-                            Choice::new("Always Direct")
+                            Choice::new(t!("activity.route.direct"))
                                 .on_select(app(RouteExit::Direct, n.clone())),
-                            Choice::new("Always AI Exit")
+                            Choice::new(t!("activity.route.ai"))
                                 .on_select(app(RouteExit::Ai, n.clone())),
-                            Choice::new("Block").on_select(app(RouteExit::Block, n.clone())),
+                            Choice::new(t!("activity.route.block")).on_select(app(RouteExit::Block, n.clone())),
                             Choice::separator(),
-                            Choice::new("Show Connections").on_select(show),
+                            Choice::new(t!("activity.show_connections")).on_select(show),
                         ];
                         menu::open(items);
                     }),

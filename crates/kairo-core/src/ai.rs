@@ -156,6 +156,19 @@ pub const DOMESTIC: &[(&str, &[&str])] = &[
     ("Ernie", &["yiyan.baidu.com", "wenxin.baidu.com"]),
 ];
 
+/// A domestic AI (a name of [`DOMESTIC`], which is also its id) as a person
+/// reads it: some go by another name in Chinese.
+pub fn domestic_title(name: &str) -> String {
+    match name {
+        "Doubao" => crate::tr!("model.ai.domestic.doubao"),
+        "Tongyi" => crate::tr!("model.ai.domestic.tongyi"),
+        "Zhipu" => crate::tr!("model.ai.domestic.zhipu"),
+        "Yuanbao" => crate::tr!("model.ai.domestic.yuanbao"),
+        "Ernie" => crate::tr!("model.ai.domestic.ernie"),
+        other => other.to_owned(),
+    }
+}
+
 /// Big downloads, on their own exit (not the AI one): models, wheels, images
 /// and release files. `hf-mirror.com` is here so that the mirror, when the
 /// person uses it, goes the way Hugging Face does (and the mirror test

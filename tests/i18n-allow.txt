@@ -1,5 +1,196 @@
 # Literals that read as English but are no text for a person to read in
 # Kairo's language: names, data the core or a provider reads, words compared
-# in code. One per line: the literal, a tab, why it stays.
-apps & sites	Page::named: the English title an older Kairo or a script names the page by (an id)
-ai service	Page::named: the English title an older Kairo or a script names the page by (an id)
+# in code. One per line: the file, a tab, the literal, a tab, why it stays.
+src/store.rs	apps & sites	Page::named: the English title an older Kairo or a script names the page by (an id)
+src/store.rs	ai service	Page::named: the English title an older Kairo or a script names the page by (an id)
+# Groups (src/pages/proxies.rs): mihomo's type values, matched to a label or a protocol's own name.
+src/pages/proxies.rs	Selector	mihomo's group type (a select group), matched to its label groups.kind.select
+crates/kairo-core/src/model.rs	Selector	mihomo's group type (a select group), matched to its label groups.kind.select
+src/pages/proxies.rs	Http	mihomo's adapter type, shown as the protocol's name HTTP
+src/pages/proxies.rs	Ss	mihomo's adapter type, shown as the protocol's name Shadowsocks
+src/pages/proxies.rs	Shadowsocks	a protocol's name (and mihomo's adapter type), the same in every language
+src/pages/proxies.rs	Ssr	mihomo's adapter type, shown as the protocol's name ShadowsocksR
+src/pages/proxies.rs	Vmess	mihomo's adapter type, shown as the protocol's name VMess
+src/pages/proxies.rs	Vless	mihomo's adapter type, shown as the protocol's name VLESS
+src/pages/proxies.rs	Tuic	mihomo's adapter type, shown as the protocol's name TUIC
+src/pages/proxies.rs	Ssh	mihomo's adapter type, shown as the protocol's name SSH
+src/pages/proxies.rs	Anytls	mihomo's adapter type, shown as the protocol's name AnyTLS
+src/pages/proxies.rs	Wireguard	mihomo's adapter type, shown as the protocol's name WireGuard
+# Settings and the Inspect views (settings.rs, logs.rs).
+src/pages/logs.rs	Kairo 	the product's name before its version (concat! with CARGO_PKG_VERSION)
+src/pages/logs.rs	mihomo {v}	the core's name and its version
+src/pages/settings.rs	mihomo {v}	the core's name and its version
+src/pages/logs.rs	System: {}	Copy Diagnostics' report: a bug report for Kairo's maintainers, in English like the core's log lines in it (tests assert it)
+src/pages/logs.rs	Ports: proxy {}, controller {}	Copy Diagnostics' report: a bug report for Kairo's maintainers, in English like the core's log lines in it (tests assert it)
+src/pages/logs.rs	The last {} log line{} (oldest first; addresses, links and keys removed):	Copy Diagnostics' report: a bug report for Kairo's maintainers, in English like the core's log lines in it (tests assert it)
+src/pages/logs.rs	Kairo {}	Copy Diagnostics' report: a bug report for Kairo's maintainers, in English like the core's log lines in it (tests assert it)
+# Home, Exits, AI, Apps & Sites: words matched against the engine's and the network's English error text, and ids compared in code
+src/pages/home.rs	address already in use	matched in the core's bind error (home::fix_button), never shown
+crates/kairo-core/src/service.rs	address already in use	matched in the core's bind error (home::fix_button), never shown
+src/pages/home.rs	in use	matched in the core's port error (home::fix_button), never shown
+src/pages/home.rs	controller port	matched in the core's port error (home::fix_button), never shown
+src/pages/apps.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
+src/pages/exits.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
+crates/kairo-tray/src/lib.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
+crates/kairo-core/src/places.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
+crates/kairo-core/src/stats.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
+src/pages/ai.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (ai::tools_of, apps add sheet)
+src/pages/apps.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (ai::tools_of, apps add sheet)
+crates/kairo-core/src/activity.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (ai::tools_of, apps add sheet)
+src/pages/apps.rs	Telegram	an example app name in the Add App field: a product name, the same in every language
+# The window frame, the platform chrome, the tray, the launcher (lib.rs, palette.rs, main.rs, gtk_chrome.rs, kairo-tray).
+src/gtk_chrome.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+src/lib.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+src/main.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+crates/kairo-tray/src/linux.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+crates/kairo-tray/src/macos.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+crates/kairo-tray/src/windows.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+crates/kairo-core/src/autostart.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+crates/kairo-core/src/elevated.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+crates/kairo-core/src/paths.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
+crates/kairo-tray/src/windows.rs	Kairo tray	the hidden window of the Windows tray (CreateWindowExW): never shown
+crates/kairo-tray/src/lib.rs	Good	kairo-tray health_word value (a Choice's health, compared, asserted in tests); shown through tray.health.good
+crates/kairo-tray/src/lib.rs	Slow	kairo-tray health_word value (a Choice's health, compared, asserted in tests); shown through tray.health.slow
+crates/kairo-tray/src/lib.rs	no tray on this platform yet	kairo_tray::start's error: only logged (main.rs: no tray: …), never shown
+crates/kairo-tray/src/linux.rs	the tray did not start	kairo_tray::start's error: only logged (main.rs: no tray: …), never shown
+crates/kairo-tray/src/windows.rs	the tray did not start	kairo_tray::start's error: only logged (main.rs: no tray: …), never shown
+crates/kairo-tray/src/windows.rs	could not make the tray icon	kairo_tray::start's error (Windows): only logged (main.rs: no tray: …), never shown
+crates/kairo-tray/src/windows.rs	no module handle	kairo_tray::start's error (Windows): only logged (main.rs: no tray: …), never shown
+crates/kairo-tray/src/windows.rs	tray window: {e}	kairo_tray::start's error (Windows): only logged (main.rs: no tray: …), never shown
+src/main.rs	GET /version HTTP/1.0	the HTTP request --tun-selftest sends to the core's controller (data)
+src/main.rs	user {:?}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	paths dir={} config={} log={}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	status {status:?}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	cannot write the config: {e}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	spawn failed: {e}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	started; running={}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	READY {version:?} after {:?}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	core_alive before stop: {}	--tun-selftest's console output: a developer's diagnostic, like a log line
+src/main.rs	log tail: {:?}	--tun-selftest's console output: a developer's diagnostic, like a log line
+# Kairo-core's model (places, AI, Activity, icons, profiles, bypass): names, ids, patterns and config values.
+crates/kairo-core/src/activity.rs	lm studio	activity::target_of: a part of a process path or name matched (data)
+crates/kairo-core/src/activity.rs	 Helper	activity::target_of: a part of a process path or name matched (data)
+crates/kairo-core/src/ai.rs	Kairo AI	ai::KAIRO_AI_GROUP: the group's name written into mihomo's config (data)
+crates/kairo-core/src/ai.rs	Claude	ai::SERVICES: a product's name, the same in every language
+crates/kairo-core/src/ai.rs	Gemini	ai::SERVICES: a product's name, the same in every language
+crates/kairo-core/src/ai.rs	Cursor	ai::SERVICES: a product's name, the same in every language
+crates/kairo-core/src/ai.rs	Cu	ai::SERVICES: a service's monogram on its tile (letters of its name)
+crates/kairo-core/src/ai.rs	Copilot	ai::SERVICES: a product's name, the same in every language
+crates/kairo-core/src/ai.rs	Co	ai::SERVICES: a service's monogram on its tile (letters of its name)
+crates/kairo-core/src/ai.rs	Perplexity	ai::SERVICES: a product's name, the same in every language
+crates/kairo-core/src/ai.rs	Grok	ai::SERVICES: a product's name, the same in every language
+crates/kairo-core/src/ai.rs	Kimi	ai::DOMESTIC: a domestic AI's name and its id on the wire (data); shown through ai::domestic_title
+crates/kairo-core/src/ai.rs	Doubao	ai::DOMESTIC: a domestic AI's name and its id on the wire (data); shown through ai::domestic_title
+crates/kairo-core/src/ai.rs	Tongyi	ai::DOMESTIC: a domestic AI's name and its id on the wire (data); shown through ai::domestic_title
+crates/kairo-core/src/ai.rs	Zhipu	ai::DOMESTIC: a domestic AI's name and its id on the wire (data); shown through ai::domestic_title
+crates/kairo-core/src/ai.rs	Yuanbao	ai::DOMESTIC: a domestic AI's name and its id on the wire (data); shown through ai::domestic_title
+crates/kairo-core/src/ai.rs	Ernie	ai::DOMESTIC: a domestic AI's name and its id on the wire (data); shown through ai::domestic_title
+crates/kairo-core/src/bypass.rs	export HTTP_PROXY={proxy} HTTPS_PROXY={proxy} ALL_PROXY={proxy} NO_PROXY={skip} http_proxy={proxy} https_proxy={proxy} all_proxy={proxy} no_proxy={skip}	bypass: shell lines a person copies into a terminal (commands, the same in every language)
+crates/kairo-core/src/bypass.rs	$env:HTTP_PROXY="{proxy}"; $env:HTTPS_PROXY="{proxy}"; $env:ALL_PROXY="{proxy}"; $env:NO_PROXY="{skip}"	bypass: shell lines a person copies into a terminal (commands, the same in every language)
+crates/kairo-core/src/downloads.rs	Kairo Downloads	downloads::KAIRO_DOWNLOADS_GROUP: the group's name written into mihomo's config (data)
+crates/kairo-core/src/downloads.rs	Range	downloads::measure: the HTTP header's name (data)
+crates/kairo-core/src/autostart.rs	[Desktop Entry]	icons::apps: a .desktop file's group, key or value, matched (data)
+crates/kairo-core/src/icons/apps.rs	[Desktop Entry]	icons::apps: a .desktop file's group, key or value, matched (data)
+crates/kairo-core/src/icons/apps.rs	Type	icons::apps: a .desktop file's group, key or value, matched (data)
+crates/kairo-core/src/icons/apps.rs	Application	icons::apps: a .desktop file's group, key or value, matched (data)
+crates/kairo-core/src/icons/apps.rs	Name	icons::apps: a .desktop file's group, key or value, matched (data)
+crates/kairo-core/src/icons/apps.rs	Exec	icons::apps: a .desktop file's group, key or value, matched (data)
+crates/kairo-core/src/icons/apps.rs	Icon	icons::apps: a .desktop file's group, key or value, matched (data)
+crates/kairo-core/src/icons/apps.rs	Applications	icons::apps: macOS's ~/Applications folder (a path)
+crates/kairo-core/src/icons/apps.rs	Add-Type -AssemblyName System.Drawing; $i = [System.Drawing.Icon]::ExtractAssociatedIcon($env:KAIRO_ICON_EXE); if ($i -ne $null) { $i.ToBitmap().Save($env:KAIRO_ICON_OUT, [System.Drawing.Imaging.ImageFormat]::Png) }; $d = (Get-Item -LiteralPath $env:KAIRO_ICON_EXE).VersionInfo.FileDescription; if ($d) { [System.IO.File]::WriteAllText($env:KAIRO_ICON_LABEL, $d, (New-Object System.Text.UTF8Encoding $false)) }	icons::apps: the PowerShell script that reads a program's icon (code)
+crates/kairo-core/src/icons.rs	too many redirects	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/icons.rs	redirected somewhere an icon is not taken from	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/icons.rs	not a place an icon is taken from	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/icons.rs	too large	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/icons.rs	not a picture	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/icons.rs	not a picture: {e}	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/icons.rs	too small to be an icon	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/icons.rs	<!doctype svg	icons: a picture's start matched (data)
+crates/kairo-core/src/icons.rs	no icon	icons: a site icon fetch error, never shown (service/icon_ops.rs drops it: Err(_) => None, .ok())
+crates/kairo-core/src/model.rs	Compatible	model: mihomo's vehicle type of its built-in provider, compared (data)
+crates/kairo-core/src/places.rs	days left	places::is_note: a word of a provider's note matched in node names (data)
+crates/kairo-core/src/places.rs	Hong Kong	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	hong kong	places::REGIONS: a pattern matched against node names (data)
+crates/kairo-core/src/places.rs	Taiwan	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Japan	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Singapore	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	United States	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	united states	places::REGIONS: a pattern matched against node names (data)
+crates/kairo-core/src/places.rs	los angeles	places::REGIONS: a pattern matched against node names (data)
+crates/kairo-core/src/places.rs	san jose	places::REGIONS: a pattern matched against node names (data)
+crates/kairo-core/src/places.rs	new york	places::REGIONS: a pattern matched against node names (data)
+crates/kairo-core/src/places.rs	South Korea	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	United Kingdom	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	united kingdom	places::REGIONS: a pattern matched against node names (data)
+crates/kairo-core/src/places.rs	Germany	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	France	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Netherlands	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Canada	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Australia	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	India	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Russia	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Malaysia	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Thailand	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Vietnam	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Philippines	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Indonesia	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Argentina	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Brazil	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Macao	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	United Arab Emirates	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Italy	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Spain	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Switzerland	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Sweden	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	Mexico	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/places.rs	China	places::REGIONS: a region's stable English value (compared, matched); shown through places::region_title (model.places.*)
+crates/kairo-core/src/profile.rs	<!doctype html	profile::looks_like_html: a page's start matched (data)
+crates/kairo-core/src/profile.rs	Kairo/{} clash.meta mihomo	profile::user_agent: the User-Agent providers read (data)
+crates/kairo-core/src/protocol.rs	u{2022}hiddenu{2022}	protocol::HIDDEN: the value standing in for the controller's secret, compared by kairo-server (data)
+src/gtk_chrome.rs	rgba({}, {}, {}, {:.3})	gtk_chrome.rs: a CSS color for NSH's theme (data)
+crates/kairo-tray/src/macos.rs	<svg opacity="0.45" 	kairo-tray macos.rs: SVG markup that dims the menu bar glyph (data)
+# The engine (kairo-core: autostart, config, controller, elevated, paths, service, sysproxy, tun, update, winapi): data for programs, files, the system and the core, never shown
+crates/kairo-core/src/autostart.rs	Comment=mihomo client	autostart::entry: a line of the XDG autostart file (the .desktop file is data)
+crates/kairo-core/src/autostart.rs	env KAIRO_HOME="{h}" 	autostart::restore_entry: the shell prefix of the .desktop file's Exec line (data)
+crates/kairo-core/src/autostart.rs	Name=Kairo network check	autostart::restore_entry: a line of the XDG autostart file (the .desktop file is data)
+crates/kairo-core/src/autostart.rs	Comment=Puts the system proxy back if Kairo could not	autostart::restore_entry: a line of the XDG autostart file (the .desktop file is data)
+crates/kairo-core/src/autostart.rs	Exec={env}"{exe}" --restore-network	autostart::restore_entry: the .desktop file's command line (data)
+crates/kairo-core/src/config.rs	test is successful	config::validate: matched in the output of `mihomo -t` (data)
+crates/kairo-core/src/controller.rs	Authorization	controller: the HTTP header the controller's secret goes in (data)
+crates/kairo-core/src/controller.rs	Bearer {}	controller: the HTTP Authorization scheme (data)
+crates/kairo-core/src/elevated.rs	try {{ $p = Start-Process -FilePath {exe} -ArgumentList {line} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }}	elevated::elevation_script: a line of the PowerShell that asks for UAC (data)
+crates/kairo-core/src/elevated.rs	catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1223 }}	elevated::elevation_script: a line of the PowerShell that asks for UAC (data)
+crates/kairo-core/src/elevated.rs	$ErrorActionPreference = 'Stop'	elevated::REGISTER_TASK: a line of the PowerShell that registers the task (data)
+crates/kairo-core/src/elevated.rs	$a = New-ScheduledTaskAction -Execute $env:K_HOST -Argument $env:K_ARGS	elevated::REGISTER_TASK: a line of PowerShell (data)
+crates/kairo-core/src/elevated.rs	$p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest	elevated::REGISTER_TASK: a line of PowerShell (data)
+crates/kairo-core/src/elevated.rs	$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew	elevated::REGISTER_TASK: a line of PowerShell (data)
+crates/kairo-core/src/elevated.rs	Register-ScheduledTask -TaskName $env:K_TASK -Action $a -Principal $p -Settings $s -Force | Out-Null	elevated::REGISTER_TASK: a line of PowerShell (data)
+crates/kairo-core/src/elevated.rs	$svc = New-Object -ComObject Schedule.Service	elevated::REGISTER_TASK: a line of PowerShell (data)
+crates/kairo-core/src/elevated.rs	$t = $svc.GetFolder('\').GetTask($env:K_TASK)	elevated::REGISTER_TASK: a line of PowerShell (data)
+crates/kairo-core/src/elevated.rs	$t.SetSecurityDescriptor($env:K_SDDL, 0)	elevated::REGISTER_TASK: a line of PowerShell (data)
+crates/kairo-core/src/elevated.rs	canceled by the user	elevated::explain_elevation_failure: matched in what Windows says of a closed UAC prompt (data)
+crates/kairo-core/src/elevated.rs	cancelled by the user	elevated::explain_elevation_failure: matched in what Windows says of a closed UAC prompt (data)
+crates/kairo-core/src/elevated.rs	Bypass	elevated: the value of PowerShell's -ExecutionPolicy (data)
+crates/kairo-core/src/elevated.rs	powershell: {e}	elevated: a program's name before the system's error, no words of Kairo's
+crates/kairo-core/src/elevated.rs	icacls: {}	elevated: a program's name before its own output, no words of Kairo's
+crates/kairo-core/src/elevated.rs	Kairo core ({name})	elevated::register_service: the Windows service's DisplayName (service registry data)
+crates/kairo-core/src/elevated.rs	error: {e}	elevated::run_grant: the result file's protocol (`ok …` / `error: …`), read back by grant (strip_prefix)
+crates/kairo-core/src/paths.rs	Library/Application Support/Kairo	paths: the macOS data folder (a path)
+crates/kairo-core/src/service.rs	proxy-groups: []	service::NO_PROFILE: a line of the YAML the core runs with no subscription (data)
+crates/kairo-core/src/service.rs	  - MATCH,DIRECT	service::NO_PROFILE: a line of the YAML the core runs with no subscription (data)
+crates/kairo-core/src/service.rs	  - GEOIP,CN,DIRECT	service::prefetch_geo: a line of the YAML the geo data check reads (data)
+crates/kairo-core/src/sysproxy.rs	kreadconfig{v}	sysproxy: KDE's program (kreadconfig5, kreadconfig6)
+crates/kairo-core/src/sysproxy.rs	kwriteconfig{v}	sysproxy: KDE's program (kwriteconfig5, kwriteconfig6)
+crates/kairo-core/src/sysproxy.rs	Proxy Settings	sysproxy: the kioslaverc group KDE reads its proxy from (data)
+crates/kairo-core/src/sysproxy.rs	There aren't any	sysproxy::mac_bypass_of: matched in networksetup's output (data)
+crates/kairo-core/src/sysproxy.rs	Empty	sysproxy::mac_restore: networksetup's argument for no bypass domains (data)
+crates/kairo-core/src/sysproxy.rs	not Windows	sysproxy: the error of a platform branch compiled out (never runs)
+crates/kairo-core/src/tun.rs	pkexec: {e}	tun, update: a program's name before the system's error, no words of Kairo's
+crates/kairo-core/src/update.rs	pkexec: {e}	tun, update: a program's name before the system's error, no words of Kairo's
+crates/kairo-core/src/tun.rs	do shell script "chown root:admin '{quoted}' && chmod u+s,a+x '{quoted}'" with administrator privileges with prompt "{prompt}"	tun::grant: the AppleScript that asks macOS for the permission (data; the dialog's words are engine.tun.mac_prompt, escaped into it)
+crates/kairo-core/src/tun.rs	osascript: {e}	tun: a program's name before the system's error, no words of Kairo's
+crates/kairo-core/src/update.rs	not macOS	update: the error of a platform branch compiled out (never runs)
+crates/kairo-core/src/update.rs	not Android	update: the error of a platform branch compiled out (never runs)
+crates/kairo-core/src/update.rs	not Linux	update: the error of a platform branch compiled out (never runs)
+crates/kairo-core/src/update.rs	signatures do not match	update::install_failure: matched in Android's installer message (data)
+crates/kairo-core/src/winapi.rs	Software\Microsoft\Windows\CurrentVersion\Internet Settings	winapi: a registry key (data)

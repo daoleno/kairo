@@ -37,24 +37,24 @@ fn commands(store: Store) -> Vec<Command> {
     let mut out = Vec::new();
     if has_profile {
         out.push(cmd(
-            if running { "Disconnect" } else { "Connect" },
-            "Connection",
+            if running { t!("menu.disconnect") } else { t!("menu.connect") },
+            t!("menu.connection"),
             Icon::Shield,
             move |s| s.run(s.svc().connect(!running)),
         ));
     }
     for (m, title) in [
-        (Mode::Rule, "Mode: Smart"),
-        (Mode::Global, "Mode: Everything"),
-        (Mode::Direct, "Mode: Direct"),
+        (Mode::Rule, t!("palette.mode.rule")),
+        (Mode::Global, t!("palette.mode.global")),
+        (Mode::Direct, t!("palette.mode.direct")),
     ] {
-        out.push(cmd(title, "Connection", Icon::Rules, move |s| {
+        out.push(cmd(title, t!("menu.connection"), Icon::Rules, move |s| {
             s.run(s.svc().set_mode(m))
         }));
     }
     if has_profile && running {
         out.push(cmd(
-            "Check AI services",
+            t!("palette.check_ai"),
             "AI",
             Icon::Activity,
             |s| {
@@ -64,34 +64,34 @@ fn commands(store: Store) -> Vec<Command> {
         ));
     }
     out.push(cmd(
-        "Everything else: Fastest",
-        "Exits",
+        t!("palette.rest_fastest"),
+        Page::Exits.title(),
         Icon::Bolt,
         |s| s.run(s.svc().set_location(None)),
     ));
     out.push(cmd(
-        "Test Exits Again",
-        "Exits",
+        t!("palette.test_exits"),
+        Page::Exits.title(),
         Icon::Bolt,
         |s| s.run(s.svc().test_places()),
     ));
     for page in Page::ALL {
         out.push(cmd(
-            format!("Go to {}", page.title()),
-            if page.inspect() { "Inspect" } else { "Page" },
+            t!("palette.go_to", page = page.title()),
+            if page.inspect() { t!("palette.group.inspect") } else { t!("palette.group.page") },
             Icon::ChevronRight,
             move |s| s.page.set(page),
         ));
     }
     out.push(cmd(
-        "Add Subscription",
-        "Subscriptions",
+        t!("palette.add_subscription"),
+        Page::Profiles.title(),
         Icon::Plus,
         |s| s.page.set(Page::Profiles),
     ));
     out.push(cmd(
-        "Show All Connections",
-        "Activity",
+        t!("palette.all_connections"),
+        Page::Activity.title(),
         Icon::Connections,
         |s| {
             s.all_connections.set(true);
@@ -99,45 +99,46 @@ fn commands(store: Store) -> Vec<Command> {
         },
     ));
     out.push(cmd(
-        "Use Every App (TUN)",
-        "Connection",
+        t!("palette.use_tun"),
+        t!("menu.connection"),
         Icon::Shield,
         |_| crate::pages::home::set_via(crate::pages::home::Via::Tun),
     ));
     out.push(cmd(
-        "Copy Proxy Line for Terminal",
-        "Connection",
+        t!("palette.copy_proxy"),
+        t!("menu.connection"),
         Icon::Link,
         crate::ui::copy_terminal_env,
     ));
     out.push(cmd(
-        "Update Subscriptions",
-        "Subscriptions",
+        t!("palette.update_subscriptions"),
+        Page::Profiles.title(),
         Icon::Refresh,
         |s| {
             s.run_update_then(s.svc().update_all_profiles(), move |r| {
                 if r.is_ok() {
-                    s.info("Subscriptions updated");
+                    s.info(kairo_core::tr!("palette.subscriptions_updated"));
                 }
             })
         },
     ));
-    out.push(cmd("Restart Core", "Advanced", Icon::Restart, |s| {
+    let advanced = t!("palette.group.advanced");
+    out.push(cmd(t!("menu.core.restart"), advanced.clone(), Icon::Restart, |s| {
         s.run(s.svc().restart_core())
     }));
-    out.push(cmd("Close All Connections", "Advanced", Icon::Close, |s| {
+    out.push(cmd(t!("palette.close_all"), advanced.clone(), Icon::Close, |s| {
         s.run(s.svc().close_all_connections())
     }));
     out.push(cmd(
-        "Update GeoIP and GeoSite",
-        "Advanced",
+        t!("palette.update_geo"),
+        advanced,
         Icon::Download,
         |s| s.run(s.svc().update_geo()),
     ));
-    out.push(cmd("Check for Updates", "Kairo", Icon::Download, |s| {
+    out.push(cmd(t!("palette.check_updates"), "Kairo", Icon::Download, |s| {
         s.run_then(s.svc().check_for_update(), move |r| {
             if let Ok(None) = r {
-                s.info("Kairo is up to date");
+                s.info(kairo_core::tr!("menu.up_to_date"));
             }
         })
     }));
@@ -155,6 +156,7 @@ fn commands(store: Store) -> Vec<Command> {
         Some(d) if d > 0 => d,
         _ => u32::MAX,
     });
+    let (rest_exit, ai_exit) = (t!("palette.exit.rest"), t!("palette.exit.ai"));
     for p in list {
         let name = p.name.clone();
         let flag = p
@@ -165,7 +167,7 @@ fn commands(store: Store) -> Vec<Command> {
         let detail = |exit: &str| {
             format!(
                 "{exit} · {}{}",
-                p.region,
+                places::region_title(p.region),
                 p.delay
                     .filter(|d| *d > 0)
                     .map(|d| format!(" · {d} ms"))
@@ -176,12 +178,12 @@ fn commands(store: Store) -> Vec<Command> {
         let for_ai = name.clone();
         out.push(cmd(
             title.clone(),
-            detail("Everything else"),
+            detail(&rest_exit),
             Icon::Globe,
             move |s| s.run(s.svc().set_location(Some(name.clone()))),
         ));
         if ai_on {
-            out.push(cmd(title, detail("AI exit"), Icon::Globe, move |s| {
+            out.push(cmd(title, detail(&ai_exit), Icon::Globe, move |s| {
                 s.run(s.svc().set_ai_exit(for_ai.clone()))
             }));
         }
@@ -308,7 +310,7 @@ fn panel(open: Signal<bool>, store: Store) -> impl IntoElement {
                                     selected.set(0);
                                 })
                                 .on_submit(move |_: &str| submit())
-                                .placeholder("Search Kairo: pages, actions, locations")
+                                .placeholder(t!("palette.placeholder"))
                                 .placeholder_color(|| color(theme().muted_foreground))
                                 .caret_color(|| color(theme().primary))
                                 .auto_focus(true)

@@ -249,7 +249,8 @@ rules:
         )
         .ok()?;
         s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-        s.write_all(b"GET /version HTTP/1.0\r\n\r\n").ok()?;
+        s.write_all(b"GET /version HTTP/1.0").ok()?;
+        s.write_all(b"\r\n\r\n").ok()?;
         let mut out = String::new();
         s.read_to_string(&mut out).ok()?;
         out.contains("version").then_some(out.lines().last().unwrap_or("").to_owned())
@@ -882,7 +883,7 @@ mod platform {
         ) {
             Ok(v) => v,
             Err(e) => {
-                nsh_platform_windows::fatal_error(&format!("Cannot open a window: {e}"));
+                nsh_platform_windows::fatal_error(&kairo_core::tr!("launcher.error.window", error = e));
                 return;
             }
         };
@@ -963,7 +964,7 @@ mod platform {
                 let _ = handle.join();
             }
             Err(e) => {
-                nsh_platform_windows::fatal_error(&format!("Cannot start the UI thread: {e}"))
+                nsh_platform_windows::fatal_error(&kairo_core::tr!("launcher.error.ui_thread", error = e))
             }
         }
         kairo_tray::stop();

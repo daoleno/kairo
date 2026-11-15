@@ -64,20 +64,20 @@ impl Mode {
         }
     }
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Mode::Rule => "Rule",
-            Mode::Global => "Global",
-            Mode::Direct => "Direct",
+            Mode::Rule => crate::tr!("model.settings.mode.rule"),
+            Mode::Global => crate::tr!("model.settings.mode.global"),
+            Mode::Direct => crate::tr!("model.settings.mode.direct"),
         }
     }
 
     /// The route's name in Kairo's words.
-    pub fn route(self) -> &'static str {
+    pub fn route(self) -> String {
         match self {
-            Mode::Rule => "Smart",
-            Mode::Global => "All Traffic",
-            Mode::Direct => "Direct",
+            Mode::Rule => crate::tr!("model.settings.route.smart"),
+            Mode::Global => crate::tr!("model.settings.route.all"),
+            Mode::Direct => crate::tr!("model.settings.route.direct"),
         }
     }
 
@@ -286,18 +286,18 @@ impl Settings {
     /// Problems that would stop the core from starting, in words for the user.
     pub fn validate(&self) -> Result<(), String> {
         if self.mixed_port == 0 || self.controller_port == 0 {
-            return Err("Ports must be between 1 and 65535".into());
+            return Err(crate::tr!("model.settings.error.ports"));
         }
         if self.mixed_port == self.controller_port {
-            return Err("The proxy port and the controller port must differ".into());
+            return Err(crate::tr!("model.settings.error.same_port"));
         }
         if self.test_timeout_ms < 100 {
-            return Err("The delay test timeout is too short".into());
+            return Err(crate::tr!("model.settings.error.timeout"));
         }
         url::Url::parse(&self.test_url)
-            .map_err(|_| "The delay test URL is not a URL".to_string())?;
+            .map_err(|_| crate::tr!("model.settings.error.test_url"))?;
         if !["mixed", "gvisor", "system"].contains(&self.tun_stack.as_str()) {
-            return Err("Unknown TUN stack".into());
+            return Err(crate::tr!("model.settings.error.tun_stack"));
         }
         Ok(())
     }

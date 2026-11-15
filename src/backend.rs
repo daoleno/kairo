@@ -762,7 +762,7 @@ impl Remote {
         *self.0.send.borrow_mut() = send;
         if !up {
             for (_, tx) in self.0.pending.borrow_mut().drain() {
-                let _ = tx.send(Err("Lost the connection to Kairo".into()));
+                let _ = tx.send(Err(kairo_core::tr!("web.link.lost")));
             }
         }
         self.0.online.send_replace(up);
@@ -825,12 +825,12 @@ impl Remote {
                 self.0.pending.borrow_mut().insert(id, tx);
             }
             None => {
-                let _ = tx.send(Err("Not connected to Kairo".into()));
+                let _ = tx.send(Err(kairo_core::tr!("web.link.none")));
             }
         }
         Box::pin(async move {
-            let value = rx.await.map_err(|_| "Lost the connection to Kairo".to_owned())??;
-            serde_json::from_value(value).map_err(|e| format!("Unexpected answer: {e}"))
+            let value = rx.await.map_err(|_| kairo_core::tr!("web.link.lost"))??;
+            serde_json::from_value(value).map_err(|e| kairo_core::tr!("web.link.unexpected", error = e))
         })
     }
 

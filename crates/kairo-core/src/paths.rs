@@ -228,7 +228,7 @@ pub fn profile_id(id: &str) -> std::io::Result<&str> {
     if id.len() == 12 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
         Ok(id)
     } else {
-        Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a subscription of Kairo's"))
+        Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, crate::tr!("engine.paths.not_a_profile_id")))
     }
 }
 

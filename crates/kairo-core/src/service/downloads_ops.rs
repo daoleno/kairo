@@ -78,14 +78,11 @@ impl Service {
                 self.modify(|s| s.settings.downloads.exit = None);
                 self.save_settings();
                 self.notify(
-                    format!(
-                        "The server {was} you chose for downloads is no longer in the subscription. Downloads follow the {} now.",
-                        if self.settings().downloads.fastest {
-                            "fastest server"
-                        } else {
-                            "Location"
-                        }
-                    ),
+                    if self.settings().downloads.fastest {
+                        crate::tr!("engine.downloads_ops.exit_gone_fastest", was = was)
+                    } else {
+                        crate::tr!("engine.downloads_ops.exit_gone_location", was = was)
+                    },
                     false,
                 );
             }
@@ -165,7 +162,7 @@ impl Service {
         self.stats_manual(2);
         self.run(async move {
             let Some(group) = svc.downloads_group() else {
-                return Err("Downloads have no exit of their own while the AI layer is off".into());
+                return Err(crate::tr!("engine.downloads_ops.no_exit_ai_off"));
             };
             let listed = svc
                 .0
@@ -176,9 +173,7 @@ impl Service {
                 .find(|g| g.name == group)
                 .is_some_and(|g| g.members.iter().any(|m| m.name == name && !m.is_group));
             if !listed {
-                return Err(format!(
-                    "{name} is not one of the Downloads group's choices"
-                ));
+                return Err(crate::tr!("engine.downloads_ops.not_a_choice", name = name));
             }
             let fingerprint = svc
                 .0
@@ -187,7 +182,7 @@ impl Service {
                 .expect("ai cfg")
                 .as_ref()
                 .and_then(|c| ai::fingerprint(c, &name))
-                .ok_or_else(|| format!("{name} is not a server of this subscription"))?;
+                .ok_or_else(|| crate::tr!("engine.service.not_a_server", name = name))?;
             svc.modify(|s| {
                 s.settings.downloads.exit = Some(AiExit {
                     name,
@@ -242,17 +237,15 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             if !svc.running() {
-                return Err("Connect first".into());
+                return Err(crate::tr!("engine.service.connect_first"));
             }
             if svc.downloads_group().is_none() {
-                return Err("Downloads have no exit of their own while the AI layer is off".into());
+                return Err(crate::tr!("engine.downloads_ops.no_exit_ai_off"));
             }
             // Without its rules the test would measure whatever way the
             // subscription sends these sites, not the Downloads exit.
             if !svc.settings().ai.downloads {
-                return Err(
-                    "Downloads are not sent to their own exit while that switch is off".into(),
-                );
+                return Err(crate::tr!("engine.downloads_ops.switch_off"));
             }
             if svc.0.mirror_busy.swap(true, Ordering::SeqCst) {
                 return Ok(());
@@ -276,7 +269,7 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             if on && !svc.0.state.borrow().downloads.mirror_test.passed() {
-                return Err(downloads::MIRROR_REFUSED.into());
+                return Err(downloads::mirror_refused());
             }
             if svc.settings().downloads.mirror != on {
                 svc.modify(|s| s.settings.downloads.mirror = on);

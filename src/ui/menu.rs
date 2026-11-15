@@ -175,7 +175,7 @@ fn sheet(items: Vec<Choice>, shown: Signal<Option<Shown>>) -> impl IntoElement {
                                 .justify_center()
                                 .on_press(close)
                                 .child(
-                                    text("Cancel")
+                                    text(t!("shell.cancel"))
                                         .text_size(px(size::body()))
                                         .font_weight(FontWeight::SEMIBOLD),
                                 ),

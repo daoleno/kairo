@@ -96,19 +96,19 @@ impl Route {
 pub fn clean_app(name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err("Enter the app's name".into());
+        return Err(crate::tr!("model.routes.app_empty"));
     }
     if name.chars().count() > 128 {
-        return Err("That app name is too long".into());
+        return Err(crate::tr!("model.routes.app_too_long"));
     }
     if name.contains(',') {
-        return Err("An app name cannot contain a comma".into());
+        return Err(crate::tr!("model.routes.app_comma"));
     }
     if name.chars().any(char::is_control) {
-        return Err("An app name cannot contain line breaks or control characters".into());
+        return Err(crate::tr!("model.routes.app_control"));
     }
     if name.contains('/') || name.contains('\\') {
-        return Err("Use the app's name, not its path".into());
+        return Err(crate::tr!("model.routes.app_path"));
     }
     Ok(name.to_owned())
 }
@@ -120,37 +120,37 @@ pub fn clean_app(name: &str) -> Result<String, String> {
 pub fn clean_site(domain: &str) -> Result<String, String> {
     let mut d = domain.trim().to_lowercase();
     if d.contains("://") {
-        return Err("Enter only the site's name, without http:// or https://".into());
+        return Err(crate::tr!("model.routes.site_scheme"));
     }
     if let Some(rest) = d.strip_prefix("*.") {
         d = rest.to_owned();
     }
     let d = d.trim_start_matches('.').trim_end_matches('.').to_owned();
     if d.is_empty() {
-        return Err("Enter the site's name".into());
+        return Err(crate::tr!("model.routes.site_empty"));
     }
     if d.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err("A site name cannot contain spaces".into());
+        return Err(crate::tr!("model.routes.site_spaces"));
     }
     if d.contains('/') || d.contains('?') || d.contains('#') {
-        return Err("Enter only the site's name, without a path".into());
+        return Err(crate::tr!("model.routes.site_path"));
     }
     if d.contains(':') || d.contains('@') {
-        return Err("Enter only the site's name, without a port or a user".into());
+        return Err(crate::tr!("model.routes.site_port"));
     }
     if d.contains(',') || d.contains('*') {
-        return Err("A site name cannot contain commas or wildcards".into());
+        return Err(crate::tr!("model.routes.site_wildcard"));
     }
     let d = if d.is_ascii() {
         d
     } else {
         match url::Host::parse(&d) {
             Ok(url::Host::Domain(s)) => s,
-            _ => return Err("That is not a site name".into()),
+            _ => return Err(crate::tr!("model.routes.site_invalid")),
         }
     };
     if d.len() > 253 {
-        return Err("That site name is too long".into());
+        return Err(crate::tr!("model.routes.site_too_long"));
     }
     let labels: Vec<&str> = d.split('.').collect();
     let ok = |l: &str| {
@@ -162,14 +162,14 @@ pub fn clean_site(domain: &str) -> Result<String, String> {
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
     };
     if labels.len() < 2 || !labels.iter().all(|l| ok(l)) {
-        return Err("That is not a site name (like example.com)".into());
+        return Err(crate::tr!("model.routes.site_not_name"));
     }
     // An address, not a name.
     if labels
         .last()
         .is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit()))
     {
-        return Err("Use a site's name, not an address".into());
+        return Err(crate::tr!("model.routes.site_address"));
     }
     Ok(d)
 }
@@ -177,12 +177,10 @@ pub fn clean_site(domain: &str) -> Result<String, String> {
 /// A node or group name as the third field of a rule takes it.
 pub fn clean_target(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
-        return Err("Choose a server".into());
+        return Err(crate::tr!("model.routes.target_empty"));
     }
     if name.contains(',') || name.chars().any(char::is_control) {
-        return Err(
-            "That server's name has a comma or a line break, which a route cannot use".into(),
-        );
+        return Err(crate::tr!("model.routes.target_invalid"));
     }
     Ok(())
 }

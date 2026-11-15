@@ -1,0 +1,509 @@
+_version: 2
+
+# Home › Welcome: the first run, a subscription link in.
+home.welcome.title:
+  en: "Welcome to Kairo"
+  zh: "欢迎使用 Kairo"
+home.welcome.link_placeholder:
+  en: "https://… (your provider's subscription link)"
+  zh: "https://…（服务商提供的订阅链接）"
+home.welcome.paste_connect:
+  en: "Paste and Connect"
+  zh: "粘贴并连接"
+home.welcome.import_file:
+  en: "Import File"
+  zh: "导入文件"
+home.welcome.no_link:
+  en: "The clipboard holds no link"
+  zh: "剪贴板中没有链接"
+home.connect:
+  en: "Connect"
+  zh: "连接"
+home.connecting:
+  en: "Connecting…"
+  zh: "正在连接…"
+home.try_again:
+  en: "Try Again"
+  zh: "重试"
+
+# Home › What went wrong: a headline and a hint.
+home.problem.provider_says:
+  en: "Your provider says: “%{said}”"
+  zh: "服务商提示：「%{said}」"
+home.problem.provider_says_hint:
+  en: "The link works, but the provider sent a message instead of locations. Do what it asks (often: allow fetching on its website), then try again."
+  zh: "链接有效，但服务商返回了一条消息，而不是节点。请按提示操作（通常是在其网站上允许获取订阅），然后重试。"
+home.problem.refused:
+  en: "The provider refused this link."
+  zh: "服务商拒绝了此链接。"
+home.problem.refused_hint:
+  en: "It may have expired or been reset (%{error}). Copy a fresh link from your provider."
+  zh: "链接可能已过期或已被重置（%{error}）。请从服务商处复制新的链接。"
+home.problem.unreachable:
+  en: "Kairo can't reach the provider."
+  zh: "Kairo 无法连接到服务商。"
+# "Check that Paul's MacBook is online, then try again."
+home.problem.check_online:
+  en: "Check that %{machine} is online, then try again."
+  zh: "请确认 %{machine} 已联网，然后重试。"
+home.problem.check_online_phone:
+  en: "Check that this phone is online, then try again."
+  zh: "请确认这台手机已联网，然后重试。"
+home.problem.check_online_computer:
+  en: "Check that this Mac or PC is online, then try again."
+  zh: "请确认这台电脑已联网，然后重试。"
+home.problem.node_list:
+  en: "This link gives a plain node list, not a Clash/mihomo config."
+  zh: "此链接提供的是纯节点列表，而不是 Clash/mihomo 配置。"
+home.problem.node_list_hint:
+  en: "Ask your provider for the Clash or mihomo link (many have a “Clash” button next to it)."
+  zh: "请向服务商索取 Clash 或 mihomo 订阅链接（很多服务商在旁边提供「Clash」按钮）。"
+home.problem.bad_config:
+  en: "This link doesn't give a config Kairo can use."
+  zh: "此链接没有提供 Kairo 可用的配置。"
+home.problem.bad_config_hint:
+  en: "Check you copied the whole link. (%{error})"
+  zh: "请确认复制了完整的链接。（%{error}）"
+
+# Home › The switch: the state, the plan, the way out of a failure.
+home.state.off:
+  en: "Not Connected"
+  zh: "未连接"
+home.state.on:
+  en: "Connected"
+  zh: "已连接"
+home.state.failed:
+  en: "Couldn't Connect"
+  zh: "无法连接"
+home.state.updating:
+  en: "Updating…"
+  zh: "正在更新…"
+home.state.locating:
+  en: "Finding the fastest location…"
+  zh: "正在寻找最快的地区…"
+home.state.disconnecting:
+  en: "Disconnecting…"
+  zh: "正在断开…"
+# "Nebula · 37 GB of 100 GB · 22 days left"
+home.plan.usage:
+  en: "%{used} of %{total}"
+  zh: "%{used} / %{total}"
+home.plan.expired:
+  en: "expired"
+  zh: "已过期"
+home.plan.days_left.one:
+  en: "%{count} day left"
+  zh: "剩余 %{count} 天"
+home.plan.days_left.other:
+  en: "%{count} days left"
+  zh: "剩余 %{count} 天"
+home.fix.free_port:
+  en: "Use a Free Port"
+  zh: "使用空闲端口"
+home.fix.allow_tun:
+  en: "Allow TUN"
+  zh: "允许 TUN"
+
+# Home › Mode and how apps reach Kairo.
+home.mode.title:
+  en: "Mode"
+  zh: "模式"
+home.mode.smart:
+  en: "Smart"
+  zh: "智能分流"
+home.mode.global:
+  en: "Everything"
+  zh: "全局"
+home.mode.direct:
+  en: "Direct"
+  zh: "直连"
+# "Apps on Paul's MacBook": a server's page switches the server's apps.
+home.via.apps_on:
+  en: "Apps on %{machine}"
+  zh: "%{machine} 上的应用"
+home.via.apps:
+  en: "Apps"
+  zh: "应用"
+home.via.system:
+  en: "System settings"
+  zh: "系统设置"
+home.via.tun:
+  en: "Every app"
+  zh: "所有应用"
+
+# Exits: the three exits, their cards and the picker.
+exits.title.ai:
+  en: "AI"
+  zh: "AI"
+exits.title.rest:
+  en: "Everything else"
+  zh: "其他流量"
+exits.title.downloads:
+  en: "Downloads"
+  zh: "下载"
+exits.page.subtitle:
+  en: "Where traffic leaves"
+  zh: "流量的出口"
+exits.health.good:
+  en: "Good"
+  zh: "良好"
+exits.health.ok:
+  en: "OK"
+  zh: "一般"
+exits.health.slow:
+  en: "Slow"
+  zh: "较慢"
+exits.health.untested:
+  en: "Not tested"
+  zh: "未测速"
+exits.badge.stable:
+  en: "stable"
+  zh: "稳定"
+# The line under a card's country: "Fastest · Seoul 02", "Tokyo 01 · pinned 3 days".
+exits.subtitle.fastest:
+  en: "Fastest · %{node}"
+  zh: "最快 · %{node}"
+exits.subtitle.chosen:
+  en: "Chosen · %{node}"
+  zh: "手动选择 · %{node}"
+exits.subtitle.pinned_today:
+  en: "%{node} · pinned today"
+  zh: "%{node} · 今天已固定"
+exits.subtitle.pinned:
+  en: "%{node} · pinned %{when}"
+  zh: "%{node} · 已固定 %{when}"
+exits.subtitle.follows:
+  en: "%{node} · follows Everything else"
+  zh: "%{node} · 跟随其他流量"
+# How long a pin has held: "today", "2 days", "3 weeks".
+exits.pinned_for.today:
+  en: "today"
+  zh: "今天"
+exits.pinned_for.days.one:
+  en: "%{count} day"
+  zh: "%{count} 天"
+exits.pinned_for.days.other:
+  en: "%{count} days"
+  zh: "%{count} 天"
+exits.pinned_for.weeks:
+  en: "%{count} weeks"
+  zh: "%{count} 周"
+exits.quality:
+  en: "Quality"
+  zh: "质量"
+exits.test_again:
+  en: "Test Again"
+  zh: "重新测速"
+exits.fastest.title:
+  en: "Fastest"
+  zh: "最快"
+exits.fastest.now:
+  en: "now %{node}"
+  zh: "当前 %{node}"
+exits.fastest.automatic:
+  en: "automatic"
+  zh: "自动"
+exits.follow_rest:
+  en: "Follow Everything else"
+  zh: "跟随其他流量"
+exits.servers.fewer:
+  en: "Fewer servers"
+  zh: "收起节点"
+exits.servers.all:
+  en: "All servers"
+  zh: "全部节点"
+
+# Exits › Downloads: the mirror and its speed test.
+exits.mirror.title:
+  en: "Use mirrors for model hubs and package indexes"
+  zh: "为模型仓库和软件包索引使用镜像"
+exits.mirror.test:
+  en: "Test"
+  zh: "测试"
+exits.mirror.use:
+  en: "Use mirrors"
+  zh: "使用镜像"
+exits.mirror.copy:
+  en: "Copy for terminal"
+  zh: "复制终端命令"
+exits.copied:
+  en: "Copied"
+  zh: "已复制"
+exits.mirror.off:
+  en: "Off"
+  zh: "关闭"
+exits.mirror.testing:
+  en: "Testing…"
+  zh: "正在测试…"
+# "Mirror 1.2 s · original 8.4 s"
+exits.mirror.passed:
+  en: "Mirror %{mirror} · original %{original}"
+  zh: "镜像 %{mirror} · 原站 %{original}"
+exits.mirror.passed_no_original:
+  en: "Mirror %{mirror} · the original did not answer"
+  zh: "镜像 %{mirror} · 原站无响应"
+exits.mirror.failed:
+  en: "The test did not pass: %{why}"
+  zh: "测试未通过：%{why}"
+
+# Home › AI: the services' table, what each one sees.
+ai.board.title:
+  en: "AI"
+  zh: "AI"
+ai.checking:
+  en: "Checking…"
+  zh: "正在检测…"
+ai.not_checked:
+  en: "Not checked yet"
+  zh: "尚未检测"
+ai.check_now:
+  en: "Check Now"
+  zh: "立即检测"
+ai.unreachable:
+  en: "Unreachable"
+  zh: "无法访问"
+ai.reachable:
+  en: "Reachable"
+  zh: "可访问"
+ai.no_answer:
+  en: "No answer"
+  zh: "无响应"
+# "Sees Japan": the country the service sees.
+ai.sees:
+  en: "Sees %{country}"
+  zh: "地区：%{country}"
+ai.not_where_others:
+  en: "Not where the others are"
+  zh: "与其他服务不一致"
+ai.api_answered:
+  en: "Its API answered HTTP %{status}"
+  zh: "其 API 返回 HTTP %{status}"
+ai.site_not_api:
+  en: "Site reached, API not"
+  zh: "网站可访问，API 无法访问"
+ai.not_in_use:
+  en: "Not in use"
+  zh: "未使用"
+ai.estimated:
+  en: "Estimated"
+  zh: "估计"
+ai.api_not_answering:
+  en: "API not answering"
+  zh: "API 无响应"
+ai.not_through_kairo:
+  en: "Not through Kairo"
+  zh: "未经过 Kairo"
+ai.own_network:
+  en: "your own network"
+  zh: "本机网络"
+ai.goes.ai_exit:
+  en: "AI exit"
+  zh: "AI 出口"
+ai.goes.direct:
+  en: "Direct"
+  zh: "直连"
+ai.goes.blocked:
+  en: "Blocked"
+  zh: "已拦截"
+ai.summary.problems.one:
+  en: "%{count} problem"
+  zh: "%{count} 个问题"
+ai.summary.problems.other:
+  en: "%{count} problems"
+  zh: "%{count} 个问题"
+ai.summary.all_see:
+  en: "All %{count} see %{country}"
+  zh: "%{count} 个服务均识别为%{country}"
+ai.summary.all_reachable:
+  en: "All %{count} reachable"
+  zh: "%{count} 个服务均可访问"
+ai.summary.some_reachable:
+  en: "%{ok} of %{total} reachable"
+  zh: "%{ok}/%{total} 个服务可访问"
+ai.column.service:
+  en: "Service"
+  zh: "服务"
+ai.column.status:
+  en: "Status"
+  zh: "状态"
+ai.column.sees:
+  en: "Sees"
+  zh: "识别地区"
+ai.column.goes:
+  en: "Goes through"
+  zh: "经由"
+ai.column.used_by:
+  en: "Used by"
+  zh: "使用方"
+# A row's accessibility label: "Claude: Reachable · sees Japan · AI exit".
+ai.row.label:
+  en: "%{name}: %{status} · sees %{sees} · %{goes}"
+  zh: "%{name}：%{status} · 地区：%{sees} · %{goes}"
+ai.fix.use_ai_exit:
+  en: "Use AI Exit"
+  zh: "使用 AI 出口"
+ai.fix.use_every_app:
+  en: "Use Every App"
+  zh: "切换到所有应用"
+ai.fix.copy_for_terminal:
+  en: "Copy for Terminal"
+  zh: "复制终端命令"
+ai.alert.direct:
+  en: "Mode is Direct: AI is not using the exit"
+  zh: "当前为直连模式：AI 未使用出口"
+ai.alert.use_smart:
+  en: "Use Smart"
+  zh: "使用智能分流"
+ai.alert.exit_gone:
+  en: "%{node} is no longer in your subscription"
+  zh: "%{node} 已不在你的订阅中"
+ai.alert.follows_rest:
+  en: "AI now follows Everything else (%{node})"
+  zh: "AI 现在跟随其他流量（%{node}）"
+ai.alert.pin:
+  en: "Pin it"
+  zh: "固定"
+ai.alert.ok:
+  en: "OK"
+  zh: "好的"
+ai.lanes.direct:
+  en: "Direct: Kimi, DeepSeek, Doubao, Tongyi"
+  zh: "直连：Kimi、DeepSeek、豆包、通义"
+
+# Home › AI › A service in detail: each check.
+ai.detail.close:
+  en: "Close"
+  zh: "关闭"
+ai.detail.note:
+  en: "Kairo shows what the service sees. Where you are, and the service's own terms, still apply."
+  zh: "Kairo 显示的是服务识别到的情况。你所在地区的规定和服务自身的条款依然适用。"
+ai.check.through_exit:
+  en: "Through the exit"
+  zh: "经由出口"
+ai.check.api:
+  en: "API"
+  zh: "API"
+ai.check.answers:
+  en: "Answers in %{ms} ms"
+  zh: "%{ms} ms 内响应"
+ai.check.unexpected:
+  en: "Answered HTTP %{status}, not what it gives without a key"
+  zh: "返回 HTTP %{status}，与无密钥时的正常响应不符"
+ai.check.no_api:
+  en: "Kairo has no way to ask this one"
+  zh: "Kairo 无法检测此服务的 API"
+ai.check.sees_warp:
+  en: "Sees %{country} · through Cloudflare WARP"
+  zh: "地区：%{country} · 经由 Cloudflare WARP"
+ai.check.estimated:
+  en: "About %{country} · estimated: this service does not say"
+  zh: "估计地区：%{country} · 此服务未提供"
+ai.check.unknown:
+  en: "Not known"
+  zh: "未知"
+ai.check.country:
+  en: "Country"
+  zh: "地区"
+ai.check.hold:
+  en: "A connection held open"
+  zh: "长连接保持"
+# "Checked 5 min ago"
+ai.check.checked:
+  en: "Checked %{ago}"
+  zh: "上次检测：%{ago}"
+ai.ago.now:
+  en: "just now"
+  zh: "刚刚"
+ai.ago.min:
+  en: "%{n} min ago"
+  zh: "%{n} 分钟前"
+ai.ago.h:
+  en: "%{n} h ago"
+  zh: "%{n} 小时前"
+ai.hold.held:
+  en: "Open for %{secs} s, no drop"
+  zh: "保持 %{secs} s，未断开"
+ai.hold.dropped:
+  en: "Dropped after %{after} s"
+  zh: "%{after} s 后断开"
+ai.hold.failed:
+  en: "Could not test: %{why}"
+  zh: "无法测试：%{why}"
+ai.hold.testing:
+  en: "Testing for 90 s…"
+  zh: "正在测试 90 s…"
+ai.hold.untested:
+  en: "Not tested yet"
+  zh: "尚未测试"
+
+# Apps & Sites: the apps and sites that go their own way.
+apps.exit.usual:
+  en: "Usual"
+  zh: "默认"
+apps.exit.direct:
+  en: "Direct"
+  zh: "直连"
+apps.exit.ai:
+  en: "AI exit"
+  zh: "AI 出口"
+apps.exit.everything:
+  en: "Everything else"
+  zh: "其他流量"
+apps.exit.downloads:
+  en: "Downloads"
+  zh: "下载"
+apps.exit.block:
+  en: "Block"
+  zh: "拦截"
+apps.subtitle.one:
+  en: "%{count} choice"
+  zh: "%{count} 项"
+apps.subtitle.other:
+  en: "%{count} choices"
+  zh: "%{count} 项"
+apps.search_placeholder:
+  en: "Search apps and sites"
+  zh: "搜索应用与网站"
+apps.add_app:
+  en: "Add App"
+  zh: "添加应用"
+apps.add_site:
+  en: "Add Site"
+  zh: "添加网站"
+apps.empty:
+  en: "Nothing set apart"
+  zh: "暂无单独设置"
+apps.section.apps:
+  en: "Apps"
+  zh: "应用"
+apps.section.sites:
+  en: "Sites"
+  zh: "网站"
+apps.remove:
+  en: "Remove %{name}"
+  zh: "移除 %{name}"
+apps.subscription.title:
+  en: "From your subscription"
+  zh: "来自订阅"
+# "Netflix, YouTube, Telegram and 4 more groups"
+apps.subscription.more:
+  en: "%{names} and %{count} more groups"
+  zh: "%{names} 及另外 %{count} 个策略组"
+apps.add.app_title:
+  en: "Add an app"
+  zh: "添加应用"
+apps.add.site_title:
+  en: "Add a site"
+  zh: "添加网站"
+apps.add.name_first:
+  en: "Type a name first."
+  zh: "请先输入名称。"
+apps.add.goes_through:
+  en: "Goes through"
+  zh: "经由"
+apps.add.cancel:
+  en: "Cancel"
+  zh: "取消"
+apps.add.add:
+  en: "Add"
+  zh: "添加"

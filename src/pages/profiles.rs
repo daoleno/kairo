@@ -13,7 +13,10 @@ use nsh_base::{ButtonElement as Button, alert_dialog, button, theme};
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
 
+use kairo_core::tr;
+
 use crate::chrome::Glyph;
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::menu::{self, Choice};
 use crate::ui::toolbar;
@@ -28,39 +31,39 @@ pub fn host_of(url: &str) -> String {
     url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
-        .unwrap_or_else(|| "Subscription".to_owned())
+        .unwrap_or_else(|| tr!("profiles.host_unknown"))
 }
 
 /// Where a subscription comes from, for its row: the host, or "Imported file".
 pub fn source_label(source: &Source) -> String {
     match source {
         Source::Remote { url, .. } => host_of(url),
-        Source::Local { .. } => "Imported file".to_owned(),
+        Source::Local { .. } => tr!("profiles.source.file"),
     }
 }
 
 /// "Updated 2 h ago".
 pub fn updated_ago(at: Option<i64>, now: i64) -> String {
     let Some(at) = at else {
-        return "Never updated".into();
+        return tr!("profiles.updated.never");
     };
     match now - at {
-        i64::MIN..=59 => "Updated just now".into(),
-        s @ 60..=3599 => format!("Updated {} min ago", s / 60),
-        s @ 3600..=86399 => format!("Updated {} h ago", s / 3600),
-        s => format!("Updated {} d ago", s / DAY),
+        i64::MIN..=59 => tr!("profiles.updated.just_now"),
+        s @ 60..=3599 => tr!("profiles.updated.minutes", n = s / 60),
+        s @ 3600..=86399 => tr!("profiles.updated.hours", n = s / 3600),
+        s => tr!("profiles.updated.days", n = s / DAY),
     }
 }
 
 /// "Every 12 hours", "Every day", "Only by hand".
 pub fn interval_label(hours: u32) -> String {
     match hours {
-        0 => "Only by hand".into(),
-        1 => "Every hour".into(),
-        24 => "Every day".into(),
-        168 => "Every week".into(),
-        h if h % 24 == 0 => format!("Every {} days", h / 24),
-        h => format!("Every {h} hours"),
+        0 => tr!("profiles.interval.by_hand"),
+        1 => tr!("profiles.interval.hour"),
+        24 => tr!("profiles.interval.day"),
+        168 => tr!("profiles.interval.week"),
+        h if h % 24 == 0 => tr!("profiles.interval.days", n = h / 24),
+        h => tr!("profiles.interval.hours", n = h),
     }
 }
 
@@ -70,19 +73,16 @@ pub fn schedule_line(source: &Source, updated_at: Option<i64>, now: i64) -> Stri
         Source::Remote { interval_hours, .. } => {
             let ago = updated_ago(updated_at, now);
             match interval_hours {
-                0 => format!("{ago} · by hand"),
-                h => format!("{ago} · every {h} h"),
+                0 => tr!("profiles.schedule.by_hand", ago = ago),
+                h => tr!("profiles.schedule.every", ago = ago, h = h),
             }
         }
-        Source::Local { .. } => "Not updated automatically".into(),
+        Source::Local { .. } => tr!("profiles.schedule.file"),
     }
 }
 
 /// `Dec 2`, in the local time of `offset` seconds from UTC.
 pub fn month_day(t: i64, offset: i64) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
     // Civil from days (Howard Hinnant).
     let z = (t + offset).div_euclid(DAY) + 719_468;
     let era = z.div_euclid(146_097);
@@ -92,7 +92,21 @@ pub fn month_day(t: i64, offset: i64) -> String {
     let mp = (5 * doy + 2) / 153;
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    format!("{} {day}", MONTHS[(month - 1) as usize])
+    let key = match month {
+        1 => "profiles.date.jan",
+        2 => "profiles.date.feb",
+        3 => "profiles.date.mar",
+        4 => "profiles.date.apr",
+        5 => "profiles.date.may",
+        6 => "profiles.date.jun",
+        7 => "profiles.date.jul",
+        8 => "profiles.date.aug",
+        9 => "profiles.date.sep",
+        10 => "profiles.date.oct",
+        11 => "profiles.date.nov",
+        _ => "profiles.date.dec",
+    };
+    tr!(key, day = day)
 }
 
 /// A size with at most one decimal, none when whole: "37 GB", "2.9 GB".
@@ -122,8 +136,10 @@ pub fn size_text(n: u64) -> String {
 pub fn used_of(used: u64, total: u64) -> String {
     let (a, b) = (size_text(used), size_text(total));
     match (a.split_once(' '), b.split_once(' ')) {
-        (Some((number, unit)), Some((_, unit_b))) if unit == unit_b => format!("{number} of {b}"),
-        _ => format!("{a} of {b}"),
+        (Some((number, unit)), Some((_, unit_b))) if unit == unit_b => {
+            tr!("profiles.used_of", used = number, total = b)
+        }
+        _ => tr!("profiles.used_of", used = a, total = b),
     }
 }
 
@@ -147,17 +163,17 @@ pub fn allowance_per_day(left: u64, days: i64) -> Option<u64> {
 /// "37 of 100 GB · expires Dec 2".
 pub fn usage_line(usage: Option<&Usage>, now: i64, offset: i64) -> String {
     let Some(u) = usage else {
-        return "No usage data".into();
+        return tr!("profiles.usage.none");
     };
     let amount = if u.total > 0 {
         used_of(u.used(), u.total)
     } else {
-        format!("{} used", size_text(u.used()))
+        tr!("profiles.usage.used", size = size_text(u.used()))
     };
     let expiry = match u.expire {
-        None => "no expiry".to_owned(),
-        Some(t) if t <= now => format!("expired {}", month_day(t, offset)),
-        Some(t) => format!("expires {}", month_day(t, offset)),
+        None => tr!("profiles.usage.no_expiry"),
+        Some(t) if t <= now => tr!("profiles.usage.expired", date = month_day(t, offset)),
+        Some(t) => tr!("profiles.usage.expires", date = month_day(t, offset)),
     };
     format!("{amount} · {expiry}")
 }
@@ -186,40 +202,43 @@ pub fn usage_tiles(u: &Usage, now: i64, offset: i64) -> [Tile; 4] {
     let days = days_left(u.expire, now);
     let left = left_bytes(u);
     let used = tile(
-        "Used",
+        tr!("profiles.tile.used"),
         size_text(u.used()),
         if u.total > 0 {
-            format!("of {}", size_text(u.total))
+            tr!("profiles.tile.of_total", total = size_text(u.total))
         } else {
-            "no limit".to_owned()
+            tr!("profiles.tile.no_limit")
         },
     );
     let until = match (u.expire, days) {
-        (None, _) => "no expiry".to_owned(),
-        (Some(t), None) => format!("expired {}", month_day(t, offset)),
-        (Some(t), Some(1)) => format!("1 day to {}", month_day(t, offset)),
-        (Some(t), Some(d)) => format!("{d} days to {}", month_day(t, offset)),
+        (None, _) => tr!("profiles.usage.no_expiry"),
+        (Some(t), None) => tr!("profiles.usage.expired", date = month_day(t, offset)),
+        (Some(t), Some(d)) => tr!(
+            &plural("profiles.tile.days_to", d as u64),
+            count = d,
+            date = month_day(t, offset)
+        ),
     };
     let left_tile = tile(
-        "Left",
-        left.map_or_else(|| "No limit".to_owned(), size_text),
+        tr!("profiles.tile.left"),
+        left.map_or_else(|| tr!("profiles.tile.no_limit_value"), size_text),
         until,
     );
-    let pace = tile("Recent pace", "—", "not measured yet");
+    let pace = tile(tr!("profiles.tile.pace"), "—", tr!("profiles.tile.pace_unmeasured"));
     let allowance = match (left, days, u.expire) {
         (Some(left), Some(d), Some(t)) => {
             let per_day = allowance_per_day(left, d).unwrap_or(0);
             tile(
-                format!("To last until {}", month_day(t, offset)),
-                format!("≤ {}/day", size_text(per_day)),
-                format!(
-                    "{} over {d} day{}",
-                    size_text(left),
-                    if d == 1 { "" } else { "s" }
+                tr!("profiles.tile.last_until", date = month_day(t, offset)),
+                tr!("profiles.tile.at_most_per_day", size = size_text(per_day)),
+                tr!(
+                    &plural("profiles.tile.over_days", d as u64),
+                    size = size_text(left),
+                    count = d
                 ),
             )
         }
-        _ => tile("To last until expiry", "—", ""),
+        _ => tile(tr!("profiles.tile.last_until_expiry"), "—", ""),
     };
     [used, left_tile, pace, allowance]
 }
@@ -250,28 +269,29 @@ pub fn scrub(text: &str, url: Option<&str>) -> String {
     out
 }
 
-fn reason(code: u16) -> &'static str {
-    match code {
-        429 => "Too Many Requests",
-        500 => "Internal Server Error",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        _ => "Server Error",
-    }
+fn reason(code: u16) -> String {
+    tr!(match code {
+        429 => "profiles.http.too_many_requests",
+        500 => "profiles.http.internal_server_error",
+        502 => "profiles.http.bad_gateway",
+        503 => "profiles.http.service_unavailable",
+        504 => "profiles.http.gateway_timeout",
+        _ => "profiles.http.server_error",
+    })
 }
 
 /// An update's failure in the user's words: the headline and a hint, with no
-/// link in either. (The engine says "The server answered HTTP 503"; the rest is
+/// link in either. (The engine says "The server answered HTTP 503", in the
+/// language it spoke then: the code is what ends it; the rest is
 /// `home::explain`.)
 pub fn plain_error(err: &str, url: Option<&str>) -> (String, Option<String>) {
     let e = scrub(err, url);
     let code = e
-        .strip_prefix("The server answered HTTP ")
-        .and_then(|n| n.trim().parse::<u16>().ok());
+        .rsplit_once("HTTP ")
+        .and_then(|(_, n)| n.trim().parse::<u16>().ok());
     if let Some(code) = code.filter(|c| *c >= 500 || *c == 429) {
         return (
-            format!("Your provider says: “{code} {}”", reason(code)),
+            tr!("profiles.provider_says", code = code, reason = reason(code)),
             None,
         );
     }
@@ -281,9 +301,9 @@ pub fn plain_error(err: &str, url: Option<&str>) -> (String, Option<String>) {
 /// The rest of the banner after the subscription's name:
 /// "couldn't update · Your provider says: “503 Service Unavailable”. Using the saved copy."
 pub fn banner_text(headline: &str) -> String {
-    format!(
-        "couldn't update · {}. Using the saved copy.",
-        headline.trim().trim_end_matches('.')
+    tr!(
+        "profiles.banner",
+        headline = headline.trim().trim_end_matches(['.', '。'])
     )
 }
 
@@ -349,14 +369,13 @@ pub fn page() -> impl IntoElement {
                 let n = store.state.with(|s| s.profiles.profiles.len());
                 match n {
                     0 => String::new(),
-                    1 => "1 subscription".to_owned(),
-                    n => format!("{n} subscriptions"),
+                    n => t!(&plural("profiles.count", n as u64), count = n),
                 }
             },
             vec![
                 toolbar::button(
                     "profiles.update-all",
-                    "Update All",
+                    t!("profiles.update_all"),
                     Glyph::Refresh,
                     Icon::Refresh,
                     move || store.run_update(store.svc().update_all_profiles()),
@@ -364,7 +383,7 @@ pub fn page() -> impl IntoElement {
                 .enabled(move || any_remote() && !updating_all()),
                 toolbar::button(
                     "profiles.add",
-                    "Add",
+                    t!("profiles.add.button"),
                     Glyph::Add,
                     Icon::Plus,
                     move || dialog.set(Some(Dialog::Add)),
@@ -418,9 +437,9 @@ pub fn page() -> impl IntoElement {
                         .otherwise(move || {
                             ui::empty_state(
                                 Icon::Profiles,
-                                "No subscriptions yet",
+                                t!("profiles.empty"),
                                 Some(
-                                    ui::btn_icon(Icon::Plus, "Add", Variant::Primary)
+                                    ui::btn_icon(Icon::Plus, t!("profiles.add.button"), Variant::Primary)
                                         .on_press(move || dialog.set(Some(Dialog::Add)))
                                         .into_element(),
                                 ),
@@ -484,9 +503,9 @@ fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
             ui::btn(
                 move || -> SharedString {
                     if updating() {
-                        "Retrying…".into()
+                        t!("profiles.banner.retrying").into()
                     } else {
-                        "Retry".into()
+                        t!("profiles.banner.retry").into()
                     }
                 },
                 Variant::Secondary,
@@ -502,7 +521,7 @@ fn banner(p: ReadSignal<Profile>) -> impl IntoElement {
         )
         // Closing hides it until the next failed update says it again.
         .child(
-            ui::icon_btn(Icon::Close, "Close")
+            ui::icon_btn(Icon::Close, t!("profiles.banner.close"))
                 .on_press(move || store.svc().dismiss_failure(&close_id)),
         )
 }
@@ -599,7 +618,7 @@ fn row(
                         }))
                         .child(ui::muted(move || -> SharedString {
                             if updating() {
-                                return "Updating…".into();
+                                return t!("profiles.updating").into();
                             }
                             p.with(|p| schedule_line(&p.source, p.updated_at, now()))
                                 .into()
@@ -612,7 +631,7 @@ fn row(
                 }))
                 .child(when(active, || in_use_tag()).otherwise(move || {
                     let id = id_use.clone();
-                    ui::btn("Use", Variant::Secondary)
+                    ui::btn(t!("profiles.use"), Variant::Secondary)
                         .h(px(26.0))
                         .on_press(move || store.run(store.svc().activate(id.clone())))
                 }))
@@ -620,7 +639,7 @@ fn row(
                 .child(when(active, || groups_button().h(px(26.0))))
                 .child(when(remote, move || {
                     let id = id_update.clone();
-                    ui::btn("Update", Variant::Secondary)
+                    ui::btn(t!("profiles.update"), Variant::Secondary)
                         .h(px(26.0))
                         .disabled(updating)
                         .on_press(move || store.run_update(store.svc().update_profile(id.clone())))
@@ -628,7 +647,7 @@ fn row(
                 .child(when(has_usage, move || {
                     let toggle = toggle.clone();
                     button()
-                        .accessibility_label("Subscription usage")
+                        .accessibility_label(t!("profiles.usage.title"))
                         .on_press(move || toggle())
                         .items_center()
                         .justify_center()
@@ -644,7 +663,7 @@ fn row(
                 }))
                 .child(
                     ui::btn("···", Variant::Secondary)
-                        .accessibility_label("More")
+                        .accessibility_label(t!("profiles.more"))
                         .h(px(26.0))
                         .on_press(move || menu(id_menu.clone(), p, dialog)),
                 ),
@@ -722,7 +741,7 @@ fn phone_row(
                         )
                         .child(when(active, || in_use_tag()))
                         .child(
-                            ui::icon_btn(Icon::More, "More")
+                            ui::icon_btn(Icon::More, t!("profiles.more"))
                                 .mr(px(-8.0))
                                 .on_press(move || menu(id_menu.clone(), p, dialog)),
                         ),
@@ -738,7 +757,7 @@ fn phone_row(
                 }))
                 .child(ui::muted(move || -> SharedString {
                     if updating() {
-                        return "Updating…".into();
+                        return t!("profiles.updating").into();
                     }
                     p.with(|p| schedule_line(&p.source, p.updated_at, now()))
                         .into()
@@ -750,13 +769,13 @@ fn phone_row(
                         .gap_2()
                         .child(when(move || !active(), move || {
                             let id = id_use.clone();
-                            ui::btn("Use", Variant::Primary)
+                            ui::btn(t!("profiles.use"), Variant::Primary)
                                 .on_press(move || store.run(store.svc().activate(id.clone())))
                         }))
                         .child(when(active, || groups_button()))
                         .child(when(remote, move || {
                             let id = id_update.clone();
-                            ui::btn_icon(Icon::Refresh, "Update", Variant::Secondary)
+                            ui::btn_icon(Icon::Refresh, t!("profiles.update"), Variant::Secondary)
                                 .disabled(updating)
                                 .on_press(move || {
                                     store.run_update(store.svc().update_profile(id.clone()))
@@ -766,7 +785,7 @@ fn phone_row(
                             let id = id_toggle.clone();
                             ui::btn(
                                 move || -> SharedString {
-                                    if open() { "Hide usage" } else { "Usage" }.into()
+                                    if open() { t!("profiles.usage.hide") } else { t!("profiles.usage.show") }.into()
                                 },
                                 Variant::Secondary,
                             )
@@ -789,7 +808,7 @@ fn phone_row(
 /// Opens the subscription's groups (the Groups page).
 fn groups_button() -> Button {
     let store = store();
-    ui::btn_icon(Icon::Layers, "Groups", Variant::Secondary)
+    ui::btn_icon(Icon::Layers, Page::Proxies.title(), Variant::Secondary)
         .on_press(move || store.page.set(Page::Proxies))
 }
 
@@ -802,7 +821,7 @@ fn in_use_tag() -> View {
         .rounded_full()
         .bg(move || theme().primary.opacity(0.12))
         .child(
-            text("In use")
+            text(t!("profiles.in_use"))
                 .text_size(px(size::small()))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || theme().primary),
@@ -814,7 +833,7 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
     let store = store();
     let (name, source) = p.with_untracked(|p| (p.name.clone(), p.source.clone()));
     let mut items = Vec::new();
-    items.push(Choice::new("Rename…").on_select({
+    items.push(Choice::new(t!("profiles.menu.rename")).on_select({
         let (id, name) = (id.clone(), name.clone());
         move || {
             dialog.set(Some(Dialog::Rename {
@@ -829,7 +848,7 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
     } = &source
     {
         let host = host_of(url);
-        items.push(Choice::new("Change Link…").on_select({
+        items.push(Choice::new(t!("profiles.menu.change_link")).on_select({
             let id = id.clone();
             move || {
                 dialog.set(Some(Dialog::Link {
@@ -839,7 +858,7 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
             }
         }));
         items.push(Choice::submenu(
-            "Update Interval",
+            t!("profiles.menu.interval"),
             interval_choices(*interval_hours).into_iter().map(|h| {
                 let id = id.clone();
                 Choice::new(interval_label(h))
@@ -853,7 +872,7 @@ fn menu(id: String, p: ReadSignal<Profile>, dialog: Signal<Option<Dialog>>) {
         ));
     }
     items.push(Choice::separator());
-    items.push(Choice::new("Remove…").on_select({
+    items.push(Choice::new(t!("profiles.menu.remove")).on_select({
         let id = id.clone();
         move || remove(id.clone(), name.clone())
     }));
@@ -866,16 +885,18 @@ fn remove(id: String, name: String) {
         .state
         .with_untracked(|s| s.profiles.active.as_deref() == Some(id.as_str()));
     let description = if active {
-        "Kairo deletes its saved copy. It is the one in use: Kairo switches to another subscription, or disconnects when there is none."
+        t!("profiles.remove.active")
     } else {
-        "Kairo deletes its saved copy. You can add it again later."
+        t!("profiles.remove.other")
     };
+    let title = t!("profiles.remove.title", name = name);
+    let (remove_label, cancel_label) = (t!("profiles.remove.confirm"), t!("profiles.cancel"));
     spawn(async move {
         let answer = alert_dialog()
-            .title(format!("Remove “{name}”?"))
+            .title(title)
             .description(description)
-            .destructive("remove", "Remove")
-            .cancel("cancel", "Cancel")
+            .destructive("remove", remove_label)
+            .cancel("cancel", cancel_label)
             .show()
             .await;
         if answer.is_ok_and(|a| a.action.as_deref() == Some("remove")) {
@@ -899,9 +920,9 @@ fn usage_section(p: ReadSignal<Profile>) -> impl IntoElement {
             .with(|st| kairo_core::stats::project(&st.0.usage_of(&id), now()).and_then(|p| p.pace));
         if let Some(pace) = pace {
             tiles[2] = tile(
-                "Recent pace",
-                format!("{}/day", size_text(pace as u64)),
-                "over the last days",
+                t!("profiles.tile.pace"),
+                t!("profiles.tile.per_day", size = size_text(pace as u64)),
+                t!("profiles.tile.pace_measured"),
             );
         }
         Some(tiles)
@@ -931,7 +952,7 @@ fn usage_section(p: ReadSignal<Profile>) -> impl IntoElement {
         .px_4()
         .pb_4()
         .gap_2()
-        .child(ui::section_label("Subscription usage"))
+        .child(ui::section_label(t!("profiles.usage.title")))
         .child(if ui::phone() {
             // Two by two: four across is too narrow for a figure and its words.
             view()
@@ -984,7 +1005,7 @@ fn sheet(d: Dialog, dialog: Signal<Option<Dialog>>) -> impl IntoElement {
         )
 }
 
-fn card_frame(title: &'static str, detail: Option<String>) -> View {
+fn card_frame(title: impl Into<SharedString>, detail: Option<String>) -> View {
     view()
         .w_full()
         .max_w(px(480.0))
@@ -995,7 +1016,7 @@ fn card_frame(title: &'static str, detail: Option<String>) -> View {
         .border_1()
         .border_color(move || theme().border)
         .child(
-            text(title)
+            text(title.into())
                 .text_size(px(size::large() + 3.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .role(AccessibilityRole::Header),
@@ -1003,12 +1024,12 @@ fn card_frame(title: &'static str, detail: Option<String>) -> View {
         .child(detail.map(ui::muted))
 }
 
-fn form_row(label: &'static str, control: impl IntoElement) -> View {
+fn form_row(label: impl Into<SharedString>, control: impl IntoElement) -> View {
     view()
         .flex_row()
         .items_center()
         .gap_3()
-        .child(ui::muted(label).w(px(52.0)))
+        .child(ui::muted(label.into()).w(px(52.0)))
         .child(view().flex_1().min_w(px(0.0)).items_end().child(control))
 }
 
@@ -1074,7 +1095,7 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
                     if h != PROVIDER_CHOICE {
                         store.svc().rename_profile(id, String::new(), Some(h), None);
                     }
-                    store.info("Subscription added");
+                    store.info(t!("profiles.added"));
                     dialog.set(None);
                 }
                 Err(e) => problem.set(Some(e)),
@@ -1089,7 +1110,7 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
             if let Some((name, text)) = crate::web::pick_text_file(".yaml,.yml,.txt").await {
                 store.run_then(svc.add_yaml(name, text), move |r| {
                     if r.is_ok() {
-                        store.info("Config imported");
+                        store.info(t!("profiles.imported"));
                         dialog.set(None);
                     }
                 });
@@ -1100,10 +1121,10 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
             let picked = pick_paths(
                 OpenDialog::files()
                     .filter(FileFilter::new(
-                        "Clash / mihomo config",
+                        t!("profiles.import.filter"),
                         ["yaml", "yml", "txt"],
                     ))
-                    .title("Import a Config"),
+                    .title(t!("profiles.import.title")),
             )
             .await;
             match picked {
@@ -1111,37 +1132,37 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
                     if let Some(path) = paths.into_iter().next() {
                         store.run_then(svc.add_file(path), move |r| {
                             if r.is_ok() {
-                                store.info("Config imported");
+                                store.info(t!("profiles.imported"));
                                 dialog.set(None);
                             }
                         });
                     }
                 }
                 Ok(None) => {}
-                Err(e) => store.error(format!("No file dialog: {e}")),
+                Err(e) => store.error(t!("profiles.import.no_dialog", error = e)),
             }
         });
     };
     let on_submit = submit.clone();
     let on_press = submit.clone();
-    card_frame("Add a Subscription", None)
+    card_frame(t!("profiles.add.title"), None)
     .child(form_row(
-        "Link",
+        t!("profiles.form.link"),
         ui::field(url, "https://example.com/subscribe?token=…")
             .w_full()
             .on_submit(move |_: &str| on_submit()),
     ))
-    .child(form_row("Name", {
+    .child(form_row(t!("profiles.form.name"), {
         let on_submit = submit.clone();
-        ui::field(name, "From the provider")
+        ui::field(name, t!("profiles.form.name_from_provider"))
             .w_full()
             .on_submit(move |_: &str| on_submit())
     }))
     .child(form_row(
-        "Update",
+        t!("profiles.form.update"),
         ui::popup_button(
             move || {
-                let mut v = vec![(PROVIDER_CHOICE, "As the provider says".to_owned())];
+                let mut v = vec![(PROVIDER_CHOICE, t!("profiles.form.interval_provider"))];
                 v.extend([6, 12, 24, 72, 168, 0].map(|h| (h, interval_label(h))));
                 v
             },
@@ -1156,23 +1177,23 @@ fn add_card(dialog: Signal<Option<Dialog>>) -> impl IntoElement {
             .items_center()
             .gap_2()
             .mt_1()
-            .child(ui::btn("Import a File", Variant::Secondary).on_press(import))
+            .child(ui::btn(t!("profiles.add.import"), Variant::Secondary).on_press(import))
             .child(view().flex_1())
             .child(ui::muted(move || -> SharedString {
                 if busy.get() {
-                    "Downloading…".into()
+                    t!("profiles.add.downloading").into()
                 } else {
                     "".into()
                 }
             }))
-            .child(ui::btn("Cancel", Variant::Secondary).on_press(move || dialog.set(None)))
+            .child(ui::btn(t!("profiles.cancel"), Variant::Secondary).on_press(move || dialog.set(None)))
             .child(
                 ui::btn(
                     move || -> SharedString {
                         if problem.with(|p| p.is_some()) {
-                            "Try Again".into()
+                            t!("profiles.add.try_again").into()
                         } else {
-                            "Add".into()
+                            t!("profiles.add.button").into()
                         }
                     },
                     Variant::Primary,
@@ -1200,10 +1221,10 @@ fn rename_card(id: String, current: String, dialog: Signal<Option<Dialog>>) -> i
         dialog.set(None);
     });
     let on_submit = submit.clone();
-    card_frame("Rename", None)
+    card_frame(t!("profiles.rename.title"), None)
     .child(form_row(
-        "Name",
-        ui::field(name, "Name")
+        t!("profiles.form.name"),
+        ui::field(name, t!("profiles.form.name"))
             .w_full()
             .on_submit(move |_: &str| on_submit()),
     ))
@@ -1213,9 +1234,9 @@ fn rename_card(id: String, current: String, dialog: Signal<Option<Dialog>>) -> i
             .gap_2()
             .mt_1()
             .child(view().flex_1())
-            .child(ui::btn("Cancel", Variant::Secondary).on_press(move || dialog.set(None)))
+            .child(ui::btn(t!("profiles.cancel"), Variant::Secondary).on_press(move || dialog.set(None)))
             .child(
-                ui::btn("Save", Variant::Primary)
+                ui::btn(t!("profiles.save"), Variant::Primary)
                     .disabled(move || !valid())
                     .on_press(move || submit()),
             ),
@@ -1251,9 +1272,9 @@ fn link_card(id: String, host: String, dialog: Signal<Option<Dialog>>) -> impl I
         });
     });
     let on_submit = submit.clone();
-    card_frame("Change Link", Some(format!("Now: {host}")))
+    card_frame(t!("profiles.link.title"), Some(t!("profiles.link.now", host = host)))
     .child(form_row(
-        "Link",
+        t!("profiles.form.link"),
         ui::field(url, "https://example.com/subscribe?token=…")
             .w_full()
             .on_submit(move |_: &str| on_submit()),
@@ -1264,9 +1285,9 @@ fn link_card(id: String, host: String, dialog: Signal<Option<Dialog>>) -> impl I
             .gap_2()
             .mt_1()
             .child(view().flex_1())
-            .child(ui::btn("Cancel", Variant::Secondary).on_press(move || dialog.set(None)))
+            .child(ui::btn(t!("profiles.cancel"), Variant::Secondary).on_press(move || dialog.set(None)))
             .child(
-                ui::btn("Save and Update", Variant::Primary)
+                ui::btn(t!("profiles.link.save"), Variant::Primary)
                     .disabled(move || !valid())
                     .on_press(move || submit()),
             ),
@@ -1460,6 +1481,9 @@ mod tests {
         let (headline, hint) = plain_error("The server answered HTTP 503", None);
         assert_eq!(headline, "Your provider says: “503 Service Unavailable”");
         assert!(hint.is_none(), "the headline is the whole message");
+        // The engine's message in another language (saved when Kairo spoke it): the code ends it.
+        let (headline, _) = plain_error("服务器返回 HTTP 503", None);
+        assert_eq!(headline, "Your provider says: “503 Service Unavailable”");
         assert_eq!(
             banner_text(&headline),
             "couldn't update · Your provider says: “503 Service Unavailable”. Using the saved copy."

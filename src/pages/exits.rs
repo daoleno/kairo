@@ -9,6 +9,7 @@ use kairo_core::places::{self, Place};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, Icon, icon, size};
@@ -24,12 +25,12 @@ pub enum Exit {
 impl Exit {
     pub const ALL: [Exit; 3] = [Exit::Ai, Exit::Rest, Exit::Downloads];
 
-    pub fn title(self) -> &'static str {
-        match self {
-            Exit::Ai => "AI",
-            Exit::Rest => "Everything else",
-            Exit::Downloads => "Downloads",
-        }
+    pub fn title(self) -> String {
+        kairo_core::tr!(match self {
+            Exit::Ai => "exits.title.ai",
+            Exit::Rest => "exits.title.rest",
+            Exit::Downloads => "exits.title.downloads",
+        })
     }
 
     /// Whether Kairo can keep it on the fastest place by itself. The AI exit
@@ -61,13 +62,13 @@ impl Health {
         }
     }
 
-    pub fn word(self) -> &'static str {
-        match self {
-            Health::Good => "Good",
-            Health::Ok => "OK",
-            Health::Slow => "Slow",
-            Health::Untested => "Not tested",
-        }
+    pub fn word(self) -> String {
+        kairo_core::tr!(match self {
+            Health::Good => "exits.health.good",
+            Health::Ok => "exits.health.ok",
+            Health::Slow => "exits.health.slow",
+            Health::Untested => "exits.health.untested",
+        })
     }
 
     pub fn tone(self) -> AdaptiveColor {
@@ -117,35 +118,42 @@ pub fn subtitle(exit: Exit) -> String {
         .as_ref()
         .map(|p| p.title.clone())
         .unwrap_or_else(|| "—".into());
+    use kairo_core::tr;
+    let how = |fastest: bool| {
+        if fastest {
+            tr!("exits.subtitle.fastest", node = node)
+        } else {
+            tr!("exits.subtitle.chosen", node = node)
+        }
+    };
     match exit {
         Exit::Ai => {
             let pinned = store
                 .state
                 .with(|s| s.settings.ai.exit.as_ref().map(|e| e.since));
             match pinned {
-                Some(since) => format!("{node} · pinned {}", pinned_for(since)),
-                None => format!("{node} · follows Everything else"),
+                Some(since) if pin_days(since) == 0 => tr!("exits.subtitle.pinned_today", node = node),
+                Some(since) => tr!("exits.subtitle.pinned", node = node, when = pinned_for(since)),
+                None => tr!("exits.subtitle.follows", node = node),
             }
         }
-        Exit::Rest => {
-            let auto = store.state.with(|s| s.settings.auto_location);
-            format!("{} · {node}", if auto { "Fastest" } else { "Chosen" })
-        }
-        Exit::Downloads => {
-            let fastest = crate::pages::ai::downloads_fastest();
-            format!("{} · {node}", if fastest { "Fastest" } else { "Chosen" })
-        }
+        Exit::Rest => how(store.state.with(|s| s.settings.auto_location)),
+        Exit::Downloads => how(crate::pages::ai::downloads_fastest()),
     }
+}
+
+/// Whole days since a pin was made.
+fn pin_days(since: i64) -> i64 {
+    (kairo_core::unix() - since).max(0) / 86400
 }
 
 /// "today", "2 days", "3 weeks": how long ago a pin was made.
 pub fn pinned_for(since: i64) -> String {
-    let days = (kairo_core::unix() - since).max(0) / 86400;
+    let days = pin_days(since);
     match days {
-        0 => "today".into(),
-        1 => "1 day".into(),
-        2..=13 => format!("{days} days"),
-        _ => format!("{} weeks", days / 7),
+        0 => kairo_core::tr!("exits.pinned_for.today"),
+        1..=13 => kairo_core::tr!(&plural("exits.pinned_for.days", days as u64), count = days),
+        _ => kairo_core::tr!("exits.pinned_for.weeks", count = days / 7),
     }
 }
 
@@ -200,7 +208,7 @@ pub fn card_with(
                         .flex_1()
                         .number_of_lines(1),
                 )
-                .child(when(move || exit == Exit::Ai, move || ui::badge("stable")))
+                .child(when(move || exit == Exit::Ai, move || ui::badge(t!("exits.badge.stable"))))
                 .child(ui::dot(move || health().tone()))
                 .child(
                     ui::muted(move || -> SharedString { health().word().into() })
@@ -256,7 +264,7 @@ pub fn place_country(p: &Place) -> String {
     if p.region == "Other" {
         p.title.clone()
     } else {
-        p.region.to_owned()
+        places::region_title(p.region)
     }
 }
 
@@ -278,7 +286,7 @@ pub fn page() -> impl IntoElement {
         .flex_1()
         .child(toolbar::floating(
             Page::Exits,
-            || "Where traffic leaves".to_owned(),
+            || t!("exits.page.subtitle"),
             vec![],
         ))
         .child(
@@ -335,7 +343,7 @@ fn quality_card(exit: Exit) -> impl IntoElement {
             view()
                 .px_4()
                 .py_3()
-                .child(ui::body("Quality").font_weight(FontWeight::SEMIBOLD)),
+                .child(ui::body(t!("exits.quality")).font_weight(FontWeight::SEMIBOLD)),
         )
         .child(ui::divider())
         .child(crate::pages::stats::quality(idx))
@@ -346,30 +354,20 @@ fn quality_card(exit: Exit) -> impl IntoElement {
 /// What the mirror's speed test says, in words.
 pub fn mirror_text(test: &kairo_core::downloads::MirrorTest) -> String {
     use kairo_core::downloads::MirrorTest as T;
+    use kairo_core::tr;
     let secs = |ms: u64| format!("{:.1} s", ms as f64 / 1000.0);
     match test {
-        T::Untested => "Off".into(),
-        T::Running => "Testing…".into(),
+        T::Untested => tr!("exits.mirror.off"),
+        T::Running => tr!("exits.mirror.testing"),
         T::Passed {
             mirror_ms,
             direct_ms: Some(d),
-        } => {
-            format!(
-                "Mirror {} · original {}",
-                secs(*mirror_ms),
-                secs(*d)
-            )
-        }
+        } => tr!("exits.mirror.passed", mirror = secs(*mirror_ms), original = secs(*d)),
         T::Passed {
             mirror_ms,
             direct_ms: None,
-        } => {
-            format!(
-                "Mirror {} · the original did not answer",
-                secs(*mirror_ms)
-            )
-        }
-        T::Failed { why } => format!("The test did not pass: {why}"),
+        } => tr!("exits.mirror.passed_no_original", mirror = secs(*mirror_ms)),
+        T::Failed { why } => tr!("exits.mirror.failed", why = why),
     }
 }
 
@@ -394,13 +392,13 @@ fn mirror_card() -> impl IntoElement {
                         .flex_1()
                         .min_w(px(0.0))
                         .gap_0p5()
-                        .child(ui::body("Use mirrors for model hubs and package indexes"))
+                        .child(ui::body(t!("exits.mirror.title")))
                         .child(ui::muted(move || -> SharedString {
                             info.with(|d| mirror_text(&d.mirror_test)).into()
                         })),
                 )
                 .child(
-                    ui::btn("Test", Variant::Secondary)
+                    ui::btn(t!("exits.mirror.test"), Variant::Secondary)
                         .disabled(running)
                         .on_press(move || store.run(store.svc().test_mirror())),
                 )
@@ -408,12 +406,12 @@ fn mirror_card() -> impl IntoElement {
                     view().opacity(move || if can_switch() || info.with(|d| d.mirror) { 1.0_f32 } else { 0.4_f32 }).child(
                         ui::toggle(
                             move || info.with(|d| d.mirror),
-                            "Use mirrors",
+                            t!("exits.mirror.use"),
                             move |on| {
                                 if can_switch() || !on {
                                     store.run(store.svc().set_mirror(on));
                                 } else {
-                                    store.error(kairo_core::downloads::MIRROR_REFUSED);
+                                    store.error(kairo_core::downloads::mirror_refused());
                                 }
                             },
                         ),
@@ -433,8 +431,8 @@ fn mirror_card() -> impl IntoElement {
                     .child(text(lines).text_size(px(size::small())).selectable(true))
                     .child(
                         view().flex_row().child(
-                            ui::btn("Copy for terminal", Variant::Secondary).on_press(move || {
-                                ui::copy(store, copy.clone(), "Copied");
+                            ui::btn(t!("exits.mirror.copy"), Variant::Secondary).on_press(move || {
+                                ui::copy(store, copy.clone(), t!("exits.copied"));
                             }),
                         ),
                     )
@@ -566,7 +564,7 @@ fn picker(exit: Exit) -> impl IntoElement {
             head.child(ui::body(exit.title()).font_weight(FontWeight::SEMIBOLD))
                 .child(view().flex_1())
                 .child(
-                    ui::btn_icon(Icon::Bolt, "Test Again", Variant::Secondary)
+                    ui::btn_icon(Icon::Bolt, t!("exits.test_again"), Variant::Secondary)
                         .disabled(testing)
                         .on_press(move || {
                             spawn(store.svc().test_places());
@@ -583,13 +581,13 @@ fn picker(exit: Exit) -> impl IntoElement {
                     icon(Icon::Bolt, 15.0)
                         .text_color(move || theme().primary)
                         .into_element(),
-                    ui::body("Fastest").font_weight(FontWeight::MEDIUM),
+                    ui::body(t!("exits.fastest.title")).font_weight(FontWeight::MEDIUM),
                     ui::muted(move || -> SharedString {
                         store.state.with(|_| ());
                         store.proxies.with(|_| ());
                         match place_of(exit) {
-                            Some(p) if on_fastest(exit) => format!("now {}", p.title).into(),
-                            _ => "automatic".into(),
+                            Some(p) if on_fastest(exit) => t!("exits.fastest.now", node = p.title).into(),
+                            _ => t!("exits.fastest.automatic").into(),
                         }
                     }),
                     None,
@@ -606,7 +604,7 @@ fn picker(exit: Exit) -> impl IntoElement {
                     icon(Icon::Globe, 15.0)
                         .text_color(move || theme().muted_foreground)
                         .into_element(),
-                    ui::body("Follow Everything else"),
+                    ui::body(t!("exits.follow_rest")),
                     ui::muted(""),
                     None,
                     None::<fn() -> Health>,
@@ -643,7 +641,7 @@ fn picker(exit: Exit) -> impl IntoElement {
                                     })
                                 },
                                 ui::flag(c.flag.clone(), size::large()),
-                                ui::body(region).font_weight(FontWeight::MEDIUM),
+                                ui::body(places::region_title(region)).font_weight(FontWeight::MEDIUM),
                                 ui::muted(format!("{count}")),
                                 Some(is_open),
                                 Some(move || health),
@@ -678,9 +676,9 @@ fn picker(exit: Exit) -> impl IntoElement {
                 .hover(|s| s.bg(move || theme().accent))
                 .child(ui::muted(move || -> SharedString {
                     if all.get() {
-                        "Fewer servers".into()
+                        t!("exits.servers.fewer").into()
                     } else {
-                        "All servers".into()
+                        t!("exits.servers.all").into()
                     }
                 })),
         )

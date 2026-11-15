@@ -153,8 +153,8 @@ pub fn copy(store: crate::store::Store, text: String, done: impl Into<SharedStri
 /// machine Kairo runs on).
 pub fn copy_terminal_env(store: crate::store::Store) {
     let done = match machine() {
-        Some(m) => format!("Copied, for a terminal on {m}"),
-        None => "Copied".into(),
+        Some(m) => kairo_core::tr!("shell.copied_for", machine = m),
+        None => kairo_core::tr!("shell.copied"),
     };
     copy(store, store.svc().terminal_env(), done);
 }
@@ -577,7 +577,7 @@ pub fn search_field(value: Signal<String>, placeholder: impl Into<String>) -> Vi
             move || value.with(|v| !v.is_empty()),
             move || {
                 button()
-                    .accessibility_label("Clear")
+                    .accessibility_label(t!("shell.clear"))
                     .on_press(move || value.set(String::new()))
                     .cursor_pointer()
                     .text_color(move || theme().muted_foreground)
@@ -926,7 +926,7 @@ pub fn delay_tone(delay: Option<u32>) -> AdaptiveColor {
 pub fn delay_text(delay: Option<u32>) -> SharedString {
     match delay {
         None => "—".into(),
-        Some(0) => "Timeout".into(),
+        Some(0) => t!("shell.timeout").into(),
         Some(d) => format!("{d} ms").into(),
     }
 }

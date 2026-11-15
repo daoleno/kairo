@@ -7,6 +7,7 @@ use kairo_core::{CoreStatus, Mode};
 use nsh_base::{ButtonElement as Button, theme};
 use nsh_core::prelude::*;
 
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::toolbar;
 use crate::ui::{self, size};
@@ -66,17 +67,17 @@ fn welcome() -> impl IntoElement {
                 link.set(text.clone());
                 connect(text);
             } else {
-                problem.set(Some("The clipboard holds no link".into()));
+                problem.set(Some(kairo_core::tr!("home.welcome.no_link")));
             }
         });
     };
     let label = move || -> SharedString {
         if busy.get() {
-            "Connecting…".into()
+            t!("home.connecting").into()
         } else if !valid() && clip_has_text.get() {
-            "Paste and Connect".into()
+            t!("home.welcome.paste_connect").into()
         } else {
-            "Connect".into()
+            t!("home.connect").into()
         }
     };
     scroll().flex_1().child(
@@ -91,10 +92,10 @@ fn welcome() -> impl IntoElement {
             .child(
                 view()
                     .gap_2()
-                    .child(text("Welcome to Kairo").text_size(px(size::display())).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header)),
+                    .child(text(t!("home.welcome.title")).text_size(px(size::display())).font_weight(FontWeight::SEMIBOLD).role(AccessibilityRole::Header)),
             )
             .child(
-                ui::field(link, "https://… (your provider's subscription link)")
+                ui::field(link, t!("home.welcome.link_placeholder"))
                     .auto_focus(true)
                     .h(px(44.0))
                     .px_4()
@@ -120,7 +121,7 @@ fn welcome() -> impl IntoElement {
                     .gap_1()
                     .self_center()
                     .mt_4()
-                    .child(ui::link_btn("Import File").on_press(move || store.page.set(Page::Profiles))),
+                    .child(ui::link_btn(t!("home.welcome.import_file")).on_press(move || store.page.set(Page::Profiles))),
             ),
     )
 }
@@ -155,16 +156,20 @@ fn problem_box(
         .child(
             view()
                 .flex_row()
-                .child(ui::capsule("Try Again", false).on_press(move || retry())),
+                .child(ui::capsule(t!("home.try_again"), false).on_press(move || retry())),
         )
 }
 
-/// A failure in the user's words: the headline and a hint.
+/// A failure in the user's words: the headline and a hint. (It reads the
+/// engine's error text, in either language; it is `tr!`, profiles' tests
+/// reach it.)
 pub fn explain(e: &str) -> (String, Option<String>) {
-    if let Some(said) = e.strip_prefix("Your provider says: ") {
+    use kairo_core::profile::{Failure, failure_of};
+    use kairo_core::tr;
+    if let Some(said) = kairo_core::profile::provider_notice(e) {
         return (
-            format!("Your provider says: “{said}”"),
-            Some("The link works, but the provider sent a message instead of locations. Do what it asks (often: allow fetching on its website), then try again.".into()),
+            tr!("home.problem.provider_says", said = said),
+            Some(tr!("home.problem.provider_says_hint")),
         );
     }
     let low = e.to_lowercase();
@@ -174,39 +179,31 @@ pub fn explain(e: &str) -> (String, Option<String>) {
         || low.contains("http 410")
     {
         return (
-            "The provider refused this link.".into(),
-            Some(format!(
-                "It may have expired or been reset ({e}). Copy a fresh link from your provider."
-            )),
+            tr!("home.problem.refused"),
+            Some(tr!("home.problem.refused_hint", error = e)),
         );
     }
-    if low.contains("timed out")
-        || low.contains("could not connect")
-        || low.contains("dns")
-        || low.contains("resolve")
-    {
+    let failure = failure_of(e);
+    if failure == Some(Failure::Unreachable) || low.contains("dns") || low.contains("resolve") {
         return (
-            "Kairo can't reach the provider.".into(),
-            Some(format!(
-                "Check that {} is online, then try again.",
-                match crate::ui::machine() {
-                    Some(m) => m,
-                    None if cfg!(target_os = "android") => "this phone".into(),
-                    None => "this Mac or PC".into(),
-                }
-            )),
+            tr!("home.problem.unreachable"),
+            Some(match crate::ui::machine() {
+                Some(m) => tr!("home.problem.check_online", machine = m),
+                None if cfg!(target_os = "android") => tr!("home.problem.check_online_phone"),
+                None => tr!("home.problem.check_online_computer"),
+            }),
         );
     }
-    if low.contains("base64 node list") {
+    if failure == Some(Failure::NodeList) {
         return (
-            "This link gives a plain node list, not a Clash/mihomo config.".into(),
-            Some("Ask your provider for the Clash or mihomo link (many have a “Clash” button next to it).".into()),
+            tr!("home.problem.node_list"),
+            Some(tr!("home.problem.node_list_hint")),
         );
     }
-    if low.contains("not valid yaml") || low.contains("no proxies") {
+    if failure == Some(Failure::BadConfig) {
         return (
-            "This link doesn't give a config Kairo can use.".into(),
-            Some(format!("Check you copied the whole link. ({e})")),
+            tr!("home.problem.bad_config"),
+            Some(tr!("home.problem.bad_config_hint", error = e)),
         );
     }
     (e.to_owned(), None)
@@ -217,24 +214,44 @@ pub fn explain(e: &str) -> (String, Option<String>) {
 #[derive(Clone, PartialEq)]
 enum Conn {
     Off,
-    Connecting(&'static str),
+    Connecting(Phase),
     On,
     Failed(String),
+}
+
+/// What the switch is waiting for.
+#[derive(Clone, Copy, PartialEq)]
+enum Phase {
+    Updating,
+    Locating,
+    Starting,
+    Stopping,
+}
+
+impl Phase {
+    fn label(self) -> String {
+        match self {
+            Phase::Updating => t!("home.state.updating"),
+            Phase::Locating => t!("home.state.locating"),
+            Phase::Starting => t!("home.connecting"),
+            Phase::Stopping => t!("home.state.disconnecting"),
+        }
+    }
 }
 
 fn conn() -> Conn {
     let store = store();
     store.state.with(|s| match &s.core {
-        CoreStatus::Running { .. } if s.task.is_some() => Conn::Connecting("Updating…"),
+        CoreStatus::Running { .. } if s.task.is_some() => Conn::Connecting(Phase::Updating),
         CoreStatus::Running { .. } => {
             if s.locating {
-                Conn::Connecting("Finding the fastest location…")
+                Conn::Connecting(Phase::Locating)
             } else {
                 Conn::On
             }
         }
-        CoreStatus::Starting => Conn::Connecting("Connecting…"),
-        CoreStatus::Stopping => Conn::Connecting("Disconnecting…"),
+        CoreStatus::Starting => Conn::Connecting(Phase::Starting),
+        CoreStatus::Stopping => Conn::Connecting(Phase::Stopping),
         CoreStatus::Failed { message } => Conn::Failed(message.clone()),
         CoreStatus::Stopped => Conn::Off,
     })
@@ -264,14 +281,14 @@ fn hero() -> impl IntoElement {
     let last_press = signal(None::<(bool, nsh_core::time::Instant)>);
     let on = move || {
         matches!(state.get(), Conn::On | Conn::Connecting(_))
-            && !matches!(state.get(), Conn::Connecting("Disconnecting…"))
+            && !matches!(state.get(), Conn::Connecting(Phase::Stopping))
     };
     let headline = move || -> SharedString {
         match state.get() {
-            Conn::Off => "Not Connected".into(),
-            Conn::Connecting(what) => what.into(),
-            Conn::On => "Connected".into(),
-            Conn::Failed(_) => "Couldn't Connect".into(),
+            Conn::Off => t!("home.state.off").into(),
+            Conn::Connecting(what) => what.label().into(),
+            Conn::On => t!("home.state.on").into(),
+            Conn::Failed(_) => t!("home.state.failed").into(),
         }
     };
     let detail = move || -> SharedString {
@@ -395,20 +412,18 @@ pub fn plan_text(name: &str, usage: Option<(u64, u64, Option<i64>)>, now: i64) -
     let mut parts = vec![name.to_owned()];
     if let Some((used, total, expire)) = usage {
         if total > 0 {
-            parts.push(format!(
-                "{} of {}",
-                kairo_core::bytes(used),
-                kairo_core::bytes(total)
+            parts.push(kairo_core::tr!(
+                "home.plan.usage",
+                used = kairo_core::bytes(used),
+                total = kairo_core::bytes(total)
             ));
         }
         if let Some(t) = expire {
             let days = (t - now) / 86400;
             parts.push(if t < now {
-                "expired".into()
-            } else if days == 1 {
-                "1 day left".into()
+                kairo_core::tr!("home.plan.expired")
             } else {
-                format!("{days} days left")
+                kairo_core::tr!(&plural("home.plan.days_left", days as u64), count = days)
             });
         }
     }
@@ -442,11 +457,11 @@ fn fix_button(message: impl Fn() -> String + Copy + 'static, failed: bool) -> im
         untracked(move || {
             if ours
                 && (m.contains("address already in use")
-                    || m.contains("used by")
+                    || kairo_core::failure::port_taken(&m)
                     || m.contains("port") && m.contains("in use"))
             {
                 let controller = m.contains("controller port");
-                ui::capsule("Use a Free Port", true)
+                ui::capsule(t!("home.fix.free_port"), true)
                     .on_press(move || {
                         let mut next = store.svc().settings();
                         // The port that is busy moves; the other stays.
@@ -471,12 +486,14 @@ fn fix_button(message: impl Fn() -> String + Copy + 'static, failed: bool) -> im
                         });
                     })
                     .into_element()
-            } else if m.contains("tun") && (m.contains("permission") || m.contains("privilege")) {
-                ui::capsule("Allow TUN", true)
+            } else if kairo_core::failure::tun_needs_permission(&m)
+                || m.contains("tun") && (m.contains("permission") || m.contains("privilege"))
+            {
+                ui::capsule(t!("home.fix.allow_tun"), true)
                     .on_press(move || store.run(store.svc().grant_tun()))
                     .into_element()
             } else if failed {
-                ui::capsule("Try Again", true)
+                ui::capsule(t!("home.try_again"), true)
                     .on_press(move || store.run(store.svc().connect(true)))
                     .into_element()
             } else {
@@ -495,7 +512,7 @@ fn big_switch(
     let knob = h - pad * 2.0;
     nsh_base::button()
         .role(AccessibilityRole::Switch)
-        .accessibility_label("Connect")
+        .accessibility_label(t!("home.connect"))
         .selected(on)
         .on_press(move || set(!on()))
         .w(px(w))
@@ -537,12 +554,12 @@ fn choices() -> impl IntoElement {
         .gap_2()
         .flex_shrink_0()
         .child(labelled(
-            "Mode",
+            t!("home.mode.title"),
             ui::segmented(
                 vec![
-                    (Mode::Rule, "Smart"),
-                    (Mode::Global, "Everything"),
-                    (Mode::Direct, "Direct"),
+                    (Mode::Rule, t!("home.mode.smart")),
+                    (Mode::Global, t!("home.mode.global")),
+                    (Mode::Direct, t!("home.mode.direct")),
                 ],
                 mode,
                 move |m| store.run(store.svc().set_mode(m)),
@@ -556,11 +573,11 @@ fn choices() -> impl IntoElement {
                 // A server's page switches the server's apps.
                 labelled(
                     match ui::machine() {
-                        Some(m) => SharedString::from(format!("Apps on {m}")),
-                        None => "Apps".into(),
+                        Some(m) => SharedString::from(t!("home.via.apps_on", machine = m)),
+                        None => t!("home.via.apps").into(),
                     },
                     ui::segmented(
-                        vec![(Via::System, "System settings"), (Via::Tun, "Every app")],
+                        vec![(Via::System, t!("home.via.system")), (Via::Tun, t!("home.via.tun"))],
                         via,
                         move |v| set_via(v),
                     ),
@@ -626,7 +643,7 @@ fn exits() -> impl IntoElement {
     let store = store();
     view()
         .gap_2()
-        .child(ui::section_label("Exits").px_1())
+        .child(ui::section_label(Page::Exits.title()).px_1())
         .child({
             // Three cards in a row; on a phone, one under another.
             let phone = ui::phone();
@@ -652,6 +669,29 @@ fn exits() -> impl IntoElement {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn subscription_failures_are_explained_in_either_language() {
+        use kairo_core::i18n::text_in;
+        for lang in ["en", "zh"] {
+            let error = text_in(lang, "model.profile.download", &[("error", &text_in(lang, "model.profile.timed_out", &[]))]);
+            assert_eq!(explain(&error).0, kairo_core::tr!("home.problem.unreachable"), "{error}");
+            let error = text_in(lang, "model.profile.node_list", &[]);
+            assert_eq!(explain(&error).0, kairo_core::tr!("home.problem.node_list"), "{error}");
+            let error = text_in(lang, "model.profile.yaml", &[("error", &"mapping values are not allowed")]);
+            assert_eq!(explain(&error).0, kairo_core::tr!("home.problem.bad_config"), "{error}");
+            let error = text_in(lang, "model.profile.no_proxies", &[]);
+            assert_eq!(explain(&error).0, kairo_core::tr!("home.problem.bad_config"), "{error}");
+            let error = text_in(lang, "model.profile.notice", &[("notice", &"Plan expired")]);
+            assert_eq!(
+                explain(&error).0,
+                kairo_core::tr!("home.problem.provider_says", said = "Plan expired"),
+                "{error}"
+            );
+        }
+        // Not Kairo's words: the text as it is.
+        assert_eq!(explain("something else").0, "something else");
+    }
 
     #[test]
     fn a_quick_second_press_undoes_the_first_whatever_the_screen_shows() {

@@ -43,13 +43,27 @@ pub enum Slot {
 impl Slot {
     pub const ALL: [Slot; 4] = [Slot::Ai, Slot::Rest, Slot::Downloads, Slot::Direct];
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Slot::Ai => "AI",
-            Slot::Rest => "Everything else",
-            Slot::Downloads => "Downloads",
-            Slot::Direct => "Direct",
+            Slot::Ai => crate::tr!("model.stats.slot.ai"),
+            Slot::Rest => crate::tr!("model.stats.slot.rest"),
+            Slot::Downloads => crate::tr!("model.stats.slot.downloads"),
+            Slot::Direct => crate::tr!("model.stats.slot.direct"),
         }
+    }
+}
+
+/// The app the smallest of an hour are summed under: a value kept in the
+/// file; [`app_title`] is what a person reads.
+pub const OTHER_APPS: &str = "Other";
+
+/// An app of the records as a person reads it ([`OTHER_APPS`] and an unknown
+/// tool in their language).
+pub fn app_title(app: &str) -> String {
+    if app == OTHER_APPS {
+        crate::tr!("model.stats.other_apps")
+    } else {
+        crate::activity::tool_title(app)
     }
 }
 
@@ -176,7 +190,7 @@ impl Store {
             by.sort_by(|a, b| b.1.cmp(&a.1));
             let rest: u64 = by.split_off(TOP_PER_HOUR).iter().map(|x| x.1).sum();
             h.apps = by.into_iter().collect();
-            *h.apps.entry("Other".into()).or_default() += rest;
+            *h.apps.entry(OTHER_APPS.into()).or_default() += rest;
         }
     }
 
@@ -451,11 +465,11 @@ impl Per {
 }
 
 impl Range {
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Range::Today => "Today",
-            Range::Week => "7 days",
-            Range::Month => "30 days",
+            Range::Today => crate::tr!("model.stats.range.today"),
+            Range::Week => crate::tr!("model.stats.range.week"),
+            Range::Month => crate::tr!("model.stats.range.month"),
         }
     }
 

@@ -1,0 +1,142 @@
+_version: 2
+
+# Settings › Advanced › Inspect › Diagnostics: the toolbar.
+logs.lines.one:
+  en: "%{count} line"
+  zh: "%{count} 行"
+logs.lines.other:
+  en: "%{count} lines"
+  zh: "%{count} 行"
+# "120 lines · paused"
+logs.paused:
+  en: "%{lines} · paused"
+  zh: "%{lines} · 已暂停"
+logs.tool.search:
+  en: Search the log
+  zh: 搜索日志
+logs.tool.level:
+  en: Level
+  zh: 级别
+logs.tool.resume:
+  en: Resume
+  zh: 继续
+logs.tool.pause:
+  en: Pause
+  zh: 暂停
+logs.tool.clear:
+  en: Clear
+  zh: 清空
+logs.tool.copy:
+  en: Copy Diagnostics
+  zh: 复制诊断信息
+logs.copied:
+  en: Diagnostics copied
+  zh: 已复制诊断信息
+# The levels the filter offers (a view filter, not the core's setting).
+logs.level.debug:
+  en: Debug
+  zh: 调试
+logs.level.info:
+  en: Info
+  zh: 信息
+logs.level.warning:
+  en: Warning
+  zh: 警告
+logs.level.error:
+  en: Error
+  zh: 错误
+
+# Diagnostics: the log, and the core and Kairo above it.
+logs.core_not_running:
+  en: The core is not running
+  zh: 内核未运行
+logs.nothing_matches:
+  en: Nothing matches
+  zh: 无匹配结果
+logs.empty:
+  en: No log lines
+  zh: 暂无日志
+logs.core:
+  en: Core
+  zh: 内核
+logs.restart_core:
+  en: Restart Core
+  zh: 重启内核
+logs.start_core:
+  en: Start Core
+  zh: 启动内核
+logs.memory:
+  en: "memory %{size}"
+  zh: "内存 %{size}"
+logs.ports:
+  en: "ports %{proxy} / %{controller}"
+  zh: "端口 %{proxy} / %{controller}"
+logs.data_folder:
+  en: "data folder %{path}"
+  zh: "数据文件夹 %{path}"
+logs.open_folder:
+  en: Open Folder
+  zh: 打开文件夹
+
+# Settings › Advanced › Inspect › Rules: the running configuration's rules and rule sets.
+rules.count.one:
+  en: "%{count} rule"
+  zh: "%{count} 条规则"
+rules.count.other:
+  en: "%{count} rules"
+  zh: "%{count} 条规则"
+# Filtered: "12 of 1214".
+rules.count_of:
+  en: "%{shown} of %{total}"
+  zh: "%{shown} / %{total}"
+rules.tool.filter:
+  en: Filter rules
+  zh: 筛选规则
+rules.tool.update_sets:
+  en: Update Rule Sets
+  zh: 更新规则集
+rules.tab.rules:
+  en: Rules
+  zh: 规则
+rules.tab.sets:
+  en: Rule Sets
+  zh: 规则集
+rules.core_not_running:
+  en: The core is not running
+  zh: 内核未运行
+rules.column.type:
+  en: Type
+  zh: 类型
+rules.column.payload:
+  en: Payload
+  zh: 内容
+rules.column.target:
+  en: Target
+  zh: 目标
+rules.empty:
+  en: No rules
+  zh: 暂无规则
+rules.nothing_matches:
+  en: Nothing matches
+  zh: 无匹配结果
+rules.no_sets:
+  en: This configuration has no rule sets.
+  zh: 当前配置没有规则集。
+# A rule set's line: "domain · mrs · http · 1214 rules · updated 2025-11-08 12:00:00".
+rules.set.updated:
+  en: "updated %{time}"
+  zh: "更新于 %{time}"
+rules.set.update:
+  en: Update
+  zh: 更新
+
+# A subscription's expiry (the Groups page).
+overview.no_expiry:
+  en: No expiry
+  zh: 无到期时间
+overview.expired:
+  en: "Expired %{date}"
+  zh: "已于 %{date} 到期"
+overview.expires:
+  en: "Expires %{date} · %{days} d left"
+  zh: "%{date} 到期 · 剩余 %{days} 天"

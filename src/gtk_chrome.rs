@@ -57,7 +57,8 @@ fn icons(page: Page) -> &'static [&'static str] {
     }
 }
 
-fn sidebar_row(page: Page) -> gtk::ListBoxRow {
+/// A page's row of the sidebar, and its title (relabeled in a new language).
+fn sidebar_row(page: Page) -> (gtk::ListBoxRow, gtk::Label) {
     let icon = gtk::Image::from_gicon(&gio::ThemedIcon::from_names(icons(page)));
     let title = gtk::Label::builder()
         .label(page.title())
@@ -72,7 +73,21 @@ fn sidebar_row(page: Page) -> gtk::ListBoxRow {
     row.append(&title);
     let r = gtk::ListBoxRow::builder().child(&row).build();
     r.update_property(&[gtk::accessible::Property::Label(&page.title())]);
-    r
+    (r, title)
+}
+
+/// The main menu, as GNOME apps have it: the things a menu bar would hold.
+fn main_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+    let first = gio::Menu::new();
+    first.append(Some(&kairo_core::tr!("menu.search")), Some("win.palette"));
+    first.append(Some(&kairo_core::tr!("menu.core.restart")), Some("win.restart-core"));
+    menu.append_section(None, &first);
+    let last = gio::Menu::new();
+    last.append(Some(&Page::Settings.title()), Some("win.settings"));
+    last.append(Some(&kairo_core::tr!("menu.quit")), Some("app.quit"));
+    menu.append_section(None, &last);
+    menu
 }
 
 /// Builds the window's content around `nsh` (the NSH view's widget).
@@ -80,8 +95,11 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let list = gtk::ListBox::builder()
         .css_classes(["navigation-sidebar"])
         .build();
+    let mut rows = Vec::new();
     for page in PAGES {
-        list.append(&sidebar_row(page));
+        let (row, label) = sidebar_row(page);
+        list.append(&row);
+        rows.push((page, row, label));
     }
     // The five pages; Settings apart.
     list.set_header_func(|row, _| {
@@ -144,7 +162,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         .build();
     let toggle = gtk::ToggleButton::builder()
         .icon_name("sidebar-show-symbolic")
-        .tooltip_text("Show Sidebar")
+        .tooltip_text(kairo_core::tr!("menu.show_sidebar"))
         .build();
     split
         .bind_property("show-sidebar", &toggle, "active")
@@ -152,49 +170,44 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         .sync_create()
         .build();
     content_bar.pack_start(&toggle);
-    // The main menu, as GNOME apps have it: the things a menu bar would hold.
-    {
-        let menu = gio::Menu::new();
-        let first = gio::Menu::new();
-        first.append(Some("Search Kairo…"), Some("win.palette"));
-        first.append(Some("Restart Core"), Some("win.restart-core"));
-        menu.append_section(None, &first);
-        let last = gio::Menu::new();
-        last.append(Some("Settings"), Some("win.settings"));
-        last.append(Some("Quit"), Some("app.quit"));
-        menu.append_section(None, &last);
-        let b = gtk::MenuButton::builder()
-            .icon_name("open-menu-symbolic")
-            .menu_model(&menu)
-            .primary(true)
-            .tooltip_text("Main Menu")
-            .build();
-        content_bar.pack_end(&b);
-    }
+    let main_button = gtk::MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .menu_model(&main_menu())
+        .primary(true)
+        .tooltip_text(kairo_core::tr!("menu.main"))
+        .build();
+    content_bar.pack_end(&main_button);
     window.set_content(Some(&split));
+
+    // A new language (Settings › Language): what GTK shows says it again.
+    {
+        let toggle = toggle.clone();
+        let mut language = kairo_core::i18n::watch();
+        glib::spawn_future_local(async move {
+            loop {
+                for (page, row, label) in &rows {
+                    label.set_label(&page.title());
+                    row.update_property(&[gtk::accessible::Property::Label(&page.title())]);
+                }
+                toggle.set_tooltip_text(Some(&kairo_core::tr!("menu.show_sidebar")));
+                main_button.set_tooltip_text(Some(&kairo_core::tr!("menu.main")));
+                main_button.set_menu_model(Some(&main_menu()));
+                if language.changed().await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
 
     // The chrome's own widgets (the sidebar toggle, focus rings, selection)
     // in Kairo's accent rather than the desktop's blue.
     {
         let a = nsh_app_kairo::accent::current();
-        let css = format!(
-            "@define-color accent_bg_color {};\n@define-color accent_fg_color {};\n@define-color accent_color {};\n",
-            if adw::StyleManager::default().is_dark() {
-                a.dark[0]
-            } else {
-                a.light[0]
-            },
-            if adw::StyleManager::default().is_dark() {
-                a.dark[1]
-            } else {
-                a.light[1]
-            },
-            if adw::StyleManager::default().is_dark() {
-                a.dark[2]
-            } else {
-                a.light[2]
-            },
-        );
+        let css = accent_css(if adw::StyleManager::default().is_dark() {
+            a.dark
+        } else {
+            a.light
+        });
         let provider = gtk::CssProvider::new();
         provider.load_from_string(&css);
         if let Some(display) = gdk::Display::default() {
@@ -206,14 +219,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
         }
         let style = adw::StyleManager::default();
         style.connect_dark_notify(move |m| {
-            let dark = m.is_dark();
-            let pick = |i: usize| if dark { a.dark[i] } else { a.light[i] };
-            provider.load_from_string(&format!(
-                "@define-color accent_bg_color {};\n@define-color accent_fg_color {};\n@define-color accent_color {};\n",
-                pick(0),
-                pick(1),
-                pick(2)
-            ));
+            provider.load_from_string(&accent_css(if m.is_dark() { a.dark } else { a.light }));
         });
     }
 
@@ -256,6 +262,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     let mut pages = chrome::bridge().page.subscribe();
     let list_page = list.clone();
     let title_page = title.clone();
+    let mut language = kairo_core::i18n::watch();
     glib::spawn_future_local(async move {
         loop {
             let page = *pages.borrow_and_update();
@@ -269,8 +276,9 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
                 None => list_page.unselect_all(),
             }
             title_page.set_title(&page.title());
-            if pages.changed().await.is_err() {
-                break;
+            kairo_core::tokio::select! {
+                r = pages.changed() => if r.is_err() { break },
+                r = language.changed() => if r.is_err() { break },
             }
         }
     });
@@ -350,6 +358,7 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
     // The core's state: the sidebar's footer, the color scheme.
     let mut state = svc.state();
     let mut live = svc.live();
+    let mut language = kairo_core::i18n::watch();
     glib::spawn_future_local(async move {
         loop {
             let s = state.borrow_and_update().clone();
@@ -366,9 +375,20 @@ pub fn build(window: &adw::ApplicationWindow, view: Rc<AppView>, svc: Service) {
             kairo_core::tokio::select! {
                 r = state.changed() => if r.is_err() { break },
                 r = live.changed() => if r.is_err() { break },
+                r = language.changed() => if r.is_err() { break },
             }
         }
     });
+}
+
+/// libadwaita's accent colors as CSS: the fill, the text on it, the color as text.
+fn accent_css(colors: [&str; 3]) -> String {
+    const DEFINE: &str = "@define-color";
+    ["accent_bg_color", "accent_fg_color", "accent_color"]
+        .into_iter()
+        .zip(colors)
+        .map(|(name, value)| format!("{DEFINE} {name} {value};\n"))
+        .collect()
 }
 
 fn hex(c: gdk::RGBA) -> String {
@@ -450,35 +470,54 @@ fn theme_json(probe: &impl IsA<gtk::Widget>) -> String {
     let border = mix(if contrast { 0.5 } else { 0.15 });
     let muted = mix(0.06);
     let hover = mix(0.08);
-    let tokens = format!(
-        r#""background": "{window}", "foreground": "{fg}", "card": "{card}", "card-foreground": "{fg}",
-        "popover": "{card}", "popover-foreground": "{fg}", "primary": "{accent_bg}", "primary-foreground": "{accent_fg}",
-        "secondary": "{muted}", "secondary-foreground": "{fg}", "muted": "{muted}", "muted-foreground": "{muted_fg}",
-        "accent": "{hover}", "accent-foreground": "{fg}", "destructive": "{destructive}", "border": "{border}",
-        "input": "{border}", "ring": "{accent_text}", "sidebar": "{sidebar}", "sidebar-foreground": "{fg}",
-        "sidebar-accent": "{hover}", "sidebar-accent-foreground": "{fg}", "sidebar-border": "{shade}",
-        "sidebar-primary": "{accent_text}", "success": "{success}", "warning": "{warning}", "track": "{border}",
-        "selection": "{hover}", "graph-up": "{muted_fg}", "subtle": "{view}""#,
-        window = hex(window),
-        fg = hex(over(fg, window)),
-        card = hex(card),
-        accent_bg = hex(accent_bg),
-        accent_fg = hex(accent_fg),
-        accent_text = hex(accent_text),
-        muted = hex(muted),
-        muted_fg = hex(muted_fg),
-        hover = hex(hover),
-        destructive = hex(destructive),
-        border = hex(border),
-        sidebar = hex(sidebar),
-        shade = hex(shade),
-        success = hex(success),
-        warning = hex(warning),
-        view = hex(view),
-    );
-    format!(
-        r#"{{"cssVars": {{"theme": {{"radius": "12px", "radius-control": "6px"}}, "light": {{{tokens}}}, "dark": {{{tokens}}}}}}}"#
-    )
+    let (window, fg, card) = (hex(window), hex(over(fg, window)), hex(card));
+    let (accent_bg, accent_fg, accent_text) = (hex(accent_bg), hex(accent_fg), hex(accent_text));
+    let (muted, muted_fg, hover) = (hex(muted), hex(muted_fg), hex(hover));
+    let (destructive, border, sidebar) = (hex(destructive), hex(border), hex(sidebar));
+    let (shade, success, warning, view) = (hex(shade), hex(success), hex(warning), hex(view));
+    let tokens: serde_json::Map<String, serde_json::Value> = [
+        ("background", &window),
+        ("foreground", &fg),
+        ("card", &card),
+        ("card-foreground", &fg),
+        ("popover", &card),
+        ("popover-foreground", &fg),
+        ("primary", &accent_bg),
+        ("primary-foreground", &accent_fg),
+        ("secondary", &muted),
+        ("secondary-foreground", &fg),
+        ("muted", &muted),
+        ("muted-foreground", &muted_fg),
+        ("accent", &hover),
+        ("accent-foreground", &fg),
+        ("destructive", &destructive),
+        ("border", &border),
+        ("input", &border),
+        ("ring", &accent_text),
+        ("sidebar", &sidebar),
+        ("sidebar-foreground", &fg),
+        ("sidebar-accent", &hover),
+        ("sidebar-accent-foreground", &fg),
+        ("sidebar-border", &shade),
+        ("sidebar-primary", &accent_text),
+        ("success", &success),
+        ("warning", &warning),
+        ("track", &border),
+        ("selection", &hover),
+        ("graph-up", &muted_fg),
+        ("subtle", &view),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_owned(), serde_json::Value::from(value.as_str())))
+    .collect();
+    serde_json::json!({
+        "cssVars": {
+            "theme": { "radius": "12px", "radius-control": "6px" },
+            "light": tokens,
+            "dark": tokens,
+        }
+    })
+    .to_string()
 }
 
 /// The update icon: the download arrow in a ring (a thin whole one to start, an arc that fills with
@@ -665,8 +704,8 @@ impl Footer {
                 self.update.set_visible(false);
             }
         }
-        self.status.set_label(s.plain());
-        self.mode.set_label(s.settings.mode.route());
+        self.status.set_label(&s.plain());
+        self.mode.set_label(&s.settings.mode.route());
         let tone = match &s.core {
             CoreStatus::Running { .. } => "success",
             CoreStatus::Starting | CoreStatus::Stopping => "warning",
@@ -785,17 +824,8 @@ fn make_tool(actions: &gio::SimpleActionGroup, tool: &Tool) -> gtk::Widget {
                 }
             });
             actions.add_action(&action);
-            let menu = gio::Menu::new();
-            for (i, o) in options.iter().enumerate() {
-                let item = gio::MenuItem::new(Some(o.as_str()), None);
-                item.set_action_and_target_value(
-                    Some(&format!("tool.{id}")),
-                    Some(&(i as i32).to_variant()),
-                );
-                menu.append_item(&item);
-            }
             let b = gtk::MenuButton::builder()
-                .menu_model(&menu)
+                .menu_model(&choice_menu(id, options))
                 .tooltip_text(label.as_str())
                 .child(&gtk::Image::from_gicon(&gio::ThemedIcon::from_names(
                     glyph.icon(),
@@ -807,9 +837,43 @@ fn make_tool(actions: &gio::SimpleActionGroup, tool: &Tool) -> gtk::Widget {
     }
 }
 
+/// A choice's pull-down: its options, each choosing its index.
+fn choice_menu(id: &str, options: &[String]) -> gio::Menu {
+    let menu = gio::Menu::new();
+    for (i, o) in options.iter().enumerate() {
+        let item = gio::MenuItem::new(Some(o.as_str()), None);
+        item.set_action_and_target_value(
+            Some(&format!("tool.{id}")),
+            Some(&(i as i32).to_variant()),
+        );
+        menu.append_item(&item);
+    }
+    menu
+}
+
+/// The labels of a pull-down's options.
+fn menu_labels(menu: &gio::MenuModel) -> Vec<String> {
+    (0..menu.n_items())
+        .map(|i| {
+            menu.item_attribute_value(i, "label", Some(glib::VariantTy::STRING))
+                .and_then(|v| v.get::<String>())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 fn update_tool(actions: &gio::SimpleActionGroup, tool: &Tool, w: &gtk::Widget) {
     match tool {
-        Tool::Search { value, .. } => {
+        Tool::Search {
+            value, placeholder, ..
+        } => {
+            // Its words follow the language shown.
+            if let Some(e) = w.downcast_ref::<gtk::SearchEntry>()
+                && e.placeholder_text().as_deref() != Some(placeholder.as_str())
+            {
+                e.set_placeholder_text(Some(placeholder));
+                e.update_property(&[gtk::accessible::Property::Label(placeholder)]);
+            }
             // Never while it is being typed in: the page's value lags the field.
             let typing = w
                 .root()
@@ -837,7 +901,23 @@ fn update_tool(actions: &gio::SimpleActionGroup, tool: &Tool, w: &gtk::Widget) {
                 ))));
             }
         }
-        Tool::Choice { id, selected, .. } => {
+        Tool::Choice {
+            id,
+            label,
+            options,
+            selected,
+            ..
+        } => {
+            if let Some(b) = w.downcast_ref::<gtk::MenuButton>() {
+                if b.tooltip_text().as_deref() != Some(label.as_str()) {
+                    b.set_tooltip_text(Some(label));
+                    b.update_property(&[gtk::accessible::Property::Label(label)]);
+                }
+                // Only when the options' words changed: a new menu closes an open one.
+                if b.menu_model().is_none_or(|m| menu_labels(&m) != *options) {
+                    b.set_menu_model(Some(&choice_menu(id, options)));
+                }
+            }
             if let Some(a) = actions
                 .lookup_action(id)
                 .and_then(|a| a.downcast::<gio::SimpleAction>().ok())

@@ -21,14 +21,21 @@ const LIST_OPS: [(&str, &str, bool); 6] = [
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("The profile is not valid YAML: {0}")]
     Profile(String),
-    #[error("The override is not valid YAML: {0}")]
     Override(String),
-    #[error("{0}")]
     Rejected(String),
-    #[error("{0}")]
     Io(#[from] std::io::Error),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::Profile(e) => f.write_str(&crate::tr!("engine.config.profile_not_yaml", error = e)),
+            ConfigError::Override(e) => f.write_str(&crate::tr!("engine.config.override_not_yaml", error = e)),
+            ConfigError::Rejected(e) => f.write_str(e),
+            ConfigError::Io(e) => write!(f, "{e}"),
+        }
+    }
 }
 
 use crate::profile::check_yaml_size;
@@ -42,7 +49,7 @@ pub fn parse_mapping(text: &str) -> Result<Mapping, String> {
     match serde_yaml::from_str::<Value>(text).map_err(|e| e.to_string())? {
         Value::Mapping(m) => Ok(m),
         Value::Null => Ok(Mapping::new()),
-        _ => Err("the top level is not a mapping".into()),
+        _ => Err(crate::tr!("engine.config.not_a_mapping")),
     }
 }
 
@@ -768,8 +775,8 @@ pub async fn validate(core: &Path, dir: &Path, config: &Path) -> Result<(), Stri
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let output = match tokio::time::timeout(Duration::from_secs(90), command.output()).await {
         Ok(Ok(o)) => o,
-        Ok(Err(e)) => return Err(format!("Could not run the core: {e}")),
-        Err(_) => return Err("The core took too long to check the config".into()),
+        Ok(Err(e)) => return Err(crate::tr!("engine.config.run_failed", error = e)),
+        Err(_) => return Err(crate::tr!("engine.config.check_timeout")),
     };
     let text = format!(
         "{}{}",

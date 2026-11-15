@@ -30,8 +30,9 @@ pub const KAIRO_DOWNLOADS_GROUP: &str = "Kairo Downloads";
 pub const MIRROR_URL: &str = "https://hf-mirror.com/gpt2/resolve/main/tokenizer.json";
 pub const ORIGIN_URL: &str = "https://huggingface.co/gpt2/resolve/main/tokenizer.json";
 /// Said when the mirror is asked for before it passed.
-pub const MIRROR_REFUSED: &str =
-    "Test the mirror first: it can be turned on once it has answered through the Downloads exit";
+pub fn mirror_refused() -> String {
+    crate::tr!("model.downloads.mirror_refused")
+}
 /// How much of it a test reads.
 #[cfg(feature = "engine")]
 const SAMPLE_BYTES: u64 = 512 * 1024;
@@ -127,12 +128,12 @@ pub fn judge(mirror: Result<Sample, String>, origin: Result<Sample, String>) -> 
         Ok(m) if m.bytes >= MIN_BYTES => m,
         Ok(_) => {
             return MirrorTest::Failed {
-                why: "The mirror answered with too little to measure".into(),
+                why: crate::tr!("model.downloads.too_little"),
             };
         }
         Err(_) => {
             return MirrorTest::Failed {
-                why: "The mirror did not answer through the Downloads exit".into(),
+                why: crate::tr!("model.downloads.no_answer"),
             };
         }
     };
@@ -145,10 +146,7 @@ pub fn judge(mirror: Result<Sample, String>, origin: Result<Sample, String>) -> 
         && mirror.rate().saturating_mul(10) < o.rate().saturating_mul(9)
     {
         return MirrorTest::Failed {
-            why: format!(
-                "The mirror is slower than Hugging Face through this exit ({} ms against {} ms)",
-                mirror.ms, o.ms
-            ),
+            why: crate::tr!("model.downloads.slower", mirror = mirror.ms, origin = o.ms),
         };
     }
     MirrorTest::Passed {

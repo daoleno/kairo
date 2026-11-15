@@ -63,7 +63,8 @@ fn leaving_a_page_with_the_bypass_banner_up_fails_nothing() {
         remote: "93.184.216.34:443".into(),
         since: 0,
     };
-    let mut app = Headless::start(EngineConfig::new(Root::of::<App>())).unwrap();
+    let root = Root::of::<App>().translations(nsh_app_kairo::i18n::translations());
+    let mut app = Headless::start(EngineConfig::new(root)).unwrap();
     app.first_render().unwrap();
     // A desktop window: the default surface is too small for the banner's row.
     app.set_viewport(nsh_core::prelude::size(

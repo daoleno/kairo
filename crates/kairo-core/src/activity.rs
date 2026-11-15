@@ -78,7 +78,7 @@ pub fn tool_name(process: &str, process_path: &str) -> String {
         .unwrap_or(process);
     let base = base.strip_suffix(".exe").unwrap_or(base);
     if base.is_empty() {
-        return "Unknown".into();
+        return UNKNOWN_TOOL.into();
     }
     // Electron helpers: "Cursor Helper (Renderer)" is Cursor.
     let base = base.split(" Helper").next().unwrap_or(base);
@@ -88,6 +88,19 @@ pub fn tool_name(process: &str, process_path: &str) -> String {
             format!("{}{}", c.to_ascii_uppercase(), chars.as_str())
         }
         _ => base.to_owned(),
+    }
+}
+
+/// The name [`tool_name`] gives a connection no process is known for: a
+/// value compared and counted under; [`tool_title`] is what a person reads.
+pub const UNKNOWN_TOOL: &str = "Unknown";
+
+/// A tool's name as a person reads it ([`UNKNOWN_TOOL`] in their language).
+pub fn tool_title(tool: &str) -> String {
+    if tool == UNKNOWN_TOOL {
+        crate::tr!("model.activity.unknown_tool")
+    } else {
+        tool.to_owned()
     }
 }
 
@@ -163,18 +176,18 @@ pub enum ExitKind {
 
 impl ExitKind {
     /// How the Activity page names it.
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            ExitKind::Ai => "AI exit",
-            ExitKind::Rest => "Everything else",
-            ExitKind::Downloads => "Downloads",
-            ExitKind::Direct => "Direct",
-            ExitKind::Blocked => "Blocked",
+            ExitKind::Ai => crate::tr!("model.activity.exit.ai"),
+            ExitKind::Rest => crate::tr!("model.activity.exit.rest"),
+            ExitKind::Downloads => crate::tr!("model.activity.exit.downloads"),
+            ExitKind::Direct => crate::tr!("model.activity.exit.direct"),
+            ExitKind::Blocked => crate::tr!("model.activity.exit.blocked"),
             ExitKind::Local => {
                 if cfg!(target_os = "android") {
-                    "On this phone"
+                    crate::tr!("model.activity.exit.local_phone")
                 } else {
-                    "On this computer"
+                    crate::tr!("model.activity.exit.local_computer")
                 }
             }
         }

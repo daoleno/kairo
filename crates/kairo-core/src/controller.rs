@@ -11,12 +11,20 @@ use crate::model::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
-    #[error("The core is not reachable")]
     Unreachable,
-    #[error("{0}")]
+    /// The core's own words (or Kairo's, said already).
     Message(String),
-    #[error("Timed out")]
     Timeout,
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiError::Unreachable => f.write_str(&crate::tr!("engine.controller.unreachable")),
+            ApiError::Message(m) => f.write_str(m),
+            ApiError::Timeout => f.write_str(&crate::tr!("engine.controller.timeout")),
+        }
+    }
 }
 
 impl From<reqwest::Error> for ApiError {
@@ -286,10 +294,9 @@ impl Controller {
         loop {
             match self.version().await {
                 Ok(v) => return Ok(v),
-                Err(ApiError::Message(m)) if m.contains("Unauthorized") => {
-                    return Err(ApiError::Message(
-                        "The controller rejected Kairo's secret".into(),
-                    ));
+                // mihomo's answer to a wrong secret (`{"message":"Unauthorized"}`).
+                Err(ApiError::Message(m)) if m.to_ascii_lowercase().contains("unauthorized") => {
+                    return Err(ApiError::Message(crate::tr!("engine.controller.secret_rejected")));
                 }
                 Err(e) if start.elapsed() > limit => return Err(e),
                 Err(_) => tokio::time::sleep(Duration::from_millis(150)).await,
