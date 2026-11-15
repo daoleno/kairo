@@ -131,19 +131,7 @@ home.via.tun:
   en: "Every app"
   zh: "所有应用"
 
-# Exits: the three exits, their cards and the picker.
-exits.title.ai:
-  en: "AI"
-  zh: "AI"
-exits.title.rest:
-  en: "Everything else"
-  zh: "其他流量"
-exits.title.downloads:
-  en: "Downloads"
-  zh: "下载"
-exits.page.subtitle:
-  en: "Where traffic leaves"
-  zh: "流量的出口"
+# Apps › a kind (pages/exits.rs): its card, its exit picker, the mirror.
 exits.health.good:
   en: "Good"
   zh: "良好"
@@ -166,9 +154,6 @@ exits.subtitle.fastest:
 exits.subtitle.chosen:
   en: "Chosen · %{node}"
   zh: "手动选择 · %{node}"
-exits.subtitle.pinned_today:
-  en: "%{node} · pinned today"
-  zh: "%{node} · 今天已固定"
 exits.subtitle.pinned:
   en: "%{node} · pinned %{when}"
   zh: "%{node} · 已固定 %{when}"
@@ -203,9 +188,6 @@ exits.fastest.now:
 exits.fastest.automatic:
   en: "automatic"
   zh: "自动"
-exits.follow_rest:
-  en: "Follow Everything else"
-  zh: "跟随其他流量"
 exits.servers.fewer:
   en: "Fewer servers"
   zh: "收起节点"
@@ -247,18 +229,12 @@ exits.mirror.failed:
   zh: "测试未通过：%{why}"
 
 # Home › AI: the services' table, what each one sees.
-ai.board.title:
-  en: "AI"
-  zh: "AI"
 ai.checking:
   en: "Checking…"
   zh: "正在检测…"
 ai.not_checked:
   en: "Not checked yet"
   zh: "尚未检测"
-ai.check_now:
-  en: "Check Now"
-  zh: "立即检测"
 ai.unreachable:
   en: "Unreachable"
   zh: "无法访问"
@@ -302,6 +278,9 @@ ai.goes.ai_exit:
 ai.goes.direct:
   en: "Direct"
   zh: "直连"
+ai.goes.subscription:
+  en: "Subscription's choice"
+  zh: "由订阅决定"
 ai.goes.blocked:
   en: "Blocked"
   zh: "已拦截"
@@ -320,9 +299,27 @@ ai.summary.all_reachable:
 ai.summary.some_reachable:
   en: "%{ok} of %{total} reachable"
   zh: "%{ok}/%{total} 个服务可访问"
-ai.column.service:
-  en: "Service"
-  zh: "服务"
+home.apps.title:
+  en: "Apps you use"
+  zh: "常用应用"
+home.apps.problems.one:
+  en: "%{count} problem"
+  zh: "%{count} 个问题"
+home.apps.problems.other:
+  en: "%{count} problems"
+  zh: "%{count} 个问题"
+home.apps.all_reachable:
+  en: "All reachable"
+  zh: "全部可访问"
+home.apps.some_reachable:
+  en: "%{n} of %{count} reachable"
+  zh: "%{count} 个中 %{n} 个可访问"
+home.apps.more:
+  en: "%{count} more on Apps"
+  zh: "另有 %{count} 个，见应用页"
+ai.column.app:
+  en: "App"
+  zh: "应用"
 ai.column.status:
   en: "Status"
   zh: "状态"
@@ -367,8 +364,15 @@ ai.alert.ok:
   en: "OK"
   zh: "好的"
 ai.lanes.direct:
-  en: "Direct: Kimi, DeepSeek, Doubao, Tongyi"
-  zh: "直连：Kimi、DeepSeek、豆包、通义"
+  en: "Direct: %{names}"
+  zh: "直连：%{names}"
+ai.lanes.direct_more:
+  en: "Direct: %{names} and %{count} more"
+  zh: "直连：%{names} 等另外 %{count} 个"
+# Between names in a list: ", " in English, "、" in Chinese.
+ai.lanes.sep:
+  en: ", "
+  zh: "、"
 
 # Home › AI › A service in detail: each check.
 ai.detail.close:
@@ -436,52 +440,16 @@ ai.hold.untested:
   en: "Not tested yet"
   zh: "尚未测试"
 
-# Apps & Sites: the apps and sites that go their own way.
-apps.exit.usual:
-  en: "Usual"
-  zh: "默认"
-apps.exit.direct:
-  en: "Direct"
-  zh: "直连"
-apps.exit.ai:
-  en: "AI exit"
-  zh: "AI 出口"
-apps.exit.everything:
-  en: "Everything else"
-  zh: "其他流量"
-apps.exit.downloads:
-  en: "Downloads"
-  zh: "下载"
-apps.exit.block:
-  en: "Block"
-  zh: "拦截"
-apps.subtitle.one:
-  en: "%{count} choice"
-  zh: "%{count} 项"
-apps.subtitle.other:
-  en: "%{count} choices"
-  zh: "%{count} 项"
+# Apps (pages/exits.rs): the search, Add App, the subscription's groups.
 apps.search_placeholder:
-  en: "Search apps and sites"
-  zh: "搜索应用与网站"
+  en: "Search apps"
+  zh: "搜索应用"
 apps.add_app:
   en: "Add App"
   zh: "添加应用"
-apps.add_site:
-  en: "Add Site"
-  zh: "添加网站"
 apps.empty:
-  en: "Nothing set apart"
-  zh: "暂无单独设置"
-apps.section.apps:
-  en: "Apps"
-  zh: "应用"
-apps.section.sites:
-  en: "Sites"
-  zh: "网站"
-apps.remove:
-  en: "Remove %{name}"
-  zh: "移除 %{name}"
+  en: "No apps used this week"
+  zh: "本周没有用到的应用"
 apps.subscription.title:
   en: "From your subscription"
   zh: "来自订阅"
@@ -492,18 +460,226 @@ apps.subscription.more:
 apps.add.app_title:
   en: "Add an app"
   zh: "添加应用"
-apps.add.site_title:
-  en: "Add a site"
-  zh: "添加网站"
 apps.add.name_first:
   en: "Type a name first."
   zh: "请先输入名称。"
-apps.add.goes_through:
-  en: "Goes through"
-  zh: "经由"
 apps.add.cancel:
   en: "Cancel"
   zh: "取消"
 apps.add.add:
   en: "Add"
   zh: "添加"
+
+# Apps by kind (pages/kinds.rs): an app's row, its exit, its sheet.
+kinds.as_subscription:
+  en: "As the subscription routes it"
+  zh: "按订阅的规则走"
+kinds.checking:
+  en: "Checking…"
+  zh: "正在检测…"
+kinds.not_checked:
+  en: "Not checked yet"
+  zh: "尚未检测"
+kinds.check_now:
+  en: "Check Now"
+  zh: "立即检测"
+kinds.fix.every_app:
+  en: "Use Every App"
+  zh: "切换到所有应用"
+kinds.fix.copy_ssh:
+  en: "Copy for SSH"
+  zh: "复制 SSH 配置"
+kinds.fix.ssh_copied:
+  en: "Copied: add it to ~/.ssh/config"
+  zh: "已复制：请加到 ~/.ssh/config"
+kinds.status.not_through_kairo:
+  en: "Not through Kairo"
+  zh: "未经过 Kairo"
+kinds.status.blocked:
+  en: "Blocked"
+  zh: "已拦截"
+kinds.status.unreachable:
+  en: "Unreachable"
+  zh: "无法访问"
+kinds.status.reachable:
+  en: "Reachable"
+  zh: "可访问"
+kinds.status.sees:
+  en: "Sees %{country}"
+  zh: "地区：%{country}"
+kinds.status.this_week:
+  en: "%{bytes} this week"
+  zh: "本周 %{bytes}"
+kinds.exit.same_as:
+  en: "Same as %{kind}"
+  zh: "跟随%{kind}"
+kinds.exit.direct:
+  en: "Direct"
+  zh: "直连"
+kinds.exit.block:
+  en: "Block"
+  zh: "拦截"
+kinds.menu.exit_for_program:
+  en: "Exit for This Program"
+  zh: "此程序的出口"
+kinds.menu.add_as_app:
+  en: "Add as App"
+  zh: "添加为应用"
+kinds.by.site:
+  en: "Sites under %{domain}"
+  zh: "%{domain} 下的网站"
+kinds.by.program:
+  en: "The program %{name}"
+  zh: "程序 %{name}"
+kinds.by.game:
+  en: "A game in Steam's library folder %{folder}"
+  zh: "Steam 游戏库文件夹 %{folder} 中的游戏"
+kinds.by.more:
+  en: "%{sites} and %{count} more"
+  zh: "%{sites} 等另外 %{count} 个"
+kinds.by.catalog_program:
+  en: "the program %{name}"
+  zh: "程序 %{name}"
+kinds.by.rule_sets:
+  en: "rule sets %{names}"
+  zh: "规则集 %{names}"
+kinds.m.through:
+  en: "Through the %{kind} exit"
+  zh: "经由%{kind}出口"
+kinds.m.reachable:
+  en: "Reachable"
+  zh: "可访问"
+kinds.m.no_answer:
+  en: "No answer"
+  zh: "无响应"
+kinds.m.catalog:
+  en: "Shows the %{code} catalog"
+  zh: "显示 %{code} 片库"
+kinds.m.full_catalog:
+  en: "Shows the full catalog"
+  zh: "显示完整片库"
+kinds.m.originals_only:
+  en: "Only the service's own titles"
+  zh: "只有该服务的自制内容"
+kinds.m.not_available:
+  en: "Says it is not available here"
+  zh: "提示此地区不可用"
+kinds.m.did_not_say:
+  en: "The page did not say"
+  zh: "页面未注明"
+kinds.m.region:
+  en: "Region"
+  zh: "地区"
+kinds.m.speed:
+  en: "Speed"
+  zh: "速度"
+kinds.m.too_little:
+  en: "Too little to tell"
+  zh: "数据太少，无法判断"
+kinds.m.latency:
+  en: "Latency"
+  zh: "延迟"
+kinds.m.latency_ms:
+  en: "%{ms} ms, the middle of 10 tries"
+  zh: "%{ms} ms，10 次测量的中位数"
+kinds.m.jitter:
+  en: "Jitter"
+  zh: "抖动"
+kinds.m.lost:
+  en: "Lost"
+  zh: "丢包"
+kinds.m.lost_pct:
+  en: "%{pct}% of the tries"
+  zh: "%{pct}% 的尝试"
+kinds.m.first_byte:
+  en: "First byte"
+  zh: "首字节"
+kinds.m.ssh_open:
+  en: "Port 22 answers"
+  zh: "22 端口可连接"
+kinds.m.ssh_443:
+  en: "Port 22 closed; port 443 answers"
+  zh: "22 端口不通，443 端口可连接"
+kinds.m.ssh_closed:
+  en: "Closed"
+  zh: "不通"
+kinds.m.ssh_none:
+  en: "Not offered"
+  zh: "不提供"
+kinds.m.sees:
+  en: "Sees"
+  zh: "识别地区"
+kinds.sheet.close:
+  en: "Close"
+  zh: "关闭"
+kinds.sheet.exit:
+  en: "Exit"
+  zh: "出口"
+kinds.sheet.kind:
+  en: "Kind"
+  zh: "类别"
+kinds.sheet.measured:
+  en: "What Kairo measured"
+  zh: "Kairo 测到的结果"
+kinds.sheet.checked:
+  en: "Checked %{ago}"
+  zh: "上次检测：%{ago}"
+kinds.sheet.used_by:
+  en: "Used by"
+  zh: "使用方"
+kinds.sheet.nothing_this_week:
+  en: "Nothing this week"
+  zh: "本周无流量"
+kinds.sheet.this_week:
+  en: "This week · %{bytes}"
+  zh: "本周 · %{bytes}"
+kinds.sheet.remove:
+  en: "Remove App"
+  zh: "移除应用"
+
+# The Apps page (pages/exits.rs): the kinds, each with its exit, and the apps.
+apps.page.subtitle:
+  en: "Where each kind of app leaves"
+  zh: "每类应用的出口"
+apps.count.one:
+  en: "%{count} app"
+  zh: "%{count} 个应用"
+apps.count.other:
+  en: "%{count} apps"
+  zh: "%{count} 个应用"
+apps.all:
+  en: "All apps"
+  zh: "全部应用"
+apps.games.title:
+  en: "Most games don't use the system proxy"
+  zh: "大多数游戏不走系统代理"
+apps.games.body:
+  en: "Their traffic, UDP too, only goes through Kairo with Every app."
+  zh: "只有开启「所有应用」，游戏流量（包括 UDP）才会经过 Kairo。"
+apps.kind.none:
+  en: "No %{kind} app used this week"
+  zh: "本周没有用到%{kind}类应用"
+apps.kind.section:
+  en: "%{kind} apps"
+  zh: "%{kind}类应用"
+apps.kinds_off:
+  en: "Kairo uses the subscription's rules only (Settings): just the exits chosen for single apps apply."
+  zh: "Kairo 只使用订阅的规则（见设置）：只有为单个应用选的出口仍然生效。"
+apps.unsorted:
+  en: "Seen, not sorted"
+  zh: "已发现，未分类"
+apps.so_far:
+  en: "%{bytes} so far"
+  zh: "已用 %{bytes}"
+apps.sort_as:
+  en: "Sort as…"
+  zh: "归类为…"
+apps.subscription.groups:
+  en: "Groups"
+  zh: "策略组"
+apps.add.placeholder:
+  en: "yt-dlp or example.com"
+  zh: "yt-dlp 或 example.com"
+apps.picker.no_rule:
+  en: "no rule of Kairo's"
+  zh: "Kairo 不加规则"

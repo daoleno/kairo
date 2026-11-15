@@ -1,9 +1,13 @@
 //! Home: get online and choose where traffic goes. The first run is a
 //! welcome that takes the provider's link; after that, the connection is the
-//! page: one switch, the place traffic goes through, the route, the apps and
-//! sites that go elsewhere, and what is flowing. Everything else is Advanced.
+//! page: one switch, the route, and the apps you use: AI first, then a card
+//! for each kind used this week, with what its check measured. Everything
+//! else is Advanced.
 
+use kairo_core::kinds::{self, Kind};
 use kairo_core::{CoreStatus, Mode};
+
+use crate::pages::kinds::{AppRow, Tone};
 use nsh_base::{ButtonElement as Button, theme};
 use nsh_core::prelude::*;
 
@@ -26,6 +30,7 @@ pub fn page() -> impl IntoElement {
                 untracked(welcome).into_element()
             }
         }))
+        .child(crate::pages::kinds::sheet_host())
 }
 
 // --- Welcome ------------------------------------------------------------------------
@@ -269,8 +274,7 @@ fn home() -> impl IntoElement {
             .max_w(px(1040.0))
             .self_center()
             .child(hero())
-            .child(exits())
-            .child(crate::pages::ai::board()),
+            .child(apps_you_use()),
     )
 }
 
@@ -638,31 +642,150 @@ pub fn set_via(via: Via) {
     }
 }
 
-/// The three exits, as cards; a press opens the Exits page.
-fn exits() -> impl IntoElement {
+/// Apps you use: the AI table, then a card for each other kind used in the
+/// last 7 days (at least [`kinds::USED_BYTES`], or a connection open now),
+/// at most three apps each, troubles first.
+fn apps_you_use() -> impl IntoElement {
     let store = store();
+    let rows = crate::pages::kinds::all_rows(kinds::USED_BYTES);
+    let checking = move || store.state.with(|s| s.ai.checking || s.kinds.checking);
+    let ai_used = move || rows.with(|r| r.iter().any(|a| a.kind == Kind::Ai));
+    let any = move || rows.with(|r| !r.is_empty());
     view()
-        .gap_2()
-        .child(ui::section_label(Page::Exits.title()).px_1())
-        .child({
-            // Three cards in a row; on a phone, one under another.
-            let phone = ui::phone();
-            let cards = view().gap_3();
-            let cards = if phone { cards } else { cards.flex_row() };
-            cards.children(crate::pages::exits::Exit::ALL.into_iter().map(move |e| {
-                let slot = view().min_w(px(0.0));
-                let slot = if phone { slot } else { slot.flex_1() };
-                slot.child(crate::pages::exits::card_with(
-                    e,
-                    || false,
-                    move || {
-                        crate::pages::exits::select(e);
-                        store.page.set(Page::Exits)
-                    },
-                    true,
-                ))
-            }))
-        })
+        .gap_3()
+        .child(when(any, move || {
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .px_1()
+                .child(ui::section_label(t!("home.apps.title")).flex_1())
+                .child(
+                    ui::capsule(
+                        move || -> SharedString { if checking() { t!("kinds.checking").into() } else { t!("kinds.check_now").into() } },
+                        false,
+                    )
+                    .h(px(28.0))
+                    .px_4()
+                    .disabled(checking)
+                    .on_press(move || {
+                        store.run(store.svc().check_ai());
+                        store.run(store.svc().check_apps());
+                    }),
+                )
+        }))
+        .child(when(ai_used, crate::pages::ai::board))
+        .child(dynamic(move || {
+            let all = rows.get();
+            untracked(move || {
+                let cards: Vec<AnyElement> = [Kind::Streaming, Kind::Games, Kind::Downloads, Kind::DevTools]
+                    .into_iter()
+                    .filter_map(|k| {
+                        let mut list: Vec<AppRow> = all.iter().filter(|r| r.kind == k).cloned().collect();
+                        if list.is_empty() {
+                            return None;
+                        }
+                        // Troubles first; the rest by traffic (as they come).
+                        list.sort_by_key(|r| !(matches!(r.tone, Tone::Bad | Tone::Look) || r.fix.is_some()));
+                        Some(kind_card(k, list))
+                    })
+                    .collect();
+                let phone = ui::phone();
+                let mut out = view().gap_3();
+                let mut cards = cards.into_iter().peekable();
+                while cards.peek().is_some() {
+                    if phone {
+                        out = out.child(cards.next());
+                        continue;
+                    }
+                    let a = cards.next();
+                    let b = cards.next();
+                    out = out.child(
+                        view()
+                            .flex_row()
+                            .items_start()
+                            .gap_3()
+                            .child(view().flex_1().min_w(px(0.0)).child(a))
+                            .child(view().flex_1().min_w(px(0.0)).child(b)),
+                    );
+                }
+                out.into_element()
+            })
+        }))
+}
+
+/// The summary in a kind card's head, and whether it is a problem.
+fn kind_summary(rows: &[AppRow]) -> (String, Tone) {
+    let problems = rows.iter().filter(|r| matches!(r.tone, Tone::Bad | Tone::Look) || r.fix.is_some()).count();
+    let bad = rows.iter().any(|r| r.tone == Tone::Bad);
+    if problems > 0 {
+        let text = kairo_core::tr!(&plural("home.apps.problems", problems as u64), count = problems);
+        return (text, if bad { Tone::Bad } else { Tone::Look });
+    }
+    let ok = rows.iter().filter(|r| r.tone == Tone::Ok).count();
+    match ok {
+        0 => (kairo_core::tr!("kinds.not_checked"), Tone::Idle),
+        n if n == rows.len() => (kairo_core::tr!("home.apps.all_reachable"), Tone::Ok),
+        n => (kairo_core::tr!("home.apps.some_reachable", n = n, count = rows.len()), Tone::Ok),
+    }
+}
+
+/// A kind on Home: where it leaves, and its apps (three at most).
+fn kind_card(kind: Kind, rows: Vec<AppRow>) -> AnyElement {
+    let store = store();
+    let (summary, tone) = kind_summary(&rows);
+    let more = rows.len().saturating_sub(3);
+    let place = crate::pages::kinds::place_of(kind);
+    let flag = place.as_ref().and_then(|p| p.flag.clone()).unwrap_or_else(|| "◎".into());
+    ui::card_soft()
+        .child(
+            nsh_base::button()
+                .accessibility_label(kind.title())
+                .on_press(move || crate::pages::kinds::open_kind(kind))
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .px_5()
+                .pt_4()
+                .pb_2()
+                .cursor_pointer()
+                .child(ui::body(kind.title()).font_weight(FontWeight::SEMIBOLD))
+                .child(ui::flag(flag, size::body() + 2.0))
+                .child(ui::muted(crate::pages::kinds::subtitle(kind)).text_size(px(size::small())).number_of_lines(1).flex_1())
+                .child(ui::dot(move || crate::pages::kinds::tone_color(tone)))
+                .child(ui::muted(summary).text_size(px(size::small()))),
+        )
+        .children(rows.into_iter().take(3).map(move |r| {
+            let id = r.id.clone();
+            let t = r.tone;
+            nsh_base::button()
+                .accessibility_label(r.name.clone())
+                .on_press(move || store.app_sheet.set(Some(id.clone())))
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .px_5()
+                .min_h(px(ui::touch_h(40.0)))
+                .cursor_pointer()
+                .hover(|s| s.bg(move || theme().accent))
+                .child(r.logo(22.0))
+                .child(ui::body(r.name.clone()).number_of_lines(1).flex_1().min_w(px(64.0)))
+                .child(ui::dot(move || crate::pages::kinds::tone_color(t)))
+                .child(ui::body(r.status.clone()).text_size(px(size::small())).number_of_lines(1).flex_shrink(1.0))
+                .child(r.fix.clone().map(|f| {
+                    let fx = f.clone();
+                    ui::capsule(f.title(), matches!(f, crate::pages::kinds::Fix::UseEveryApp))
+                        .h(px(24.0))
+                        .px_3()
+                        .on_press(move || fx.apply(store))
+                }))
+                .into_element()
+        }))
+        .child((more > 0).then(|| {
+            ui::muted(t!("home.apps.more", count = more)).text_size(px(size::small())).px_5().pb_3()
+        }))
+        .child(view().h(px(8.0)))
+        .into_element()
 }
 
 #[cfg(test)]

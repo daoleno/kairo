@@ -1062,33 +1062,6 @@ fn quality_content(st: &Stats, exit: usize, week: bool) -> impl IntoElement {
         .into_element()
 }
 
-// --- Home -----------------------------------------------------------------------------
-
-/// A small line of how an exit has been doing the last 24 hours (nothing
-/// before there are two tests to draw).
-pub fn home_spark(exit: usize) -> impl IntoElement {
-    let store = store();
-    dynamic(move || {
-        let snap = store.stats.get();
-        untracked(move || {
-            let vals: Vec<Option<f64>> = snap
-                .0
-                .exit_hours(stats::EXITS[exit], now(), 24)
-                .iter()
-                .map(|(_, h)| stats::exit_median(h).map(f64::from))
-                .collect();
-            if vals.iter().flatten().count() < 2 {
-                return view().into_element();
-            }
-            let c: fn() -> AdaptiveColor = if exit == 0 {
-                ui::chart_ai
-            } else {
-                ui::chart_neutral
-            };
-            charts::spark(vals, 84.0, 26.0, c).into_element()
-        })
-    })
-}
 
 // --- Subscriptions: usage -----------------------------------------------------------------
 

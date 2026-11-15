@@ -19,6 +19,10 @@ pub const DAY: i64 = 86_400;
 pub const KEEP_SECS: i64 = 30 * DAY;
 /// Apps and sites kept per hour (the biggest ones; the rest is summed as "other").
 const TOP_PER_HOUR: usize = 40;
+/// Apps by kind kept per hour (the biggest ones; the rest is summed as "other").
+pub const KAPPS_PER_HOUR: usize = 50;
+/// The key the apps past [`KAPPS_PER_HOUR`] are summed under.
+pub const OTHER_KAPP: &str = "other";
 /// Response samples kept per hour and thing.
 const SAMPLES: usize = 12;
 /// Switches kept.
@@ -71,6 +75,8 @@ pub fn app_title(app: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Delta {
     pub app: String,
+    /// The app by kind it is (catalog id, or the person's), if recognised.
+    pub kapp: Option<String>,
     /// `None`: stays on this computer, or is blocked (not traffic).
     pub slot: Option<Slot>,
     pub service: Option<&'static str>,
@@ -83,6 +89,9 @@ pub struct Hour {
     pub x: [u64; 4],
     pub apps: BTreeMap<String, u64>,
     pub services: BTreeMap<String, u64>,
+    /// Bytes per app by kind (at most [`KAPPS_PER_HOUR`], then "other").
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kapps: BTreeMap<String, u64>,
 }
 
 impl Hour {
@@ -182,7 +191,19 @@ impl Store {
                 if let Some(s) = d.service {
                     *h.services.entry(s.to_owned()).or_default() += d.bytes;
                 }
+                if let Some(k) = &d.kapp {
+                    *h.kapps.entry(k.clone()).or_default() += d.bytes;
+                }
             }
+        }
+        if h.kapps.len() > KAPPS_PER_HOUR {
+            // The biggest stay; the rest (and an earlier "other") are summed.
+            let other = h.kapps.remove(OTHER_KAPP).unwrap_or(0);
+            let mut by: Vec<(String, u64)> = std::mem::take(&mut h.kapps).into_iter().collect();
+            by.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            let rest: u64 = by.split_off(KAPPS_PER_HOUR - 1).iter().map(|x| x.1).sum();
+            h.kapps = by.into_iter().collect();
+            h.kapps.insert(OTHER_KAPP.into(), other + rest);
         }
         if h.apps.len() > TOP_PER_HOUR {
             // Fold the smallest into "Other".
@@ -380,6 +401,35 @@ impl Store {
             }
         }
         sorted(m)
+    }
+
+    /// Apps by kind by bytes in `range`, biggest first.
+    pub fn top_kapps(&self, range: Range, now: i64, tz: i64) -> Vec<(String, u64)> {
+        let mut m: BTreeMap<String, u64> = BTreeMap::new();
+        for h in self.hours_in(range, now, tz) {
+            for (k, v) in &h.kapps {
+                *m.entry(k.clone()).or_default() += v;
+            }
+        }
+        sorted(m)
+    }
+
+    /// One app's bytes day by day over the last `days` days, the last one
+    /// being today: (day start, bytes).
+    pub fn kapp_days(&self, id: &str, now: i64, tz: i64, days: i64) -> Vec<(i64, u64)> {
+        let today = (now + tz).div_euclid(86400) * 86400 - tz;
+        (0..days)
+            .rev()
+            .map(|d| {
+                let start = today - d * 86400;
+                let bytes = self
+                    .hours
+                    .range(start..start + 86400)
+                    .filter_map(|(_, h)| h.kapps.get(id))
+                    .sum();
+                (start, bytes)
+            })
+            .collect()
     }
 
     /// AI services by bytes in `range`, biggest first.
@@ -656,8 +706,32 @@ mod tests {
     const NOW: i64 = 1_794_292_560;
     const TZ: i64 = 8 * HOUR;
 
+    #[test]
+    fn at_most_fifty_apps_an_hour_the_rest_is_other() {
+        let mut st = Store::default();
+        let deltas: Vec<Delta> = (0..60)
+            .map(|i| Delta { kapp: Some(format!("app{i:02}")), ..d("p", Some(Slot::Rest), None, 1000 + i) })
+            .collect();
+        st.add_traffic(3600, &deltas);
+        let h = st.hours.values().next().unwrap();
+        assert_eq!(h.kapps.len(), KAPPS_PER_HOUR);
+        // The 49 biggest stay; the other 11 are summed.
+        assert!(h.kapps.contains_key("app59") && !h.kapps.contains_key("app00"));
+        assert_eq!(h.kapps[OTHER_KAPP], (0..11).map(|i| 1000 + i).sum::<u64>());
+        // Again in the same hour: "other" grows, it is not one of the 49.
+        st.add_traffic(3601, &[Delta { kapp: Some("new".into()), ..d("p", Some(Slot::Rest), None, 5) }]);
+        let h = st.hours.values().next().unwrap();
+        assert_eq!(h.kapps.len(), KAPPS_PER_HOUR);
+        let top = st.top_kapps(Range::Month, 3700, 0);
+        assert_eq!(top[0].0, OTHER_KAPP);
+        let week = st.kapp_days("app59", 3700, 0, 7);
+        assert_eq!(week.len(), 7);
+        assert_eq!(week[6].1, 1059);
+    }
+
     fn d(app: &str, slot: Option<Slot>, service: Option<&'static str>, bytes: u64) -> Delta {
         Delta {
+            kapp: None,
             app: app.into(),
             slot,
             service,

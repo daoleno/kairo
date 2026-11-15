@@ -22,6 +22,7 @@ async fn what_is_recorded_is_kept_across_a_restart_and_clear_history_clears_it()
     store.add_traffic(
         now,
         &[Delta {
+            kapp: None,
             app: "claude".into(),
             slot: Some(Slot::Ai),
             service: Some("claude"),

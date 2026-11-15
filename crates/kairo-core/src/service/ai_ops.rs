@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use super::{AiAlert, Service, unix};
 use crate::activity::Tally;
-use crate::ai::{self, AiExit, AiSettings, Applied};
+use crate::ai::{self, AiExit, Applied};
 use crate::ai_check;
 use crate::places;
 
@@ -39,21 +39,20 @@ impl Service {
             .map(|a| a.group.clone())
             .unwrap_or_default();
         let adopted = applied.as_ref().is_some_and(|a| a.adopted);
-        let downloads = applied.as_ref().and_then(|a| a.downloads.clone());
         self.modify(|s| {
             s.ai.group = group;
             s.ai.adopted = adopted;
         });
         let Some(mapping) = mapping else { return };
-        self.downloads_config_loaded(&mapping, downloads);
-        let ai = self.settings().ai;
-        if ai.enabled {
+        self.kinds_config_loaded(&mapping, applied.as_ref());
+        let ai = self.settings().kinds.ai;
+        if !self.settings().kinds_off {
             match ai::exit_state(&mapping, ai.exit.as_ref()) {
                 ai::ExitState::Same | ai::ExitState::Unpinned => {}
                 ai::ExitState::Renamed(name) => {
                     // The same server under a new name: still the same exit.
                     self.modify(|s| {
-                        if let Some(e) = &mut s.settings.ai.exit {
+                        if let Some(e) = &mut s.settings.kinds.ai.exit {
                             e.name = name;
                         }
                     });
@@ -64,8 +63,8 @@ impl Service {
                     // Location, and the alert says so.
                     let was = ai.exit.as_ref().map(|e| e.name.clone()).unwrap_or_default();
                     self.modify(|s| {
-                        s.settings.ai.exit = None;
-                        s.settings.ai.follow = true;
+                        s.settings.kinds.ai.exit = None;
+                        s.settings.kinds.ai.follow = true;
                         s.ai.alert = Some(AiAlert::ExitGone { was });
                     });
                     self.save_settings();
@@ -87,8 +86,8 @@ impl Service {
     /// Location. With nothing pinned (and not told to follow) it pins the
     /// node the Location is on, once a real one is chosen.
     pub(super) async fn ai_sync(&self) {
-        let ai = self.settings().ai;
-        if !ai.enabled || !self.running() {
+        let ai = self.settings().kinds.ai;
+        if self.settings().kinds_off || !self.running() {
             return;
         }
         let Some((group, main)) = self.ai_group() else {
@@ -104,7 +103,7 @@ impl Service {
                 self.ai_pin_current();
             }
         }
-        let ai = self.settings().ai;
+        let ai = self.settings().kinds.ai;
         if ai.exit.is_none() && !ai.follow {
             // Adopted, and it sits on something that is not one node: leave it.
             return;
@@ -166,12 +165,12 @@ impl Service {
             return;
         };
         self.modify(|s| {
-            s.settings.ai.exit = Some(AiExit {
+            s.settings.kinds.ai.exit = Some(AiExit {
                 name,
                 fingerprint,
                 since: unix(),
             });
-            s.settings.ai.follow = false;
+            s.settings.kinds.ai.follow = false;
         });
         self.save_settings();
     }
@@ -198,12 +197,12 @@ impl Service {
             return;
         };
         self.modify(|s| {
-            s.settings.ai.exit = Some(AiExit {
+            s.settings.kinds.ai.exit = Some(AiExit {
                 name: place.name.clone(),
                 fingerprint,
                 since: unix(),
             });
-            s.settings.ai.follow = false;
+            s.settings.kinds.ai.follow = false;
         });
         self.save_settings();
     }
@@ -243,12 +242,12 @@ impl Service {
                 .and_then(|c| ai::fingerprint(c, &name))
                 .ok_or_else(|| crate::tr!("engine.service.not_a_server", name = name))?;
             svc.modify(|s| {
-                s.settings.ai.exit = Some(AiExit {
+                s.settings.kinds.ai.exit = Some(AiExit {
                     name,
                     fingerprint,
                     since: unix(),
                 });
-                s.settings.ai.follow = false;
+                s.settings.kinds.ai.follow = false;
                 s.ai.alert = None;
             });
             svc.save_settings();
@@ -263,8 +262,8 @@ impl Service {
         let svc = self.clone();
         self.run(async move {
             svc.modify(|s| {
-                s.settings.ai.exit = None;
-                s.settings.ai.follow = true;
+                s.settings.kinds.ai.exit = None;
+                s.settings.kinds.ai.follow = true;
                 s.ai.alert = None;
             });
             svc.save_settings();
@@ -277,27 +276,25 @@ impl Service {
         self.modify(|s| s.ai.alert = None);
     }
 
-    /// Changes the AI layer's switches; the config is rebuilt and reloaded
-    /// (open connections stay on their route through a reload).
-    pub fn update_ai(
-        &self,
-        next: AiSettings,
-    ) -> impl Future<Output = Result<(), String>> + 'static {
+    /// Turns routing by kind on or off; the config is rebuilt and reloaded
+    /// (open connections stay on their route through a reload). Off, only
+    /// the subscription's rules and the apps' own exits apply.
+    pub fn set_kinds_off(&self, off: bool) -> impl Future<Output = Result<(), String>> + 'static {
         let svc = self.clone();
         self.run(async move {
-            let prev = svc.settings().ai;
-            if prev == next {
+            if svc.settings().kinds_off == off {
                 return Ok(());
             }
-            svc.modify(|s| s.settings.ai = next.clone());
+            svc.modify(|s| s.settings.kinds_off = off);
             svc.save_settings();
             if svc.running()
                 && let Err(e) = svc.write_config(true).await
             {
-                svc.modify(|s| s.settings.ai = prev);
+                svc.modify(|s| s.settings.kinds_off = !off);
                 svc.save_settings();
                 return Err(e);
             }
+            svc.kinds_sync(false).await;
             Ok(())
         })
     }
@@ -321,6 +318,7 @@ impl Service {
         loop {
             tick.tick().await;
             self.run_ai_check(false).await;
+            self.run_kind_checks(false).await;
         }
     }
 
@@ -329,7 +327,7 @@ impl Service {
     /// `forced` ignores the minimum gap between checks.
     pub(super) async fn run_ai_check(&self, forced: bool) {
         let st = self.snapshot();
-        if !st.settings.ai.enabled || !self.running() || st.profiles.active.is_none() {
+        if st.settings.kinds_off || !self.running() || st.profiles.active.is_none() {
             return;
         }
         // With the Route on Direct the core sends everything out directly,

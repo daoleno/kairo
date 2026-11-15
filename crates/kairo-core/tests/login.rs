@@ -234,10 +234,7 @@ async fn the_login_check_leaves_a_starting_kairo_connected() {
         // The test's origin is on loopback, which the AI layer keeps off the
         // nodes (a local model is never proxied); this test is about the
         // login check and the system proxy, not about AI.
-        ai: kairo_core::ai::AiSettings {
-            enabled: false,
-            ..Default::default()
-        },
+        kinds_off: true,
         ..Settings::default()
     };
     settings.save(&paths).unwrap();

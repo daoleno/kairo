@@ -158,12 +158,15 @@ pub struct Settings {
     pub auto_location: bool,
     /// The accent (`graphite`, `ember`, `iris`, `sage`...; empty: Kairo's).
     pub accent: String,
-    /// AI services on one exit, local models off the proxy, domestic AI direct.
-    pub ai: crate::ai::AiSettings,
-    /// Downloads on an exit of their own: pinned, fastest, mirror.
-    pub downloads: crate::downloads::DownloadsSettings,
-    /// The person's choices for single apps and sites ("Apps & Sites").
-    pub routes: Vec<crate::routes::Route>,
+    /// The settings file's form: 2 since apps by kind (1 had `ai`,
+    /// `downloads` and `routes`, moved once by [`migrate_v1`]).
+    pub schema: u32,
+    /// Apps are not routed by kind: only the subscription's rules, and the apps the person gave an exit of their own.
+    pub kinds_off: bool,
+    /// Every kind's exit.
+    pub kinds: crate::kinds::Kinds,
+    /// The person's choices for single apps, and their own apps.
+    pub apps: Vec<crate::kinds::AppChoice>,
 }
 
 impl Default for Settings {
@@ -194,9 +197,10 @@ impl Default for Settings {
             core_path: None,
             auto_location: true,
             accent: String::new(),
-            ai: crate::ai::AiSettings::default(),
-            downloads: crate::downloads::DownloadsSettings::default(),
-            routes: Vec::new(),
+            schema: SCHEMA,
+            kinds_off: false,
+            kinds: crate::kinds::Kinds::default(),
+            apps: Vec::new(),
         }
     }
 }
@@ -241,16 +245,30 @@ impl Settings {
     pub fn load(paths: &Paths) -> Settings {
         let first_run = !paths.settings().exists();
         let bytes = std::fs::read(paths.settings()).ok();
+        let mut migrated = false;
         let mut settings = bytes
             .as_deref()
-            .and_then(|bytes| match serde_json::from_slice::<Settings>(bytes) {
-                Ok(s) => Some(s),
+            .and_then(|bytes| match serde_json::from_slice::<serde_json::Value>(bytes) {
+                Ok(v) => match Settings::from_value(v) {
+                    Ok((s, m)) => {
+                        migrated = m;
+                        Some(s)
+                    }
+                    Err(err) => {
+                        log::warn!("settings.json is unreadable ({err}); using defaults");
+                        None
+                    }
+                },
                 Err(err) => {
                     log::warn!("settings.json is unreadable ({err}); using defaults");
                     None
                 }
             })
             .unwrap_or_default();
+        if migrated {
+            log::info!("settings moved to apps by kind (schema {SCHEMA})");
+            let _ = settings.save(paths);
+        }
         // Settings from before the automatic location (0.1): the node picked
         // there stays, until the person asks for the fastest.
         let upgraded = bytes
@@ -261,9 +279,9 @@ impl Settings {
             settings.auto_location = false;
             let _ = settings.save(paths);
         }
-        // Routes edited by hand are checked again; ones that cannot be rules go.
-        let stored = std::mem::take(&mut settings.routes);
-        settings.routes = crate::routes::sanitize(stored);
+        // Choices edited by hand are checked again; ones that cannot be rules go.
+        let stored = std::mem::take(&mut settings.apps);
+        settings.apps = crate::kinds::sanitize(stored);
         if first_run {
             settings.mixed_port = free_port(settings.mixed_port, &[]);
             settings.controller_port = free_port(settings.controller_port, &[settings.mixed_port]);
@@ -275,6 +293,26 @@ impl Settings {
             let _ = settings.save(paths);
         }
         settings
+    }
+
+    /// The settings in a file's JSON, moved to the current schema when the
+    /// file is older (`true`: it was, and should be written back).
+    pub fn from_value(mut v: serde_json::Value) -> Result<(Settings, bool), serde_json::Error> {
+        let old = v.is_object() && v.get("schema").and_then(|s| s.as_u64()).unwrap_or(1) < u64::from(SCHEMA);
+        let moved = old.then(|| migrate_v1(&v));
+        if let Some(o) = v.as_object_mut() {
+            for k in ["ai", "downloads", "routes"] {
+                o.remove(k);
+            }
+        }
+        let mut s: Settings = serde_json::from_value(v)?;
+        if let Some((rules_only, kinds, apps)) = moved {
+            s.schema = SCHEMA;
+            s.kinds_off = rules_only;
+            s.kinds = kinds;
+            s.apps = apps;
+        }
+        Ok((s, old))
     }
 
     #[cfg(feature = "engine")]
@@ -301,6 +339,104 @@ impl Settings {
         }
         Ok(())
     }
+}
+
+/// The settings file's current form.
+pub const SCHEMA: u32 = 2;
+
+/// Settings from before apps by kind (schema 1): the AI layer's switches,
+/// the Downloads exit and the "Apps & Sites" routes, moved once to the kinds
+/// and the apps. Nothing changes where traffic goes:
+///
+/// - the AI layer off is "the subscription's rules only";
+/// - the AI exit (pinned, or following the Location) is the AI kind's;
+/// - domestic AI not direct: those apps go as the subscription routes them;
+/// - downloads off: the Downloads kind goes as the subscription routes it;
+///   its pinned node, "fastest" and the mirror carry over;
+/// - a route for a site or program the catalog knows (exactly one of its
+///   domains, or one of its programs) is that app's exit; any other is an
+///   app of the person's (kind Everything else) with that exit;
+/// - a route's exit: Direct, Block, Everything else and a server stay; "AI
+///   exit" and "Downloads" are that kind's exit ("Same as AI" for an app of
+///   another kind).
+pub fn migrate_v1(
+    v: &serde_json::Value,
+) -> (bool, crate::kinds::Kinds, Vec<crate::kinds::AppChoice>) {
+    use crate::kinds::{AppChoice, AppExit, Kind, KindExit, Kinds, catalog, catalog_app, upsert};
+    use crate::routes::{RouteExit, RouteKind};
+    let ai: crate::ai::AiSettings = v
+        .get("ai")
+        .and_then(|a| serde_json::from_value(a.clone()).ok())
+        .unwrap_or_default();
+    let dl: crate::downloads::DownloadsSettings = v
+        .get("downloads")
+        .and_then(|a| serde_json::from_value(a.clone()).ok())
+        .unwrap_or_default();
+    let routes: Vec<crate::routes::Route> = v
+        .get("routes")
+        .and_then(|a| serde_json::from_value(a.clone()).ok())
+        .map(crate::routes::sanitize)
+        .unwrap_or_default();
+    let kinds = Kinds {
+        ai: crate::kinds::AiKind {
+            exit: ai.exit.clone(),
+            follow: ai.follow,
+        },
+        downloads: KindExit {
+            subscription: !ai.downloads,
+            exit: dl.exit.clone(),
+            fastest: dl.fastest,
+        },
+        mirror: dl.mirror,
+        ..Kinds::default()
+    };
+    let mut apps: Vec<AppChoice> = Vec::new();
+    if !ai.domestic_direct {
+        for a in catalog().iter().filter(|a| a.direct) {
+            upsert(
+                &mut apps,
+                AppChoice { id: a.id.into(), kind: a.kind, matcher: None, exit: AppExit::Subscription },
+            );
+        }
+    }
+    for r in routes {
+        // The catalog app the route names exactly, if any.
+        let known = match &r.kind {
+            RouteKind::Site { domain } => catalog().iter().find(|a| a.suffixes.contains(&domain.as_str())),
+            RouteKind::App { name } => catalog()
+                .iter()
+                .find(|a| a.programs.iter().any(|p| p.eq_ignore_ascii_case(name))),
+        };
+        let kind = known.map(|a| a.kind).unwrap_or(Kind::Other);
+        let exit = match r.exit {
+            RouteExit::Usual => continue,
+            RouteExit::Direct => AppExit::Direct,
+            RouteExit::Block => AppExit::Block,
+            RouteExit::Everything => AppExit::Everything,
+            RouteExit::Node(n) => AppExit::Node(n),
+            RouteExit::Ai if kind == Kind::Ai => AppExit::Kind,
+            RouteExit::Ai => AppExit::Of(Kind::Ai),
+            RouteExit::Downloads if kind == Kind::Downloads => AppExit::Kind,
+            RouteExit::Downloads => AppExit::Of(Kind::Downloads),
+        };
+        let choice = match known {
+            Some(a) => AppChoice { id: a.id.into(), kind, matcher: None, exit },
+            None => match AppChoice::custom(r.kind.clone(), kind, exit) {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!("route {} is not moved: {e}", r.id);
+                    continue;
+                }
+            },
+        };
+        // A catalog app back on its defaults (an AI site on the AI exit) needs no choice.
+        if choice.matcher.is_none() && catalog_app(&choice.id).is_some() && choice.is_default() {
+            apps.retain(|a| a.id != choice.id);
+            continue;
+        }
+        upsert(&mut apps, choice);
+    }
+    (!ai.enabled, kinds, apps)
 }
 
 /// A random controller secret.
@@ -350,6 +486,88 @@ mod tests {
         assert!(!again.auto_location);
         let fresh = tempfile::tempdir().unwrap();
         assert!(Settings::load(&Paths::new(fresh.path().to_path_buf())).auto_location);
+    }
+
+    /// A schema 1 file with everything the AI layer, the Downloads exit and
+    /// "Apps & Sites" kept, moved once.
+    const V1: &str = r#"{
+      "mixedPort": 7897, "secret": "s", "autoLocation": true,
+      "ai": {"enabled": true, "exit": {"name": "🇯🇵 Tokyo 02", "fingerprint": "ab", "since": 5},
+             "follow": false, "domesticDirect": false, "downloads": true},
+      "downloads": {"exit": {"name": "🇸🇬 Singapore 01", "fingerprint": "cd", "since": 6}, "fastest": false, "mirror": true},
+      "routes": [
+        {"id": "site:netflix.com", "kind": {"site": {"domain": "netflix.com"}}, "exit": {"node": "🇺🇸 Los Angeles 05"}},
+        {"id": "app:steam", "kind": {"app": {"name": "steam"}}, "exit": "direct"},
+        {"id": "app:yt-dlp", "kind": {"app": {"name": "yt-dlp"}}, "exit": "ai"},
+        {"id": "site:example.com", "kind": {"site": {"domain": "example.com"}}, "exit": "downloads"},
+        {"id": "site:doubleclick.net", "kind": {"site": {"domain": "doubleclick.net"}}, "exit": "block"},
+        {"id": "site:claude.ai", "kind": {"site": {"domain": "claude.ai"}}, "exit": "ai"},
+        {"id": "site:github.com", "kind": {"site": {"domain": "github.com"}}, "exit": "everything"}
+      ]
+    }"#;
+
+    #[test]
+    fn schema_1_moves_once_to_kinds_and_apps() {
+        use crate::kinds::{AppExit, Kind};
+        use crate::routes::RouteKind;
+        let (s, moved) = Settings::from_value(serde_json::from_str(V1).unwrap()).unwrap();
+        assert!(moved);
+        assert_eq!(s.schema, SCHEMA);
+        assert!(!s.kinds_off);
+        assert_eq!(s.kinds.ai.exit.as_ref().unwrap().name, "🇯🇵 Tokyo 02");
+        assert!(!s.kinds.ai.follow);
+        assert_eq!(s.kinds.downloads.exit.as_ref().unwrap().fingerprint, "cd");
+        assert!(!s.kinds.downloads.subscription && !s.kinds.downloads.fastest && s.kinds.mirror);
+        // New kinds start as the subscription routes them: nothing moves.
+        assert!(s.kinds.streaming.subscription && s.kinds.games.subscription && s.kinds.dev_tools.subscription);
+        let exit = |id: &str| s.apps.iter().find(|a| a.id == id).map(|a| (a.kind, a.exit.clone()));
+        // Domestic AI that was not direct goes as the subscription routes it.
+        assert_eq!(exit("kimi"), Some((Kind::Ai, AppExit::Subscription)));
+        assert_eq!(exit("deepseek"), Some((Kind::Ai, AppExit::Subscription)));
+        // Routes the catalog knows are those apps' exits.
+        assert_eq!(exit("netflix"), Some((Kind::Streaming, AppExit::Node("🇺🇸 Los Angeles 05".into()))));
+        assert_eq!(exit("steam"), Some((Kind::Games, AppExit::Direct)));
+        assert_eq!(exit("github"), Some((Kind::DevTools, AppExit::Everything)));
+        // An AI site on the AI exit is the default: no choice is kept.
+        assert_eq!(exit("claude"), None);
+        // Others are the person's own apps, with the same exit.
+        assert_eq!(exit("app:yt-dlp"), Some((Kind::Other, AppExit::Of(Kind::Ai))));
+        assert_eq!(exit("site:example.com"), Some((Kind::Other, AppExit::Of(Kind::Downloads))));
+        assert_eq!(exit("site:doubleclick.net"), Some((Kind::Other, AppExit::Block)));
+        let own = s.apps.iter().find(|a| a.id == "app:yt-dlp").unwrap();
+        assert_eq!(own.matcher, Some(RouteKind::app("yt-dlp")));
+        // Written back, the old keys are gone and reading it again moves nothing.
+        let text = serde_json::to_value(&s).unwrap();
+        for k in ["ai", "downloads", "routes"] {
+            assert!(text.get(k).is_none(), "{k} is still written");
+        }
+        let (again, moved) = Settings::from_value(text).unwrap();
+        assert!(!moved);
+        assert_eq!(again, s);
+    }
+
+    #[test]
+    fn schema_1_layer_off_and_downloads_off() {
+        let v = serde_json::json!({"ai": {"enabled": false, "follow": true, "downloads": false}, "routes": []});
+        let (s, _) = Settings::from_value(v).unwrap();
+        assert!(s.kinds_off);
+        assert!(s.kinds.ai.follow && s.kinds.ai.exit.is_none());
+        assert!(s.kinds.downloads.subscription);
+        // Domestic AI direct was the default: nothing to keep.
+        assert!(s.apps.is_empty());
+    }
+
+    #[test]
+    fn a_v1_file_on_disk_is_rewritten_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path().to_path_buf());
+        std::fs::write(paths.settings(), V1).unwrap();
+        let s = Settings::load(&paths);
+        assert_eq!(s.schema, SCHEMA);
+        let on_disk: serde_json::Value = serde_json::from_slice(&std::fs::read(paths.settings()).unwrap()).unwrap();
+        assert_eq!(on_disk.get("schema").and_then(|v| v.as_u64()), Some(u64::from(SCHEMA)));
+        assert!(on_disk.get("routes").is_none());
+        assert_eq!(Settings::load(&paths), s);
     }
 
     #[test]

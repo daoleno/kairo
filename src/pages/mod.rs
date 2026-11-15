@@ -2,11 +2,11 @@
 
 pub mod activity;
 pub mod ai;
-pub mod apps;
 pub mod connections;
 pub mod dns;
 pub mod exits;
 pub mod home;
+pub mod kinds;
 pub mod logs;
 pub mod overview;
 pub mod profiles;

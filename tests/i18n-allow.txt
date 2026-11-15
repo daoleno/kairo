@@ -29,15 +29,11 @@ src/pages/home.rs	address already in use	matched in the core's bind error (home:
 crates/kairo-core/src/service.rs	address already in use	matched in the core's bind error (home::fix_button), never shown
 src/pages/home.rs	in use	matched in the core's port error (home::fix_button), never shown
 src/pages/home.rs	controller port	matched in the core's port error (home::fix_button), never shown
-src/pages/apps.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
-src/pages/exits.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
 crates/kairo-tray/src/lib.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
 crates/kairo-core/src/places.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
 crates/kairo-core/src/stats.rs	Other	kairo-core places' region for a node with no known country, compared in code (exits::place_country, apps::exit_title)
 src/pages/ai.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (ai::tools_of, apps add sheet)
-src/pages/apps.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (ai::tools_of, apps add sheet)
 crates/kairo-core/src/activity.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (ai::tools_of, apps add sheet)
-src/pages/apps.rs	Telegram	an example app name in the Add App field: a product name, the same in every language
 # The window frame, the platform chrome, the tray, the launcher (lib.rs, palette.rs, main.rs, gtk_chrome.rs, kairo-tray).
 src/gtk_chrome.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
 src/lib.rs	Kairo	the product's name: the macOS app menu, window and tray titles, the GTK sidebar's title, the palette's group of Kairo's own commands
@@ -194,3 +190,34 @@ crates/kairo-core/src/update.rs	not Android	update: the error of a platform bran
 crates/kairo-core/src/update.rs	not Linux	update: the error of a platform branch compiled out (never runs)
 crates/kairo-core/src/update.rs	signatures do not match	update::install_failure: matched in Android's installer message (data)
 crates/kairo-core/src/winapi.rs	Software\Microsoft\Windows\CurrentVersion\Internet Settings	winapi: a registry key (data)
+# Apps by kind (kinds.rs, kind_check.rs, pages/kinds.rs, pages/exits.rs): names and data.
+src/pages/exits.rs	Unknown	the process name the activity tally gives a connection the core could not name, never offered as an app (data)
+src/pages/kinds.rs	Other	the region value of a server in no known country (data), shown through places::region_title
+crates/kairo-core/src/kinds.rs	Kairo Streaming	a hidden group Kairo writes into mihomo's config (a name)
+crates/kairo-core/src/kinds.rs	Kairo Games	a hidden group Kairo writes into mihomo's config (a name)
+crates/kairo-core/src/kinds.rs	Kairo Dev tools	a hidden group Kairo writes into mihomo's config (a name)
+crates/kairo-core/src/kind_check.rs	Host {host}{NL}  Hostname {alt}{NL}  Port 443{NL}  User git{NL}	lines of ~/.ssh/config in ssh's own words, copied for the person to paste
+crates/kairo-core/src/kind_check.rs	CONNECT {target} HTTP/1.1{CRLF}Host: {target}{CRLF}{CRLF}	the HTTP request sent to the proxy (data)
+crates/kairo-core/src/kind_check.rs	not available in your country	the words a streaming page says, looked for in its body (data from the service)
+crates/kairo-core/src/kind_check.rs	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36	the User-Agent header the checks send (data)
+crates/kairo-core/src/kind_check.rs	no end to the proxy's answer	an io::Error inside a check: the check reads it as Unreachable, it is never shown
+crates/kairo-core/src/kind_check.rs	the proxy refused	an io::Error inside a check: the check reads it as Unreachable, it is never shown
+crates/kairo-core/src/kind_check.rs	Range	an HTTP header's name
+crates/kairo-core/src/kinds.rs	Netflix	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Prime Video	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Max	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Hulu	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Spotify	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Twitch	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Steam	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Epic Games	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Riot Games	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	PlayStation Network	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Xbox network	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Hugging Face	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Ollama models	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Docker Hub	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	GitHub Packages	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	GitHub Releases	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	Go modules	an app's own name in the catalog, the same in every language
+crates/kairo-core/src/kinds.rs	VS Code Marketplace	an app's own name in the catalog, the same in every language

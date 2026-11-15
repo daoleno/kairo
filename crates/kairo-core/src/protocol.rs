@@ -11,15 +11,15 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::activity::Tally;
-use crate::ai::AiSettings;
 use crate::model::{Connections, LogEntry};
-use crate::routes::{RouteExit, RouteKind};
+use crate::kinds::{AppExit, Kind};
+use crate::routes::RouteKind;
 use crate::settings::{Mode, Settings};
 use crate::stats::Store as Stats;
 use crate::view::{Live, Proxies, State};
 
 /// The protocol's version: a page and a server that differ reload the page.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// What stands in for a secret the page is not sent (the controller's).
 pub const HIDDEN: &str = "\u{2022}hidden\u{2022}";
@@ -79,17 +79,24 @@ pub enum Command {
     GeoUpdated,
     ClearLogs,
     ClearStats,
-    // Routes.
-    SetRoute { kind: RouteKind, exit: RouteExit },
-    RemoveRoute { id: String },
-    // AI and Downloads.
+    // Apps: an app's kind and exit (`matcher` for an app of the person's).
+    SetApp { id: String, matcher: Option<RouteKind>, kind: Kind, exit: AppExit },
+    RemoveApp { id: String },
+    /// Off: only the apps' own exits apply; the kinds go the subscription's way.
+    SetKindsOff { off: bool },
+    // Kind exits (AI's too).
+    SetKindExit { kind: Kind, name: String },
+    KindFollowFastest { kind: Kind },
+    KindFollowLocation { kind: Kind },
+    KindToSubscription { kind: Kind },
+    CheckApps,
+    CheckApp { id: String },
+    // AI.
     SetAiExit { name: String },
     AiFollowLocation,
     DismissAiAlert,
-    UpdateAi { ai: Box<AiSettings> },
     CheckAi,
-    SetDownloadsExit { name: String },
-    DownloadsFollowFastest,
+    // Downloads' mirror.
     TestMirror,
     SetMirror { on: bool },
     // Pictures: what the service knows of an app's or a site's.

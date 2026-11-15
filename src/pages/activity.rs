@@ -6,10 +6,9 @@
 
 use kairo_core::activity::{AppFlow, ExitKind};
 use kairo_core::ai;
+use kairo_core::kinds::{self, Kind};
 use kairo_core::bytes;
-use kairo_core::routes::{RouteExit, RouteKind};
 use nsh_base::theme;
-use crate::ui::menu::{self, Choice};
 use nsh_core::prelude::*;
 
 use crate::chrome::Glyph;
@@ -24,14 +23,28 @@ pub struct AppRow {
     pub name: String,
     /// "2 open", or "idle".
     pub open: String,
-    /// What it talks to: AI services first (marked), then sites by traffic.
-    pub talks: Vec<(String, bool)>,
+    /// What it talks to: the apps it used (their kind colours the chip), by
+    /// traffic, then the sites no app claims.
+    pub talks: Vec<(String, Option<Kind>)>,
     pub more: usize,
     /// The exits it leaves through, in words.
     pub goes: String,
     pub total: u64,
     /// Whether it stays on this computer (nothing to count).
     pub local: bool,
+}
+
+/// An app's name for a chip, and its kind.
+fn app_title(id: &str) -> (String, Option<Kind>) {
+    if let Some(c) = kinds::catalog_app(id) {
+        return (kairo_core::ai::domestic_title(c.name), Some(c.kind));
+    }
+    let name = id
+        .strip_prefix("site:")
+        .or_else(|| id.strip_prefix("app:"))
+        .or_else(|| id.strip_prefix("game:"))
+        .unwrap_or(id);
+    (name.to_owned(), Some(if id.starts_with("game:") { Kind::Games } else { Kind::Other }))
 }
 
 /// How many names show in "Talks to" before "+N".
@@ -44,6 +57,9 @@ pub fn exit_title(kind: ExitKind) -> String {
         ExitKind::Ai => "activity.exit.ai",
         ExitKind::Rest => "activity.exit.rest",
         ExitKind::Downloads => "activity.exit.downloads",
+        ExitKind::Streaming => "activity.exit.streaming",
+        ExitKind::Games => "activity.exit.games",
+        ExitKind::DevTools => "activity.exit.dev_tools",
         ExitKind::Direct => "activity.exit.direct",
         ExitKind::Blocked => "activity.exit.blocked",
         ExitKind::Local => {
@@ -67,21 +83,35 @@ pub fn app_rows(apps: &[(&str, &AppFlow)], query: &str) -> Vec<AppRow> {
                 || a.services.keys().any(|s| s.contains(&q))
         })
         .map(|(name, a)| {
-            let mut talks: Vec<(String, bool)> = Vec::new();
+            let mut talks: Vec<(String, Option<Kind>)> = Vec::new();
+            let mut apps: Vec<(&String, &u64)> = a.kapps.iter().collect();
+            apps.sort_by(|x, y| y.1.cmp(x.1).then(x.0.cmp(y.0)));
+            for (id, _) in &apps {
+                talks.push(app_title(id));
+            }
+            // AI services Kairo knew of before the tally learned apps.
             let mut services: Vec<(&&'static str, &u64)> = a.services.iter().collect();
             services.sort_by(|x, y| y.1.cmp(x.1));
             for (id, _) in services {
+                if a.kapps.contains_key(*id) {
+                    continue;
+                }
                 let title = ai::SERVICES
                     .iter()
                     .find(|s| s.id == *id)
                     .map(|s| s.name.to_owned())
                     .unwrap_or_else(|| (*id).to_owned());
-                talks.push((title, true));
+                talks.push((title, Some(Kind::Ai)));
             }
             let mut sites: Vec<(&String, &u64)> = a.sites.iter().collect();
             sites.sort_by(|x, y| y.1.cmp(x.1).then(x.0.cmp(y.0)));
             for (site, _) in sites {
-                talks.push((site.clone(), false));
+                let claimed = kinds::app_of_host(site).is_some_and(|c| a.kapps.contains_key(c.id))
+                    || a.kapps.contains_key(&format!("site:{site}"))
+                    || ai::SERVICES.iter().any(|s| a.services.contains_key(s.id) && s.suffixes.iter().any(|x| site == x || site.ends_with(&format!(".{x}"))));
+                if !claimed {
+                    talks.push((site.clone(), None));
+                }
             }
             let more = talks.len().saturating_sub(TALKS);
             talks.truncate(TALKS);
@@ -400,7 +430,7 @@ fn phone_app(r: AppRow) -> impl IntoElement {
             view().flex_row().flex_wrap().gap_1p5().children(
                 r.talks
                     .iter()
-                    .map(|(t, ai)| pill(t.clone(), *ai).into_element())
+                    .map(|(t, k)| pill(t.clone(), *k).into_element())
                     .chain((r.more > 0).then(|| ui::muted(format!("+{}", r.more)).into_element())),
             )
         }))
@@ -430,43 +460,19 @@ fn phone_app(r: AppRow) -> impl IntoElement {
         )
 }
 
-/// The choices for one app: always direct, always the AI exit, block, or show
+/// The choices for one program: an exit of its own, an app of a kind, or
 /// its connections (the menu on a row).
 fn row_menu(n: String) {
     let store = store();
-    let app = |exit: RouteExit, n: String| {
-        move || {
-            store.run_then(
-                store
-                    .svc()
-                    .set_route(RouteKind::App { name: n.clone() }, exit.clone()),
-                move |r| {
-                    if r.is_ok() {
-                        store.info(t!("activity.route.saved"));
-                    }
-                },
-            )
-        }
-    };
     let show = {
         let n = n.clone();
         move || {
             store.all_connections.set(true);
             // The search field is the page's: it follows the chrome's own.
-            crate::chrome::tool_event(crate::chrome::ToolEvent::Search(
-                "activity.search",
-                n.clone(),
-            ));
+            crate::chrome::tool_event(crate::chrome::ToolEvent::Search("activity.search", n.clone()));
         }
     };
-    let items = vec![
-        Choice::new(t!("activity.route.direct")).on_select(app(RouteExit::Direct, n.clone())),
-        Choice::new(t!("activity.route.ai")).on_select(app(RouteExit::Ai, n.clone())),
-        Choice::new(t!("activity.route.block")).on_select(app(RouteExit::Block, n.clone())),
-        Choice::separator(),
-        Choice::new(t!("activity.show_connections")).on_select(show),
-    ];
-    menu::open(items);
+    crate::pages::kinds::program_menu(n, show);
 }
 
 fn head(i: usize, t: String) -> impl IntoElement {
@@ -477,36 +483,35 @@ fn head(i: usize, t: String) -> impl IntoElement {
     )
 }
 
-fn pill(text_: String, ai: bool) -> impl IntoElement {
+/// A chip of "Talks to", in its kind's colour (a site no app claims is grey).
+fn pill(text_: String, kind: Option<Kind>) -> impl IntoElement {
+    let tone = move || match kind {
+        Some(Kind::Ai) => Some(theme().primary),
+        Some(Kind::Streaming) => Some(ui::warning()),
+        Some(Kind::Games) => Some(ui::success()),
+        Some(Kind::Downloads) => Some(ui::chart_downloads()),
+        Some(Kind::DevTools) => Some(ui::chart_rest()),
+        Some(Kind::Other) | None => None,
+    };
     view()
         .px_2()
         .h(px(20.0))
         .items_center()
         .justify_center()
         .rounded_full()
-        .bg(move || {
-            if ai {
-                theme().primary.opacity(0.14)
-            } else {
-                theme().foreground.opacity(0.07)
-            }
+        .bg(move || match tone() {
+            Some(c) => c.opacity(0.14),
+            None => theme().foreground.opacity(0.07),
         })
         .child(
             text(text_)
                 .text_size(px(size::small()))
-                .text_color(move || {
-                    if ai {
-                        theme().primary
-                    } else {
-                        theme().muted_foreground
-                    }
-                })
+                .text_color(move || tone().unwrap_or(theme().muted_foreground))
                 .number_of_lines(1),
         )
 }
 
 fn app_row(r: AppRow) -> impl IntoElement {
-    let store = store();
     let name = r.name.clone();
     let menu_name = stored(r.name.clone());
     view()
@@ -529,7 +534,7 @@ fn app_row(r: AppRow) -> impl IntoElement {
             cell(1).flex_wrap().gap_1p5().children(
                 r.talks
                     .iter()
-                    .map(|(t, ai)| pill(t.clone(), *ai).into_element())
+                    .map(|(t, k)| pill(t.clone(), *k).into_element())
                     .chain((r.more > 0).then(|| ui::muted(format!("+{}", r.more)).into_element())),
             ),
         )
@@ -550,43 +555,7 @@ fn app_row(r: AppRow) -> impl IntoElement {
                     .h(px(26.0))
                     .rounded_full()
                     .on_press(move || {
-                        let n = menu_name.with(|n| n.clone());
-                        let app = |exit: RouteExit, n: String| {
-                            move || {
-                                store.run_then(
-                                    store.svc().set_route(
-                                        RouteKind::App { name: n.clone() },
-                                        exit.clone(),
-                                    ),
-                                    move |r| {
-                                        if r.is_ok() {
-                                            store.info(t!("activity.route.saved"));
-                                        }
-                                    },
-                                )
-                            }
-                        };
-                        let show = {
-                            let n = n.clone();
-                            move || {
-                                store.all_connections.set(true);
-                                // The search field is the page's: it follows the chrome's own.
-                                crate::chrome::tool_event(crate::chrome::ToolEvent::Search(
-                                    "activity.search",
-                                    n.clone(),
-                                ));
-                            }
-                        };
-                        let items = vec![
-                            Choice::new(t!("activity.route.direct"))
-                                .on_select(app(RouteExit::Direct, n.clone())),
-                            Choice::new(t!("activity.route.ai"))
-                                .on_select(app(RouteExit::Ai, n.clone())),
-                            Choice::new(t!("activity.route.block")).on_select(app(RouteExit::Block, n.clone())),
-                            Choice::separator(),
-                            Choice::new(t!("activity.show_connections")).on_select(show),
-                        ];
-                        menu::open(items);
+                        row_menu(menu_name.with(|n| n.clone()));
                     }),
             ),
         )
@@ -627,6 +596,7 @@ mod tests {
         t.names = ExitNames {
             ai: "Kairo AI".into(),
             downloads: "Kairo Downloads".into(),
+            ..Default::default()
         };
         let now = parse_time("2026-11-09T15:00:00Z").unwrap() + 5;
         t.ingest(
@@ -653,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn an_app_shows_its_services_first_then_sites_and_its_exits() {
+    fn an_app_shows_the_apps_it_used_by_traffic_and_its_exits() {
         let t = tally();
         let rows = app_rows(&t.apps(), "");
         assert_eq!(rows.len(), 2);
@@ -661,8 +631,8 @@ mod tests {
         assert_eq!(
             safari.talks,
             vec![
-                ("ChatGPT".to_owned(), true),
-                ("youtube.com".to_owned(), false)
+                ("YouTube".to_owned(), Some(Kind::Streaming)),
+                ("ChatGPT".to_owned(), Some(Kind::Ai))
             ]
         );
         assert_eq!(safari.goes, "Everything else · AI exit");
@@ -710,6 +680,7 @@ mod tests {
         let b = |tool: &str, remote: &str| kairo_core::bypass::Bypass {
             tool: tool.into(),
             service: None,
+            game: None,
             pid: 1,
             remote: remote.into(),
             since: 0,

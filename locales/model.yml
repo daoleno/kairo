@@ -323,6 +323,15 @@ model.activity.exit.rest:
 model.activity.exit.downloads:
   en: "Downloads"
   zh: "下载"
+model.activity.exit.streaming:
+  en: "Streaming"
+  zh: "流媒体"
+model.activity.exit.games:
+  en: "Games"
+  zh: "游戏"
+model.activity.exit.dev_tools:
+  en: "Dev tools"
+  zh: "开发工具"
 model.activity.exit.direct:
   en: "Direct"
   zh: "直连"
@@ -383,3 +392,61 @@ model.downloads.slower:
 model.geo.too_small:
   en: "%{source}: only %{bytes} bytes"
   zh: "%{source}：只有 %{bytes} 字节"
+
+# The kinds of apps (kinds.rs): each has an exit and a check.
+model.kind.ai:
+  en: AI
+  zh: AI
+model.kind.streaming:
+  en: Streaming
+  zh: 流媒体
+model.kind.games:
+  en: Games
+  zh: 游戏
+model.kind.downloads:
+  en: Downloads
+  zh: 下载
+model.kind.dev_tools:
+  en: Dev tools
+  zh: 开发工具
+model.kind.other:
+  en: Everything else
+  zh: 其他流量
+
+# An app's check, as its row says it (kind_check.rs): only what was measured.
+model.kind_check.unreachable:
+  en: Unreachable
+  zh: 无法访问
+model.kind_check.reachable:
+  en: Reachable
+  zh: 可访问
+model.kind_check.reachable_ms:
+  en: "Reachable · %{ms} ms"
+  zh: "可访问 · %{ms} ms"
+model.kind_check.catalog:
+  en: "%{code} catalog"
+  zh: "%{code} 片库"
+model.kind_check.full_catalog:
+  en: Full catalog
+  zh: 完整片库
+model.kind_check.originals_only:
+  en: Originals only
+  zh: 仅自制内容
+model.kind_check.not_available:
+  en: Not available here
+  zh: 此地区不可用
+model.kind_check.sees:
+  en: "Sees %{country}"
+  zh: "地区：%{country}"
+model.kind_check.game:
+  en: "%{ms} ms · jitter %{jitter} ms"
+  zh: "%{ms} ms · 抖动 %{jitter} ms"
+model.kind_check.game_lost:
+  en: "%{ms} ms · jitter %{jitter} ms · %{lost}% lost"
+  zh: "%{ms} ms · 抖动 %{jitter} ms · 丢包 %{lost}%"
+model.kind_check.ssh_22_closed:
+  en: SSH port 22 closed
+  zh: SSH 22 端口不通
+model.kind_check.ssh_closed:
+  en: SSH closed
+  zh: SSH 不通

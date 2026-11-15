@@ -10,36 +10,43 @@ Linux, written in Rust on [NSH](https://nsh.dev).
 
 ## What it does
 
-Five pages in a sidebar: **Home**, **Exits**, **Activity**, **Apps & Sites** and **Subscriptions**, with
-Settings below them.
+Four pages in a sidebar: **Home**, **Apps**, **Activity** and **Subscriptions**, with Settings below them.
 
-- **Three exits.** Traffic leaves through one of three places, each with a country, a server and a word for
-  how it is doing (Good, OK, Slow): **AI**, **Everything else** and **Downloads**. The AI exit is pinned to a
-  server (the same server, even if the provider renames it) and stays there when Everything else changes.
-  Everything else is the fastest place by default, or the one you pick. Downloads (Hugging Face, PyPI,
-  Ollama, Docker, GitHub) follow Everything else unless you pick another; a mirror switch, off until a
-  throughput test passes, can shorten them. Pick a country, then a server, in **Exits**.
-- **AI work.** Claude, ChatGPT, Gemini, Cursor, Copilot, Perplexity and Grok go through the AI exit. Kimi,
-  DeepSeek, Doubao, Tongyi and the other domestic AI go direct, and local models (Ollama, LM Studio, your
-  LAN) are never proxied. Home shows a row per service with what Kairo measured: whether it is reachable,
-  whether its API answers (without a key), the country it sees (from Cloudflare's trace when the service sits
-  behind it, otherwise a marked estimate), and whether a connection stays open for 90 seconds. The checks run
-  when you connect and every ten minutes. When something is wrong, Home says so with one button: **Use AI
-  Exit** or **Use Every App**. Kairo shows what a service sees; where you are and the service's own terms
-  still apply. Settings → AI turns each part off.
-- **Activity.** By app: what each one talks to (AI services first, then sites), where it goes through, and how
-  much. A row's menu sets **Always Direct**, **Always AI Exit** or **Block** for that app, or shows its raw
-  connections (with close). When an AI tool such as Claude Code goes around Kairo (it ignores the system
-  proxy), a banner says so, with **Use Every App** (TUN) and **Copy for terminal** (an `export` line, with
-  `NO_PROXY`). It reads the socket table of the current user only; no root.
+- **Apps by kind.** An app is a service you use (Netflix, Claude, Steam, Hugging Face), known by its sites and
+  rule sets; the programs that use it show as its "used by". A browser is never an app. Every app has a kind,
+  and each kind has an exit: **AI**, **Streaming**, **Games**, **Downloads**, **Dev tools** and **Everything
+  else**, each with a country, a server and a word for how it is doing (Good, OK, Slow). The AI exit is pinned
+  to a server (the same server, even if the provider renames it) and stays there when Everything else changes.
+  Everything else is the fastest place by default, or the one you pick. Downloads follow the fastest place; a
+  mirror switch, off until a throughput test passes, can shorten them. Streaming, Games and Dev tools start
+  as the subscription routes them (Kairo writes no rule for them, or adopts the subscription's own group of
+  that name) until you pick a place. One app can have an exit of its own: its kind's, Everything else, the
+  subscription's way, Direct, a country, or Block. Pick a kind's country, then a server, in **Apps**; it also
+  lists every app used this week by kind, and the sites Kairo saw and could not sort (one choice makes one an
+  app). **Settings → Advanced → Use the subscription's rules only** leaves only the single apps' own exits.
+- **What each kind measures.** AI: whether it is reachable, whether its API answers (without a key), the
+  country it sees (from Cloudflare's trace when the service sits behind it, otherwise a marked estimate), and
+  whether a connection stays open for 90 seconds. Streaming: the catalog the service's own page shows (falling
+  back to the country it sees) and Mbit/s. Games: the middle of ten connection times, jitter and loss, and
+  whether the game goes around Kairo. Downloads: MB/s over a ranged sample. Dev tools: HTTPS and its first
+  byte, and SSH on port 22. Home shows the AI table and a card for each kind used in the last 7 days (at least
+  1 MB, or a connection open now), three apps at most each. When something is wrong, a row offers one button:
+  **Use AI Exit**, **Use Every App** or **Copy for SSH** (an `~/.ssh/config` snippet; Kairo edits no file).
+  Kimi, DeepSeek, Doubao, Tongyi and the other domestic AI go direct, and local models (Ollama, LM Studio, your
+  LAN) are never proxied. Kairo shows what a service sees; where you are and the service's own terms still
+  apply.
+- **Activity.** By app: the apps each program talks to (coloured by kind, then the sites no app claims), where
+  it goes through, and how much. A row's menu sets **Exit for This Program** or **Add as App**, or shows its
+  raw connections (with close). When an AI tool such as Claude Code or a game goes around Kairo (it ignores the
+  system proxy), a banner says so, with **Use Every App** (TUN) and **Copy for terminal** (an `export` line,
+  with `NO_PROXY`). It reads the socket table of the current user only; no root.
 - **Statistics.** Kairo records, on this computer only, how much went through each exit (per hour), which apps
   and AI services used it, whether each AI service was reachable and how fast its API answered, how each exit's
   server held up (a test every ten minutes) and every switch, and each subscription's use. Activity shows
-  Today, 7 days or 30 days; a service's row opens its week; Exits has a Quality section; Subscriptions says
+  Today, 7 days or 30 days; a service's row opens its week; an app's sheet shows its week (at most 50 apps an
+  hour are kept by name, the rest as Other); Apps has a Quality section; Subscriptions says
   whether the data lasts until the plan ends. History is kept 30 days in `stats.json` in Kairo's data folder;
   **Clear History** in Activity removes it. Nothing is sent anywhere.
-- **Apps & Sites.** One list of choices: an app or a site goes through the AI exit, another country, direct,
-  or is blocked. Everything not listed uses its usual exit.
 - **Subscriptions.** Add a link or a YAML file; Kairo checks each one with the core before using it. Usage
   and expiry show on the row, and when a provider answers with an error or a notice, Kairo says it in plain
   words with a Retry. Updates run on a schedule (the provider's interval or your own) or by hand.
@@ -136,7 +143,7 @@ On first run Kairo takes ports 7897 and 9097, or the next free ones if another c
 ```
 src/main.rs          the launcher: window, tray, single instance, signals, guardian process
 src/lib.rs           the NSH root component (App) and the sidebar shell
-src/pages/*.rs       Home, Exits, Activity, Apps & Sites, Subscriptions, Settings (and its Inspect views)
+src/pages/*.rs       Home, Apps, Activity, Subscriptions, Settings (and its Inspect views)
 src/ui/              the small design system: tokens, rows, groups, segmented controls, icons
 crates/kairo-core    everything that is not UI:
   service.rs           the state (a tokio watch channel the UI subscribes to) and every action

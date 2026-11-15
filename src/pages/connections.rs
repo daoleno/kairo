@@ -704,37 +704,38 @@ fn inspector(
         }))
 }
 
-/// "Always Direct · Always AI Exit · Block" for the connection's site.
+/// The connection's site as an app: its exit, or an app of a kind.
 fn always_buttons(c: &Connection) -> impl IntoElement {
-    use kairo_core::routes::{RouteExit, RouteKind};
+    use kairo_core::kinds::{AppExit, Kind};
+    use kairo_core::routes::RouteKind;
     let store = store();
-    let site = kairo_core::activity::site_of(&c.host);
-    let one = move |label: String, exit: RouteExit| {
-        let site = site.clone();
-        ui::btn(label, Variant::Secondary).on_press(move || {
-            store.run_then(
-                store.svc().set_route(
-                    RouteKind::Site {
-                        domain: site.clone(),
-                    },
-                    exit.clone(),
-                ),
-                move |r| {
-                    if r.is_ok() {
-                        store.info(t!("activity.route.saved"));
-                    }
-                },
-            )
-        })
+    let site = stored(kairo_core::activity::site_of(&c.host));
+    let set = move |kind: Kind, exit: AppExit| {
+        store.run_then(
+            store.svc().set_app(String::new(), Some(RouteKind::Site { domain: site.with(|s| s.clone()) }), kind, exit),
+            move |r| {
+                if r.is_ok() {
+                    store.info(t!("activity.route.saved"));
+                }
+            },
+        )
     };
     view().gap_2().child(ui::muted(t!("connections.for_site"))).child(
         view()
             .flex_row()
             .flex_wrap()
             .gap_2()
-            .child(one(t!("activity.route.direct"), RouteExit::Direct))
-            .child(one(t!("activity.route.ai"), RouteExit::Ai))
-            .child(one(t!("activity.route.block"), RouteExit::Block)),
+            .child(ui::btn(t!("activity.route.direct"), Variant::Secondary).on_press(move || set(Kind::Other, AppExit::Direct)))
+            .child(ui::btn(t!("activity.route.block"), Variant::Secondary).on_press(move || set(Kind::Other, AppExit::Block)))
+            .child(ui::btn(t!("kinds.menu.add_as_app"), Variant::Secondary).on_press(move || {
+                use crate::ui::menu::{self, Choice};
+                menu::open(
+                    Kind::ALL
+                        .into_iter()
+                        .map(|kind| Choice::new(kind.title()).on_select(move || set(kind, AppExit::Kind)))
+                        .collect(),
+                );
+            })),
     )
 }
 

@@ -59,6 +59,7 @@ fn leaving_a_page_with_the_bypass_banner_up_fails_nothing() {
     let tool = |name: &str, pid: u32| Bypass {
         tool: name.into(),
         service: (name == "claude").then_some("claude"),
+        game: None,
         pid,
         remote: "93.184.216.34:443".into(),
         since: 0,
@@ -80,7 +81,7 @@ fn leaving_a_page_with_the_bypass_banner_up_fails_nothing() {
     // The list changes while the banner is up, and the page is left in the middle of it.
     // A tool of the banner, pressed, then the page is left with its notice still up.
     app.press("text:Copy for terminal").unwrap();
-    app.press("text:Exits").unwrap();
+    app.press("text:Apps").unwrap();
     app.wait(Duration::from_secs(4)).unwrap();
     assert!(
         !app.screen()
@@ -98,7 +99,7 @@ fn leaving_a_page_with_the_bypass_banner_up_fails_nothing() {
         svc.inject_bypass(vec![tool("claude", 11), tool("cursor", 13 + round)]);
         app.press("text:By App").unwrap();
         svc.inject_bypass(vec![tool("claude", 11), tool("cursor", 12 + round)]);
-        app.press("text:Exits").unwrap();
+        app.press("text:Apps").unwrap();
         svc.inject_bypass(vec![]);
         app.press("text:Activity").unwrap();
         svc.inject_bypass(vec![tool("claude", 11)]);
@@ -106,7 +107,7 @@ fn leaving_a_page_with_the_bypass_banner_up_fails_nothing() {
         app.press("text:Home").unwrap();
         app.wait(Duration::from_millis(60)).unwrap();
         svc.inject_bypass(vec![]);
-        app.press("text:Apps & Sites").unwrap();
+        app.press("text:Subscriptions").unwrap();
         svc.inject_bypass(vec![tool("claude", 11)]);
         app.wait(Duration::from_millis(60)).unwrap();
         app.press("text:Activity").unwrap();

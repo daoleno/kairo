@@ -44,9 +44,8 @@ enum Row {
 
 const ROWS: &[Row] = &[
     Row::Item(Page::Overview),
-    Row::Item(Page::Exits),
-    Row::Item(Page::Activity),
     Row::Item(Page::Apps),
+    Row::Item(Page::Activity),
     Row::Item(Page::Profiles),
     Row::Heading(""),
     Row::Item(Page::Settings),
@@ -55,7 +54,6 @@ const ROWS: &[Row] = &[
 fn symbol(page: Page) -> &'static str {
     match page {
         Page::Overview => "house",
-        Page::Exits => "globe",
         Page::Activity => "arrow.up.arrow.down",
         Page::Apps => "square.grid.2x2",
         Page::Profiles => "list.bullet",

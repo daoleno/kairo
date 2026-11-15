@@ -30,7 +30,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
-use crate::{ExitId, Hooks, Model, act};
+use crate::{Hooks, Model, act};
 
 const WM_TRAY: u32 = WM_APP + 2;
 const WM_DIM: u32 = WM_APP + 3;
@@ -44,10 +44,8 @@ const ID_QUIT: usize = 22;
 const ID_ALL: usize = 23;
 const ID_TEST: usize = 24;
 const ID_SETTINGS: usize = 25;
-const ID_FASTEST: usize = 26;
 const ID_MODE: usize = 100; // + index
-const ID_REST: usize = 1000; // + index
-const ID_AI: usize = 2000; // + index
+// The exits' items: crate::exit_item (from crate::EXIT_IDS).
 
 struct Ctx {
     svc: Service,
@@ -207,12 +205,11 @@ fn build(m: &Model) -> Option<HMENU> {
         for e in &m.exits {
             let Ok(sub) = CreatePopupMenu() else { continue };
             if let Some(on) = e.fastest {
-                item(sub, ID_FASTEST, &kairo_core::tr!("tray.fastest"), true, on);
+                item(sub, crate::exit_item(e.id, None), &kairo_core::tr!("tray.fastest"), true, on);
                 separator(sub);
             }
-            let base = if e.id == ExitId::Ai { ID_AI } else { ID_REST };
             for (i, c) in e.choices.iter().enumerate() {
-                item(sub, base + i, &Model::choice_label(c), true, c.checked);
+                item(sub, crate::exit_item(e.id, Some(i)), &Model::choice_label(c), true, c.checked);
             }
             separator(sub);
             item(sub, ID_ALL, &kairo_core::tr!("tray.all_servers"), true, false);
@@ -240,34 +237,17 @@ fn build(m: &Model) -> Option<HMENU> {
 }
 
 fn pick(id: usize, model: &Model, ctx: &Ctx) {
-    let choice = |exit: ExitId, i: usize| {
-        model
-            .exits
-            .iter()
-            .find(|e| e.id == exit)
-            .and_then(|e| e.choices.get(i))
-            .map(|c| c.name.clone())
-    };
     match id {
         i if (ID_MODE..ID_MODE + 3).contains(&i) => act::mode(&ctx.svc, Mode::ALL[i - ID_MODE]),
         ID_CORE => act::connect(&ctx.svc, !model.running),
         ID_SHOW => (ctx.hooks.show)(),
         ID_QUIT => (ctx.hooks.quit)(),
-        ID_ALL => (ctx.hooks.page)("exits"),
+        ID_ALL => (ctx.hooks.page)("apps"),
         ID_SETTINGS => (ctx.hooks.page)("settings"),
         ID_TEST => act::test_again(&ctx.svc),
-        ID_FASTEST => act::locate(&ctx.svc, String::new()),
-        i if i >= ID_AI => {
-            if let Some(name) = choice(ExitId::Ai, i - ID_AI) {
-                act::ai_exit(&ctx.svc, name);
-            }
+        i => {
+            act::exit_item(&ctx.svc, model, i);
         }
-        i if i >= ID_REST => {
-            if let Some(name) = choice(ExitId::Rest, i - ID_REST) {
-                act::locate(&ctx.svc, name);
-            }
-        }
-        _ => {}
     }
 }
 

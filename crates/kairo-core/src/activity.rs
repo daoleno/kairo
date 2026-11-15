@@ -168,6 +168,9 @@ pub enum ExitKind {
     Ai,
     Rest,
     Downloads,
+    Streaming,
+    Games,
+    DevTools,
     Direct,
     Blocked,
     /// Stays on this computer or the LAN.
@@ -181,6 +184,9 @@ impl ExitKind {
             ExitKind::Ai => crate::tr!("model.activity.exit.ai"),
             ExitKind::Rest => crate::tr!("model.activity.exit.rest"),
             ExitKind::Downloads => crate::tr!("model.activity.exit.downloads"),
+            ExitKind::Streaming => crate::tr!("model.activity.exit.streaming"),
+            ExitKind::Games => crate::tr!("model.activity.exit.games"),
+            ExitKind::DevTools => crate::tr!("model.activity.exit.dev_tools"),
             ExitKind::Direct => crate::tr!("model.activity.exit.direct"),
             ExitKind::Blocked => crate::tr!("model.activity.exit.blocked"),
             ExitKind::Local => {
@@ -199,6 +205,12 @@ impl ExitKind {
 pub struct ExitNames {
     pub ai: String,
     pub downloads: String,
+    #[serde(default)]
+    pub streaming: String,
+    #[serde(default)]
+    pub games: String,
+    #[serde(default)]
+    pub dev_tools: String,
 }
 
 /// The exit a connection leaves through, from its chain of groups.
@@ -208,6 +220,12 @@ pub fn exit_of(c: &Connection, names: &ExitNames) -> ExitKind {
         ExitKind::Ai
     } else if has(&names.downloads) {
         ExitKind::Downloads
+    } else if has(&names.streaming) {
+        ExitKind::Streaming
+    } else if has(&names.games) {
+        ExitKind::Games
+    } else if has(&names.dev_tools) {
+        ExitKind::DevTools
     } else if c.chains.iter().any(|x| x.starts_with("REJECT")) {
         ExitKind::Blocked
     } else if c.chains.iter().any(|x| x == "DIRECT") {
@@ -253,6 +271,9 @@ pub struct AppFlow {
     pub services: BTreeMap<crate::wire::Static, u64>,
     /// Bytes per exit.
     pub exits: BTreeMap<ExitKind, u64>,
+    /// Bytes per app it talks to (catalog ids, or the person's own).
+    #[serde(default)]
+    pub kapps: BTreeMap<String, u64>,
     /// The exits of the connections open now.
     pub open_exits: std::collections::BTreeSet<ExitKind>,
 }
@@ -269,6 +290,15 @@ pub struct Tally {
     #[serde(with = "crate::wire::pairs")]
     flows: BTreeMap<(String, Target), Flow>,
     apps: BTreeMap<String, AppFlow>,
+    /// Every app by kind seen (an app is a service; the programs above use it).
+    #[serde(default)]
+    kapps: BTreeMap<String, AppUse>,
+    /// Sites no app claims, with their bytes: "Seen, not sorted".
+    #[serde(default)]
+    unsorted: BTreeMap<String, u64>,
+    /// The person's own apps, for recognising connections.
+    #[serde(skip)]
+    choices: Vec<crate::kinds::AppChoice>,
     /// The groups that are the exits, for telling where a connection left.
     pub names: ExitNames,
     /// Last bytes seen per connection id, and its key and start.
@@ -278,8 +308,31 @@ pub struct Tally {
     pub cut: u32,
 }
 
+/// What one app (by kind) has done, over every program that used it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct AppUse {
+    pub name: String,
+    pub kind: crate::kinds::Kind,
+    pub up: u64,
+    pub down: u64,
+    /// Connections open now.
+    pub open: u32,
+    /// Bytes per program that used it ("used by").
+    pub programs: BTreeMap<String, u64>,
+    /// The exits its open connections leave through.
+    pub open_exits: std::collections::BTreeSet<ExitKind>,
+}
+
+impl AppUse {
+    pub fn total(&self) -> u64 {
+        self.up + self.down
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Seen {
+    /// The app the connection is, recognised once.
+    kapp: Option<(String, String, crate::kinds::Kind)>,
     key: Option<(String, Target)>,
     up: u64,
     down: u64,
@@ -299,12 +352,30 @@ impl Tally {
             a.open = 0;
             a.open_exits.clear();
         }
+        for a in self.kapps.values_mut() {
+            a.open = 0;
+            a.open_exits.clear();
+        }
         let mut alive = std::collections::HashSet::new();
         for c in conns {
             let tool = tool_name(&c.process, &c.process_path);
             let start = parse_time(&c.start).unwrap_or(now);
             alive.insert(c.id.clone());
             let previous = self.last.get(&c.id).map(|p| (p.up, p.down));
+            let kapp = match self.last.get(&c.id) {
+                Some(p) => p.kapp.clone(),
+                None => crate::kinds::recognise(
+                    &crate::kinds::Seen {
+                        host: &c.host,
+                        process: &c.process,
+                        process_path: &c.process_path,
+                        rule: &c.rule,
+                        rule_payload: &c.rule_payload,
+                    },
+                    &self.choices,
+                )
+                .map(|r| (r.id, r.name, r.kind)),
+            };
             let (du, dd) = match previous {
                 Some((pu, pd)) => (c.upload.saturating_sub(pu), c.download.saturating_sub(pd)),
                 None => (c.upload, c.download),
@@ -317,12 +388,32 @@ impl Tally {
             app.open += 1;
             app.open_exits.insert(kind);
             *app.exits.entry(kind).or_default() += du + dd;
+            match &kapp {
+                Some((id, name, k)) => {
+                    *app.kapps.entry(id.clone()).or_default() += du + dd;
+                    let u = self.kapps.entry(id.clone()).or_default();
+                    u.name = name.clone();
+                    u.kind = *k;
+                    u.up += du;
+                    u.down += dd;
+                    u.open += 1;
+                    u.open_exits.insert(kind);
+                    *u.programs.entry(tool.clone()).or_default() += du + dd;
+                }
+                None if !is_local_host(&c.host) && !c.host.is_empty() => {
+                    *self.unsorted.entry(site_of(&c.host)).or_default() += du + dd;
+                }
+                None => {}
+            }
             let target = target_of(c);
             deltas.push(crate::stats::Delta {
                 app: tool.clone(),
+                kapp: kapp.as_ref().map(|(id, _, _)| id.clone()),
                 slot: match kind {
                     ExitKind::Ai => Some(crate::stats::Slot::Ai),
-                    ExitKind::Rest => Some(crate::stats::Slot::Rest),
+                    ExitKind::Rest | ExitKind::Streaming | ExitKind::Games | ExitKind::DevTools => {
+                        Some(crate::stats::Slot::Rest)
+                    }
                     ExitKind::Downloads => Some(crate::stats::Slot::Downloads),
                     ExitKind::Direct => Some(crate::stats::Slot::Direct),
                     ExitKind::Blocked | ExitKind::Local => None,
@@ -353,6 +444,7 @@ impl Tally {
             self.last.insert(
                 c.id.clone(),
                 Seen {
+                    kapp,
                     key,
                     up: c.upload,
                     down: c.download,
@@ -419,14 +511,92 @@ impl Tally {
         total
     }
 
+    /// Every app by kind seen, most traffic first.
+    pub fn kapps(&self) -> Vec<(&str, &AppUse)> {
+        let mut v: Vec<_> = self.kapps.iter().map(|(n, a)| (n.as_str(), a)).collect();
+        v.sort_by(|a, b| b.1.total().cmp(&a.1.total()).then(a.0.cmp(b.0)));
+        v
+    }
+
+    /// The apps in use: a connection open now, or at least
+    /// [`USED_BYTES`](crate::kinds::USED_BYTES) since Kairo opened or in
+    /// `week` (the statistics' last 7 days, per app). Most traffic first.
+    pub fn in_use(&self, week: &[(String, u64)]) -> Vec<String> {
+        let mut out: Vec<(String, u64)> = Vec::new();
+        for (id, u) in self.kapps() {
+            let past = week.iter().find(|(w, _)| w == id).map_or(0, |(_, b)| *b);
+            let bytes = u.total().max(past);
+            if u.open > 0 || bytes >= crate::kinds::USED_BYTES {
+                out.push((id.to_owned(), bytes));
+            }
+        }
+        for (id, b) in week {
+            if *b >= crate::kinds::USED_BYTES && id != crate::stats::OTHER_KAPP && !out.iter().any(|(o, _)| o == id) {
+                out.push((id.clone(), *b));
+            }
+        }
+        out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        out.into_iter().map(|(id, _)| id).collect()
+    }
+
+    pub fn kapp(&self, id: &str) -> Option<&AppUse> {
+        self.kapps.get(id)
+    }
+
+    /// Sites no app claims that moved at least `min` bytes, most first.
+    pub fn unsorted(&self, min: u64) -> Vec<(&str, u64)> {
+        let mut v: Vec<_> = self
+            .unsorted
+            .iter()
+            .filter(|(_, b)| **b >= min)
+            .map(|(n, b)| (n.as_str(), *b))
+            .collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        v
+    }
+
+    /// The person's own apps changed: connections are recognised again from
+    /// the next snapshot, and what was counted under the old names moves.
+    pub fn set_apps(&mut self, apps: Vec<crate::kinds::AppChoice>) {
+        self.choices = apps;
+        for s in self.last.values_mut() {
+            s.kapp = None;
+        }
+        self.last.retain(|_, _| false);
+        self.kapps.clear();
+        self.unsorted.clear();
+        for a in self.apps.values_mut() {
+            a.kapps.clear();
+        }
+    }
+
     pub fn clear(&mut self) {
+        let choices = std::mem::take(&mut self.choices);
         *self = Tally::default();
+        self.choices = choices;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn in_use_is_a_megabyte_in_seven_days_or_open_now() {
+        let mut t = Tally::default();
+        let used = |down: u64, open: u32| AppUse { down, open, ..Default::default() };
+        t.kapps.insert("netflix".into(), used(2_000_000, 0));
+        t.kapps.insert("steam".into(), used(10, 1));
+        t.kapps.insert("npm".into(), used(10, 0));
+        t.kapps.insert("pypi".into(), used(10, 0));
+        let week = vec![
+            ("pypi".to_owned(), 5_000_000),
+            ("github".to_owned(), 1_000_000),
+            ("crates".to_owned(), 999_999),
+            ("other".to_owned(), 9_000_000),
+        ];
+        assert_eq!(t.in_use(&week), ["pypi", "netflix", "github", "steam"]);
+    }
 
     fn conn(
         id: &str,
@@ -630,6 +800,7 @@ mod tests {
         t.names = ExitNames {
             ai: "Kairo AI".into(),
             downloads: "Kairo Downloads".into(),
+            ..Default::default()
         };
         let s = "2026-11-09T15:00:00Z";
         let now = parse_time(s).unwrap();
@@ -686,6 +857,7 @@ mod tests {
         let names = ExitNames {
             ai: "Kairo AI".into(),
             downloads: "Kairo Downloads".into(),
+            ..Default::default()
         };
         let mut c = conn("1", "x.com", "a", "", 0, 0, "");
         c.chains = vec!["n".into(), "Proxy".into()];

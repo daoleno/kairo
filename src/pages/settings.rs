@@ -269,7 +269,6 @@ fn general(settings: Memo<Settings>) -> impl IntoElement {
             general_rows(settings, mac),
         ))
         .child(connection_group(settings))
-        .child(ai_group(settings))
         .child(remote.then(sessions_group))
         .child(about_group())
 }
@@ -486,35 +485,22 @@ fn connection_group(settings: Memo<Settings>) -> impl IntoElement {
     ).into_element()
 }
 
-/// What Kairo does for AI tools; each switch rebuilds the rules (open
-/// connections keep running). Which exit they use is chosen under Exits.
-fn ai_group(settings: Memo<Settings>) -> impl IntoElement {
+/// Apps by kind on or off: off, Kairo writes no rule of its own for the
+/// kinds and the subscription's rules decide (the exits chosen for single
+/// apps still apply). Each change rebuilds the rules; open connections keep
+/// running.
+fn kinds_row(settings: Memo<Settings>) -> AnyElement {
     let store = store();
-    let ai = move |f: fn(&kairo_core::ai::AiSettings) -> bool| move || settings.with(|s| f(&s.ai));
-    let set = move |f: fn(&mut kairo_core::ai::AiSettings, bool)| {
-        move |on: bool| {
-            let mut next = store.svc().settings().ai;
-            f(&mut next, on);
-            store.run(store.svc().update_ai(next));
-        }
-    };
-    ui::group(
-        Some(t!("settings.ai.title")),
-        vec![
-            ui::setting_row(
-                t!("settings.ai.one_exit"),
-                None,
-                ui::toggle(ai(|a| a.enabled), t!("settings.ai.one_exit"), set(|a, v| a.enabled = v)),
-            )
-            .into_element(),
-            ui::setting_row(
-                t!("settings.ai.domestic_direct"),
-                None,
-                ui::toggle(ai(|a| a.domestic_direct), t!("settings.ai.domestic_direct"), set(|a, v| a.domestic_direct = v)),
-            )
-            .into_element(),
-        ],
+    ui::setting_row(
+        t!("settings.kinds_off"),
+        None,
+        ui::toggle(
+            move || settings.with(|s| s.kinds_off),
+            t!("settings.kinds_off"),
+            move |on: bool| store.run(store.svc().set_kinds_off(on)),
+        ),
     )
+    .into_element()
 }
 
 /// How many other browsers the list shows by name.
@@ -720,6 +706,7 @@ fn advanced(
         .child(ui::group(
             Some(t!("settings.tab.advanced")),
             vec![
+                kinds_row(settings),
                 ui::setting_row(
                     t!("settings.advanced.port"),
                     None,

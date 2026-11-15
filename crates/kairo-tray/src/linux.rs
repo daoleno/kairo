@@ -6,7 +6,7 @@ use kairo_core::{Mode, Service};
 use ksni::menu::{CheckmarkItem, RadioGroup, RadioItem, StandardItem, SubMenu};
 use ksni::{MenuItem, TrayMethods};
 
-use crate::{ExitId, Hooks, Model, act};
+use crate::{Hooks, Model, act};
 
 struct KairoTray {
     svc: Service,
@@ -86,7 +86,7 @@ impl ksni::Tray for KairoTray {
                     CheckmarkItem {
                         label: kairo_core::tr!("tray.fastest"),
                         checked: on,
-                        activate: Box::new(|t: &mut Self| act::locate(&t.svc, String::new())),
+                        activate: Box::new(move |t: &mut Self| act::fastest(&t.svc, id)),
                         ..Default::default()
                     }
                     .into(),
@@ -110,10 +110,7 @@ impl ksni::Tray for KairoTray {
                             .and_then(|e| e.choices.get(i))
                             .map(|c| c.name.clone());
                         if let Some(name) = name {
-                            match id {
-                                ExitId::Rest => act::locate(&t.svc, name),
-                                ExitId::Ai => act::ai_exit(&t.svc, name),
-                            }
+                            act::pick(&t.svc, id, name);
                         }
                     }),
                     options: e
@@ -131,7 +128,7 @@ impl ksni::Tray for KairoTray {
             sub.push(
                 StandardItem {
                     label: kairo_core::tr!("tray.all_servers"),
-                    activate: Box::new(|t: &mut Self| (t.hooks.page)("exits")),
+                    activate: Box::new(|t: &mut Self| (t.hooks.page)("apps")),
                     ..Default::default()
                 }
                 .into(),

@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 mod ai_ops;
 mod bypass_ops;
 mod downloads_ops;
+mod kind_check_ops;
 mod icon_ops;
 mod route_ops;
 mod stats_ops;
@@ -83,6 +84,9 @@ struct Inner {
     proc_busy: std::sync::atomic::AtomicBool,
     /// A mirror test is running.
     mirror_busy: std::sync::atomic::AtomicBool,
+    /// One check of the other kinds at a time, and when the last ran (unix s).
+    kind_busy: std::sync::atomic::AtomicBool,
+    kind_checked_at: std::sync::atomic::AtomicI64,
     /// Ends the app (the launcher's Quit), for "Restart to Update".
     quit: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
@@ -151,11 +155,6 @@ impl Service {
         let (core_tx, core_rx) = mpsc::unbounded_channel();
         let icons = crate::icons::Icons::new(paths.icons_dir());
         let state = State {
-            downloads: crate::downloads::DownloadsInfo {
-                fastest: settings.downloads.fastest,
-                mirror: settings.downloads.mirror,
-                ..Default::default()
-            },
             settings,
             profiles,
             sysproxy_supported: sysproxy::supported(),
@@ -189,7 +188,12 @@ impl Service {
             proc_names: Mutex::new(crate::procname::Names::default()),
             proc_busy: std::sync::atomic::AtomicBool::new(false),
             mirror_busy: std::sync::atomic::AtomicBool::new(false),
+            kind_busy: std::sync::atomic::AtomicBool::new(false),
+            kind_checked_at: std::sync::atomic::AtomicI64::new(0),
         }));
+        // The person's own apps, for recognising connections.
+        let apps = svc.settings().apps;
+        svc.0.activity.send_modify(|a| Arc::make_mut(a).set_apps(apps));
         let actor = svc.clone();
         rt.spawn(async move { actor.core_actor(core_rx).await });
         let boot = svc.clone();
@@ -733,8 +737,9 @@ impl Service {
             svc.refresh_proxies_now().await;
             svc.keep_fastest().await;
             svc.ai_sync().await;
-            svc.downloads_sync(false).await;
+            svc.kinds_sync(false).await;
             svc.run_ai_check(false).await;
+            svc.run_kind_checks(false).await;
         });
         if self.settings().system_proxy && self.0.state.borrow().sysproxy_supported {
             self.apply_sysproxy(true);
@@ -956,9 +961,13 @@ impl Service {
             .collect();
         let names = {
             let st = self.0.state.borrow();
+            let g = |k: crate::kinds::Kind| st.kinds.groups.get(&k).cloned().unwrap_or_default();
             crate::activity::ExitNames {
                 ai: st.ai.group.clone(),
-                downloads: st.downloads.group.clone(),
+                downloads: g(crate::kinds::Kind::Downloads),
+                streaming: g(crate::kinds::Kind::Streaming),
+                games: g(crate::kinds::Kind::Games),
+                dev_tools: g(crate::kinds::Kind::DevTools),
             }
         };
         let mut deltas = Vec::new();
@@ -1104,8 +1113,9 @@ impl Service {
             tokio::spawn(async move {
                 svc.keep_fastest().await;
                 svc.ai_sync().await;
-                svc.downloads_sync(false).await;
+                svc.kinds_sync(false).await;
                 svc.run_ai_check(false).await;
+                svc.run_kind_checks(false).await;
             });
         }
         Ok(())
@@ -1148,7 +1158,7 @@ impl Service {
                 // (open connections stay on their route through a reload).
                 // With other devices allowed the core stays in its rule mode
                 // (see `config::guard_loopback`): a mode is other rules too.
-                if before.allow_lan || (before.ai.enabled && (before.mode == Mode::Global || mode == Mode::Global)) {
+                if before.allow_lan || (!before.kinds_off && (before.mode == Mode::Global || mode == Mode::Global)) {
                     svc.write_config(true).await?;
                 } else {
                     svc.controller()
@@ -1180,22 +1190,21 @@ impl Service {
         self.run(async move {
             let mut next = next;
             next.validate()?;
-            // Routes are checked again whoever hands them over.
-            next.routes = crate::routes::sanitize(std::mem::take(&mut next.routes));
+            // App choices are checked again whoever hands them over.
+            next.apps = crate::kinds::sanitize(std::mem::take(&mut next.apps));
             let prev = svc.settings();
             if prev == next {
                 return Ok(());
             }
             // The mirror is only ever turned on after it has passed its test.
-            if next.downloads.mirror
-                && !prev.downloads.mirror
+            if next.kinds.mirror
+                && !prev.kinds.mirror
                 && !svc.0.state.borrow().downloads.mirror_test.passed()
             {
                 return Err(crate::downloads::mirror_refused());
             }
             svc.modify(|s| s.settings = next.clone());
             svc.save_settings();
-            svc.downloads_view_sync();
             if prev.launch_at_login != next.launch_at_login
                 || prev.start_minimized != next.start_minimized
             {
@@ -1212,7 +1221,13 @@ impl Service {
                 || prev.log_level != next.log_level
                 || prev.tun != next.tun
                 || prev.tun_stack != next.tun_stack
-                || prev.routes != next.routes;
+                || prev.apps != next.apps
+                || prev.kinds_off != next.kinds_off
+                || prev.kinds.exit(crate::kinds::Kind::Streaming).map(|e| e.subscription)
+                    != next.kinds.exit(crate::kinds::Kind::Streaming).map(|e| e.subscription)
+                || prev.kinds.games.subscription != next.kinds.games.subscription
+                || prev.kinds.downloads.subscription != next.kinds.downloads.subscription
+                || prev.kinds.dev_tools.subscription != next.kinds.dev_tools.subscription;
             if svc.running() {
                 if restart {
                     svc.restart_core().await?;
@@ -1221,7 +1236,6 @@ impl Service {
                         // Put the old settings back: the running core still has them.
                         svc.modify(|s| s.settings = prev.clone());
                         svc.save_settings();
-                        svc.downloads_view_sync();
                         return Err(e);
                     }
                     if prev.log_level != next.log_level {
@@ -1240,10 +1254,8 @@ impl Service {
             if next.tun || !next.system_proxy {
                 svc.clear_bypass();
             }
-            if prev.downloads.exit != next.downloads.exit
-                || prev.downloads.fastest != next.downloads.fastest
-            {
-                svc.downloads_sync(false).await;
+            if prev.kinds != next.kinds {
+                svc.kinds_sync(false).await;
             }
             Ok(())
         })
@@ -1568,7 +1580,7 @@ impl Service {
                 self.keep_fastest().await;
                 // The fastest place for downloads is measured by the same
                 // tests; when the Location is not automatic nothing ran them.
-                self.downloads_sync(!self.settings().auto_location).await;
+                self.kinds_sync(!self.settings().auto_location).await;
             }
         }
     }
@@ -1883,10 +1895,13 @@ impl Service {
             // The last one gone: no exit pinned to its servers stays behind.
             if svc.0.state.borrow().profiles.profiles.is_empty() {
                 svc.modify(|s| {
-                    s.settings.ai.exit = None;
-                    s.settings.ai.follow = true;
-                    s.settings.downloads.exit = None;
-                    s.settings.downloads.fastest = true;
+                    s.settings.kinds.ai.exit = None;
+                    s.settings.kinds.ai.follow = true;
+                    for k in crate::kinds::Kind::ROUTED {
+                        if let Some(e) = s.settings.kinds.exit_mut(k) {
+                            e.exit = None;
+                        }
+                    }
                 });
                 svc.save_settings();
             }
@@ -1938,7 +1953,7 @@ impl Service {
                 providers: providers.unwrap_or_default(),
                 testing,
             }));
-            self.downloads_node_changed();
+            self.kind_nodes_changed();
         }
     }
 

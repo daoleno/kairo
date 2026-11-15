@@ -242,22 +242,19 @@ engine.ai_ops.not_a_choice:
   en: "%{name} is not one of the AI group's choices"
   zh: "%{name} 不在 AI 策略组的选项中"
 
-# The Downloads exit (service/downloads_ops.rs).
+# The kinds' exits (service/downloads_ops.rs): Streaming, Games, Downloads, Dev tools.
 engine.downloads_ops.exit_gone_fastest:
-  en: "The server %{was} you chose for downloads is no longer in the subscription. Downloads follow the fastest server now."
-  zh: "你为下载选择的节点 %{was} 已不在订阅中。下载现在改走最快的节点。"
+  en: "The server %{was} you chose for %{kind} is no longer in the subscription. %{kind} follows the fastest server now."
+  zh: "你为%{kind}选择的节点 %{was} 已不在订阅中。%{kind}现在改走最快的节点。"
 engine.downloads_ops.exit_gone_location:
-  en: "The server %{was} you chose for downloads is no longer in the subscription. Downloads follow the Location now."
-  zh: "你为下载选择的节点 %{was} 已不在订阅中。下载现在改走所选地区。"
-engine.downloads_ops.no_exit_ai_off:
-  en: "Downloads have no exit of their own while the AI layer is off"
-  zh: "AI 层关闭时，下载没有单独的出口"
-engine.downloads_ops.not_a_choice:
-  en: "%{name} is not one of the Downloads group's choices"
-  zh: "%{name} 不在下载策略组的选项中"
-engine.downloads_ops.switch_off:
-  en: "Downloads are not sent to their own exit while that switch is off"
-  zh: "此开关关闭时，下载不会走单独的出口"
+  en: "The server %{was} you chose for %{kind} is no longer in the subscription. %{kind} follows the Location now."
+  zh: "你为%{kind}选择的节点 %{was} 已不在订阅中。%{kind}现在改走所选地区。"
+engine.downloads_ops.no_exit_of_its_own:
+  en: "%{kind} has no exit of its own to set"
+  zh: "%{kind}没有可设置的单独出口"
+engine.downloads_ops.as_subscription:
+  en: "Downloads go as the subscription routes them: pick an exit for them first"
+  zh: "下载目前按订阅的规则走：请先为下载选择一个出口"
 
 # TUN on Windows (elevated.rs): the one-time permission (UAC) and starting the core as SYSTEM.
 engine.elevated.cannot_pass:
@@ -428,3 +425,14 @@ engine.winapi.error:
 engine.ports.another_program:
   en: "another program"
   zh: "其他程序"
+
+# Apps (service/route_ops.rs, service/kind_check_ops.rs).
+engine.route_ops.browser:
+  en: "%{name} is a browser: choose the sites you use in it instead"
+  zh: "%{name} 是浏览器：请改为选择你在其中访问的网站"
+engine.route_ops.unknown_app:
+  en: "Kairo does not know the app %{id}"
+  zh: "Kairo 不认识应用 %{id}"
+engine.kind_check_ops.no_check:
+  en: "Kairo has no check for this app"
+  zh: "Kairo 没有针对此应用的检测"

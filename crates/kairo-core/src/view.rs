@@ -95,6 +95,29 @@ pub enum AiAlert {
     ExitGone { was: String },
 }
 
+/// What the kinds with an exit of their own know: their groups, where they
+/// go now, where the subscription sends the apps it routes, and the checks.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct KindsView {
+    /// The group of each kind Kairo routes (not AI's: [`AiView::group`]).
+    pub groups: std::collections::BTreeMap<crate::kinds::Kind, String>,
+    /// The node each of those groups goes through now.
+    pub nodes: std::collections::BTreeMap<crate::kinds::Kind, String>,
+    /// Where the subscription's own rules send each catalog app (a group or
+    /// a node), for the apps Kairo leaves to it.
+    pub sub_targets: std::collections::BTreeMap<String, String>,
+    /// The last check of each app, by app id.
+    pub checks: Vec<crate::kind_check::KindCheck>,
+    /// A check is running.
+    pub checking: bool,
+}
+
+impl KindsView {
+    pub fn check(&self, app: &str) -> Option<&crate::kind_check::KindCheck> {
+        self.checks.iter().find(|c| c.app == app)
+    }
+}
+
 /// A core replaced by the one Kairo ships.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CoreReplaced {
@@ -134,9 +157,12 @@ pub struct State {
     /// a provider's note in use); later checks happen without saying so.
     pub locating: bool,
     pub ai: AiView,
-    /// The Downloads exit: where it goes, the mirror and its test.
+    /// Streaming, Games, Downloads and Dev tools: their exits and checks.
+    #[serde(default)]
+    pub kinds: KindsView,
+    /// The Downloads mirror's test.
     pub downloads: crate::downloads::DownloadsInfo,
-    /// Routes (ids) the running config leaves out because their exit is not
+    /// Apps (ids) the running config leaves out because their exit is not
     /// in it (a node the subscription no longer has).
     pub routes_skipped: Vec<String>,
     /// AI tools whose connections go around the proxy (system-proxy mode

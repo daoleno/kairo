@@ -17,9 +17,9 @@ use nsh_core::prelude::*;
 pub enum Page {
     #[default]
     Overview,
-    Exits,
-    Activity,
+    /// Apps by kind: each kind's exit, and every app.
     Apps,
+    Activity,
     Profiles,
     Settings,
     /// Inspect: the subscription's own groups.
@@ -36,11 +36,10 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 11] = [
+    pub const ALL: [Page; 10] = [
         Page::Overview,
-        Page::Exits,
-        Page::Activity,
         Page::Apps,
+        Page::Activity,
         Page::Profiles,
         Page::Settings,
         Page::Proxies,
@@ -51,11 +50,10 @@ impl Page {
     ];
 
     /// The pages of the sidebars, in order (Settings last, apart).
-    pub const SIDEBAR: [Page; 6] = [
+    pub const SIDEBAR: [Page; 5] = [
         Page::Overview,
-        Page::Exits,
-        Page::Activity,
         Page::Apps,
+        Page::Activity,
         Page::Profiles,
         Page::Settings,
     ];
@@ -66,7 +64,7 @@ impl Page {
         let name = name.to_ascii_lowercase();
         let old = match name.as_str() {
             "overview" => Some(Page::Overview),
-            "location" | "locations" => Some(Page::Exits),
+            "location" | "locations" | "exits" => Some(Page::Apps),
             "subscriptions" | "subs" => Some(Page::Profiles),
             "connections" => Some(Page::Activity),
             "apps & sites" => Some(Page::Apps),
@@ -82,7 +80,6 @@ impl Page {
     pub fn id(self) -> &'static str {
         match self {
             Page::Overview => "home",
-            Page::Exits => "exits",
             Page::Activity => "activity",
             Page::Apps => "apps",
             Page::Profiles => "profiles",
@@ -147,7 +144,6 @@ impl Page {
     pub fn title(self) -> String {
         kairo_core::tr!(match self {
             Page::Overview => "page.home",
-            Page::Exits => "page.exits",
             Page::Activity => "page.activity",
             Page::Apps => "page.apps",
             Page::Profiles => "page.profiles",
@@ -183,6 +179,8 @@ pub struct Store {
     pub stats: Signal<Snap<Stats>>,
     /// The AI service the detail page shows (an `ai::SERVICES` id).
     pub ai_service: Signal<&'static str>,
+    /// The app whose sheet is open over Home or Apps (an app id).
+    pub app_sheet: Signal<Option<String>>,
     pub log_seq: Signal<u64>,
     /// Goes up when a picture of an app or a site has been kept (see `ui::logo`).
     pub icons_rev: Signal<u64>,
@@ -221,6 +219,7 @@ impl Store {
             activity: signal(Snap(activity_rx.borrow().clone())),
             stats: signal(Snap(stats_rx.borrow().clone())),
             ai_service: signal("claude"),
+            app_sheet: signal(None),
             log_seq: signal(*log_rx.borrow()),
             icons_rev: signal(*icons_rx.borrow()),
             origin: signal(None),

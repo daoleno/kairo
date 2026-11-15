@@ -98,11 +98,10 @@ pub fn main_view(backend: backend::Backend) -> impl IntoElement {
 }
 
 /// The pages ⌘1… open, in the sidebar's order.
-pub const GO: [Page; 5] = [
+pub const GO: [Page; 4] = [
     Page::Overview,
-    Page::Exits,
-    Page::Activity,
     Page::Apps,
+    Page::Activity,
     Page::Profiles,
 ];
 
@@ -150,7 +149,7 @@ fn location_items(store: Store) -> Vec<MenuItem> {
         );
     }
     items.push(MenuItem::separator());
-    items.push(MenuItem::new(t!("menu.all_locations")).on_select(move || store.page.set(Page::Exits)));
+    items.push(MenuItem::new(t!("menu.all_locations")).on_select(move || store.page.set(Page::Apps)));
     items
 }
 

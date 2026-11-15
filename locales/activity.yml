@@ -54,6 +54,15 @@ activity.exit.rest:
 activity.exit.downloads:
   en: Downloads
   zh: 下载
+activity.exit.streaming:
+  en: Streaming
+  zh: 流媒体
+activity.exit.games:
+  en: Games
+  zh: 游戏
+activity.exit.dev_tools:
+  en: Dev tools
+  zh: 开发工具
 activity.exit.direct:
   en: Direct
   zh: 直连
@@ -117,15 +126,12 @@ activity.app_menu:
 activity.route.direct:
   en: Always Direct
   zh: 始终直连
-activity.route.ai:
-  en: Always AI Exit
-  zh: 始终走 AI 出口
 activity.route.block:
   en: Block
   zh: 拦截
 activity.route.saved:
-  en: Saved in Apps & Sites
-  zh: 已保存到应用与网站
+  en: Saved in Apps
+  zh: 已保存到应用
 activity.show_connections:
   en: Show Connections
   zh: 显示连接

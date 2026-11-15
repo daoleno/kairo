@@ -196,23 +196,24 @@ pub fn build_full(
     // everything, as it always did. "All Traffic" is then rules with the
     // Location as the rest (see `core_mode`).
     let all_traffic = settings.mode == crate::settings::Mode::Global;
-    let applied = crate::ai::apply_with(
+    let applied = crate::ai::apply(
         &mut config,
-        &settings.ai,
-        &settings.routes,
+        &settings.kinds,
+        &settings.apps,
+        settings.kinds_off,
         &settings.tray_group,
         all_traffic,
     );
     let skipped_routes = match &applied {
         Some(a) => a.skipped_routes.clone(),
-        // The layer is off: the routes still apply.
-        None => crate::ai::apply_routes(&mut config, &settings.routes, &settings.tray_group),
+        // The kinds are off: the apps' own exits still apply.
+        None => crate::ai::apply_own(&mut config, &settings.apps, &settings.tray_group),
     };
     merge(&mut config, patch);
     apply_settings(&mut config, settings);
     // No group of locations to send the rest through (a bare list of nodes):
     // the core's own global mode is the only "All Traffic" there is.
-    if all_traffic && settings.ai.enabled && applied.as_ref().is_none_or(|a| a.main.is_none()) {
+    if all_traffic && !settings.kinds_off && applied.as_ref().is_none_or(|a| a.main.is_none()) {
         set(&mut config, "mode", "global");
     }
     if settings.allow_lan {
@@ -231,7 +232,7 @@ pub fn build_full(
 /// through the Location.
 pub fn core_mode(settings: &Settings) -> &'static str {
     use crate::settings::Mode;
-    if settings.ai.enabled && settings.mode == Mode::Global {
+    if !settings.kinds_off && settings.mode == Mode::Global {
         Mode::Rule.as_str()
     } else {
         settings.mode.as_str()
@@ -659,7 +660,7 @@ pub fn apply_settings(config: &mut Mapping, s: &Settings) {
     set(config, "mixed-port", s.mixed_port);
     // The Activity view names the tool behind each connection, which the core
     // looks up only when asked to. A profile that names its own mode wins.
-    if s.ai.enabled && !config.contains_key("find-process-mode") {
+    if !s.kinds_off && !config.contains_key("find-process-mode") {
         set(config, "find-process-mode", "always");
     }
     set(config, "allow-lan", s.allow_lan);
@@ -1041,7 +1042,7 @@ rules:
             .collect();
         assert_eq!(tail, own);
         // With the layer off the config is the profile's own.
-        s.ai.enabled = false;
+        s.kinds_off = true;
         let out = build(PROFILE, "", &s).unwrap();
         assert_eq!(
             get(&parse_mapping(&out).unwrap(), "rules")
@@ -1064,7 +1065,7 @@ append-proxies:
   - {name: b, type: direct}
 "#;
         let mut plain = Settings::default();
-        plain.ai.enabled = false;
+        plain.kinds_off = true;
         let out = build(PROFILE, over, &plain).unwrap();
         let m = parse_mapping(&out).unwrap();
         let dns = get(&m, "dns").as_mapping().unwrap();

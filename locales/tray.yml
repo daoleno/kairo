@@ -36,6 +36,9 @@ tray.exit.rest:
 tray.exit.ai:
   en: AI exit
   zh: AI 出口
+tray.exit.subscription:
+  en: "Subscription's choice"
+  zh: 由订阅决定
 tray.exit.line:
   en: "%{exit}: %{place}"
   zh: "%{exit}：%{place}"

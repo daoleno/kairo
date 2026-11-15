@@ -46,29 +46,37 @@ test("the link in, connected out: the fastest location picked by itself", async 
   await app.type("text:https://… (your provider's subscription link)", SUB);
   await app.press("text:Connect");
   await app.waitFor("text:Connected", slow);
-  // Home: three exits, each with a place and how it is doing; the plan from the provider's header.
-  await app.waitUntil(() => has(app.texts(), (t) => /^Fastest · \S/.test(t)), slow);
-  expect(app.texts()).toContain("AI");
-  expect(app.texts()).toContain("Everything else");
-  expect(app.texts()).toContain("Downloads");
-  expect(has(app.texts(), (t) => t.startsWith("Demo Cloud · ") && t.includes("of 200 GB"))).toBe(true);
-  expect(app.shows("text:Apps & Sites")).toBe(true);
+  // Home: the plan from the provider's header; no exits of their own (each kind's is on its card),
+  // and nothing used yet, so no app cards.
+  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Demo Cloud · ") && t.includes("of 200 GB")), slow);
+  expect(app.shows("text:Exits")).toBe(false);
+  expect(app.shows("text:Apps you use")).toBe(false);
   // The tests are not on Home any more: no speed graph, no milliseconds.
   expect(has(app.texts(), (t) => /^\d+ ms$/.test(t))).toBe(false);
+  // Apps: a card for each kind; Everything else found the fastest by itself.
+  await app.press("Apps");
+  await app.waitFor("text:All apps", slow);
+  for (const k of ["AI", "Streaming", "Games", "Downloads", "Dev tools", "Everything else"]) {
+    expect(app.texts()).toContain(k);
+  }
+  await app.waitUntil(() => has(app.texts(), (t) => /^Fastest · \S/.test(t)), slow);
+  // New kinds start where the subscription sends them: day one is as before.
+  expect(has(app.texts(), (t) => t.startsWith("As the subscription routes it"))).toBe(true);
 });
 
-test("exits: a place of one's own for everything else, then Fastest again", async () => {
+test("apps: a place of one's own for everything else, then Fastest again", async () => {
   const app = await open("..", desktop);
   await app.waitFor("text:Connected", slow);
-  await app.press("Exits");
-  await app.waitFor("text:Where traffic leaves", slow);
+  await app.press("Apps");
+  await app.waitFor("text:All apps", slow);
   // The tiles keep to a word; the servers' delays are in the picker, under each country.
   await app.press("text:Everything else >> nth=0");
+  await app.waitFor("text:Where each kind of app leaves", slow);
   await app.waitUntil(() => has(app.texts(), (t) => /^\d+ ms$/.test(t)), slow);
   await app.press("text:All servers");
   await app.waitFor("text:Tokyo 02", slow);
   await app.press("text:Tokyo 02");
-  await app.waitUntil(() => has(app.texts(), (t) => t === "Chosen · Tokyo 02"), slow);
+  await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Chosen · Tokyo 02")), slow);
   await app.press("text:Fastest");
   await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("Fastest · ")), slow);
   // Quality is under the servers; with nothing recorded yet it says so.
@@ -106,30 +114,38 @@ test("connect: off and on again, and two quick presses end where the last one po
   expect(app.shows("text:Not Connected")).toBe(false);
 });
 
-test("apps & sites: an app and a site of one's own, each removed by its own button", async () => {
+test("apps: an app and a site of one's own, each removed from its sheet", async () => {
   const app = await open("..", desktop);
-  await app.press("Apps & Sites");
-  await app.waitFor("text:Nothing set apart", slow);
-  await app.press("Add Site");
-  await app.waitFor("text:Add a site", slow);
-  await app.type("text:example.com", "kairo-sites.test");
-  await app.press("Add");
-  await app.waitFor("text:kairo-sites.test", slow);
-  expect(has(app.texts(), (t) => /^1 choices?$/.test(t))).toBe(true);
-  expect(app.shows("text:Nothing set apart")).toBe(false);
+  await app.press("Apps");
+  await app.waitFor("text:All apps", slow);
+  await app.press("text:All apps");
+  await app.waitFor("text:No apps used this week", slow);
   await app.press("Add App");
   await app.waitFor("text:Add an app", slow);
-  await app.waitFor("text:Telegram", slow);
-  await app.type("text:Telegram", "kairo-app");
+  await app.press("text:A site");
+  await app.type("text:yt-dlp or example.com", "kairo-sites.test");
+  await app.press("Add");
+  await app.waitFor("text:kairo-sites.test", slow);
+  expect(has(app.texts(), (t) => /^1 apps?$/.test(t))).toBe(true);
+  expect(app.shows("text:No apps used this week")).toBe(false);
+  await app.press("Add App");
+  await app.waitFor("text:Add an app", slow);
+  await app.type("text:yt-dlp or example.com", "kairo-app");
   await app.press("Add");
   await app.waitFor("text:kairo-app", slow);
-  expect(has(app.texts(), (t) => /^2 choices$/.test(t))).toBe(true);
-  // Each row has its own way out.
-  await app.press("Remove kairo-sites.test");
+  expect(has(app.texts(), (t) => /^2 apps$/.test(t))).toBe(true);
+  // An app's sheet: its exit, its kind, and for an app of one's own, the way out.
+  await app.press("kairo-sites.test");
+  await app.waitFor("text:Sites under kairo-sites.test", slow);
+  expect(app.shows("text:Exit")).toBe(true);
+  expect(app.shows("text:Kind")).toBe(true);
+  await app.press("Remove App");
   await app.waitUntil(() => !app.shows("text:kairo-sites.test"), slow);
   expect(app.shows("text:kairo-app")).toBe(true);
-  await app.press("Remove kairo-app");
-  await app.waitFor("text:Nothing set apart", slow);
+  await app.press("kairo-app");
+  await app.waitFor("text:The program kairo-app", slow);
+  await app.press("Remove App");
+  await app.waitFor("text:No apps used this week", slow);
   expect(app.shows("text:kairo-app")).toBe(false);
 });
 
@@ -203,16 +219,16 @@ test("DNS: a lookup through the core's resolver", async () => {
   await app.waitUntil(() => has(app.texts(), (t) => t.startsWith("localhost  A")), slow);
 });
 
-test("AI: its exit beside the others, the flow on Activity, the switches in Settings, no promises", async () => {
+test("AI: its exit beside the other kinds, the flow on Activity, the switch in Settings, no promises", async () => {
   const app = await open("..", desktop);
   const noPromises = () => {
     for (const t of app.texts()) {
       expect(/never (be )?(flagged|banned)|unlock|clean IP|safe/i.test(t)).toBe(false);
     }
   };
-  await app.press("Exits");
-  await app.waitFor("text:Where traffic leaves", slow);
-  // AI is an exit of its own: where it goes, and whether it stays when the Location changes.
+  await app.press("Apps");
+  await app.waitFor("text:All apps", slow);
+  // AI is a kind with an exit of its own: where it goes, and whether it stays when the Location changes.
   await app.waitUntil(() => has(app.texts(), (t) => /· (follows Everything else|pinned )/.test(t)), slow);
   expect(app.texts()).toContain("AI");
   noPromises();
@@ -233,8 +249,10 @@ test("AI: its exit beside the others, the flow on Activity, the switches in Sett
   await app.waitFor("text:Collecting data", slow);
   noPromises();
   await app.press("Settings");
-  await app.waitFor("text:AI tools use one exit", slow);
-  expect(app.shows("text:Domestic AI goes direct")).toBe(true);
+  await app.waitFor("text:Appearance", slow);
+  // The AI switches are gone: domestic AI is a few apps going Direct, and off is Advanced's.
+  expect(app.shows("text:AI tools use one exit")).toBe(false);
+  expect(app.shows("text:Domestic AI goes direct")).toBe(false);
   noPromises();
   // What almost nobody changes is behind Advanced; what was cut is gone.
   expect(app.shows("text:Port (HTTP + SOCKS)")).toBe(false);
@@ -242,10 +260,11 @@ test("AI: its exit beside the others, the flow on Activity, the switches in Sett
   expect(app.shows("text:Log level")).toBe(false);
   await app.press("text:Advanced");
   await app.waitFor("text:Port (HTTP + SOCKS)", slow);
+  expect(app.shows("text:Use the subscription's rules only")).toBe(true);
   expect(app.shows("text:The subscription's groups")).toBe(true);
   expect(app.shows("text:Diagnostics")).toBe(true);
   await app.press("text:General");
-  await app.waitFor("text:AI tools use one exit", slow);
+  await app.waitFor("text:Appearance", slow);
 });
 
 test("settings: an edit waits for Apply, Revert puts it back", async () => {

@@ -26,6 +26,10 @@ pub struct Bypass {
     /// The AI service it belongs to (the id in [`ai::SERVICES`]).
     #[serde(with = "crate::wire::opt_name")]
     pub service: Option<crate::wire::Static>,
+    /// The game it is, when it is one (a catalog id, or `game:<folder>`):
+    /// games go around a system proxy too, and their own check says so.
+    #[serde(default)]
+    pub game: Option<String>,
     pub pid: u32,
     /// Where it is connected: `ip:port`, or `[ip]:port` for IPv6.
     pub remote: String,
@@ -207,6 +211,20 @@ pub fn tool_of(name: &str, path: &str, home: Option<&str>) -> Option<&'static Ai
     ai::tool_service(name).or_else(|| ai::tool_service(rel))
 }
 
+/// The game a program is: a game platform's client the catalog knows, or a
+/// game in a Steam library.
+pub fn game_of(name: &str, path: &str) -> Option<String> {
+    use crate::kinds::{Kind, catalog, steam_game};
+    if let Some(c) = catalog()
+        .iter()
+        .filter(|c| c.kind == Kind::Games)
+        .find(|c| c.programs.iter().any(|p| p.eq_ignore_ascii_case(name)))
+    {
+        return Some(c.id.to_owned());
+    }
+    steam_game(path).map(|g| format!("game:{}", g.to_ascii_lowercase()))
+}
+
 /// What the person can paste in a terminal so command-line tools use the
 /// proxy: one line, upper and lower case (tools read either).
 pub fn terminal_env(mixed_port: u16) -> String {
@@ -247,15 +265,19 @@ pub fn detect(
     home: Option<&str>,
     now: i64,
 ) -> Vec<Bypass> {
-    let tools: HashMap<u32, (&Proc, &'static AiService)> = procs
+    let tools: HashMap<u32, (&Proc, Option<&'static AiService>, Option<String>)> = procs
         .iter()
         .filter(|p| !exclude.contains(&p.pid))
-        .filter_map(|p| Some((p.pid, (p, tool_of(&p.name, &p.path, home)?))))
+        .filter_map(|p| {
+            let service = tool_of(&p.name, &p.path, home);
+            let game = if service.is_none() { game_of(&p.name, &p.path) } else { None };
+            (service.is_some() || game.is_some()).then_some((p.pid, (p, service, game)))
+        })
         .collect();
     let mut seen: Vec<(String, IpAddr)> = Vec::new();
     let mut out = Vec::new();
     for c in conns {
-        let Some((p, service)) = tools.get(&c.pid) else {
+        let Some((p, service, game)) = tools.get(&c.pid) else {
             continue;
         };
         if is_local(c.remote) || c.port == mixed_port {
@@ -268,7 +290,8 @@ pub fn detect(
         seen.push(key);
         out.push(Bypass {
             tool: p.name.clone(),
-            service: Some(service.id),
+            service: service.map(|s| s.id),
+            game: game.clone(),
             pid: c.pid,
             remote: match c.remote {
                 IpAddr::V4(v4) => format!("{v4}:{}", c.port),
@@ -451,7 +474,7 @@ pub fn scan(mixed_port: u16, exclude: &[u32], now: i64) -> Vec<Bypass> {
     let candidates: Vec<Proc> = procs
         .into_iter()
         .filter(|p| !exclude.contains(&p.pid))
-        .filter(|p| tool_of(&p.name, &p.path, home.as_deref()).is_some())
+        .filter(|p| tool_of(&p.name, &p.path, home.as_deref()).is_some() || game_of(&p.name, &p.path).is_some())
         .collect();
     if candidates.is_empty() {
         return Vec::new();
@@ -722,10 +745,24 @@ n192.168.1.20:52401->1.1.1.1:443
     }
 
     #[test]
+    fn a_game_that_goes_around_the_proxy_is_found() {
+        let procs = vec![
+            Proc { pid: 7, name: "cs2".into(), path: "/home/me/.steam/steam/steamapps/common/Counter-Strike Global Offensive/game/bin/cs2".into() },
+            Proc { pid: 8, name: "steam".into(), path: "/usr/lib/steam/steam".into() },
+            Proc { pid: 9, name: "curl".into(), path: "/usr/bin/curl".into() },
+        ];
+        let conn = |pid: u32, ip: &str| Conn { pid, name: String::new(), remote: ip.parse().unwrap(), port: 27015 };
+        let found = detect(&[conn(7, "203.0.113.5"), conn(8, "203.0.113.6"), conn(9, "203.0.113.7")], &procs, 7897, &[], Some("/home/me"), 1);
+        let games: Vec<_> = found.iter().map(|b| (b.tool.as_str(), b.game.as_deref(), b.service)).collect();
+        assert_eq!(games, [("cs2", Some("game:counter-strike global offensive"), None), ("steam", Some("steam"), None)]);
+    }
+
+    #[test]
     fn a_bypass_keeps_the_time_it_was_first_seen() {
         let b = |tool: &str, remote: &str, since: i64| Bypass {
             tool: tool.into(),
             service: Some("claude"),
+            game: None,
             pid: 1,
             remote: remote.into(),
             since,

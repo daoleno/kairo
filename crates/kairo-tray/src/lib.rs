@@ -1,6 +1,7 @@
 //! Kairo's tray / menu bar item: whether it is connected, how the AI services
-//! stand, the two exits you switch most (Everything else, AI) with a country
-//! each, the mode, and the window, Settings and Quit.
+//! stand, a submenu for each kind of app in use (AI, Streaming, Games,
+//! Downloads, Dev tools, Everything else) with a country each, the mode, and
+//! the window, Settings and Quit.
 //!
 //! - Linux: a StatusNotifierItem (KDE Plasma, GNOME with the AppIndicator
 //!   extension, most panels) through `ksni`.
@@ -23,7 +24,7 @@ mod windows;
 pub struct Hooks {
     /// Shows and focuses the main window.
     pub show: Arc<dyn Fn() + Send + Sync>,
-    /// Shows the window on a page (`"exits"`, `"settings"`).
+    /// Shows the window on a page (`"apps"`, `"settings"`).
     pub page: Arc<dyn Fn(&'static str) + Send + Sync>,
     /// Quits the app (after restoring the system proxy).
     pub quit: Arc<dyn Fn() + Send + Sync>,
@@ -41,11 +42,27 @@ pub struct Choice {
     pub checked: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExitId {
-    /// Everything else (the Location).
-    Rest,
-    Ai,
+/// Whose exit a submenu chooses: a kind of app (Everything else is the
+/// Location).
+pub type ExitId = kairo_core::kinds::Kind;
+
+/// The platform menus' ids for an exit's items: `EXIT_IDS` + 100 × the
+/// kind's place in [`Kind::ALL`](kairo_core::kinds::Kind::ALL) + the
+/// country's place, 99 for Fastest.
+pub const EXIT_IDS: usize = 1000;
+
+/// The id of a country (`Some(i)`) or of Fastest (`None`) in `kind`'s submenu.
+pub fn exit_item(kind: ExitId, choice: Option<usize>) -> usize {
+    let k = ExitId::ALL.iter().position(|x| *x == kind).unwrap_or(0);
+    EXIT_IDS + 100 * k + choice.unwrap_or(99).min(99)
+}
+
+/// What an id of [`exit_item`] stands for.
+pub fn exit_of_item(id: usize) -> Option<(ExitId, Option<usize>)> {
+    let rel = id.checked_sub(EXIT_IDS)?;
+    let kind = *ExitId::ALL.get(rel / 100)?;
+    let slot = rel % 100;
+    Some((kind, (slot != 99).then_some(slot)))
 }
 
 /// One exit's submenu.
@@ -123,7 +140,7 @@ pub fn health_label(health: &str) -> String {
 pub fn ai_line(state: &kairo_core::State) -> String {
     use kairo_core::ai_check::{self, Api};
     let checks = &state.ai.checks;
-    if !state.settings.ai.enabled || checks.is_empty() {
+    if state.settings.kinds_off || checks.is_empty() {
         return String::new();
     }
     let odd = ai_check::odd_ones(checks);
@@ -224,7 +241,7 @@ impl Model {
         let mut exits = Vec::new();
         if main.is_some() {
             exits.push(ExitMenu {
-                id: ExitId::Rest,
+                id: ExitId::Other,
                 title: kairo_core::tr!("tray.exit.rest"),
                 place: rest_place
                     .as_ref()
@@ -237,7 +254,7 @@ impl Model {
                     rest_place.as_ref()
                 }),
             });
-            if s.ai.enabled && !state.ai.group.is_empty() {
+            if !s.kinds_off && !state.ai.group.is_empty() {
                 exits.push(ExitMenu {
                     id: ExitId::Ai,
                     title: kairo_core::tr!("tray.exit.ai"),
@@ -248,6 +265,48 @@ impl Model {
                     fastest: None,
                     choices: countries(ai_place.as_ref()),
                 });
+            }
+            // The other kinds, those with an app in use.
+            if !s.kinds_off {
+                let used: std::collections::BTreeSet<ExitId> = svc
+                    .apps_in_use()
+                    .iter()
+                    .filter_map(|id| {
+                        s.apps
+                            .iter()
+                            .find(|a| a.id == *id)
+                            .map(|a| a.kind)
+                            .or_else(|| kairo_core::kinds::catalog_app(id).map(|a| a.kind))
+                            .or_else(|| id.starts_with("game:").then_some(ExitId::Games))
+                    })
+                    .collect();
+                for kind in ExitId::ROUTED.into_iter().filter(|k| used.contains(k)) {
+                    let Some(exit) = s.kinds.exit(kind) else { continue };
+                    let place = if exit.subscription {
+                        None
+                    } else {
+                        svc.kind_node(kind).and_then(|n| {
+                            proxies
+                                .groups
+                                .iter()
+                                .flat_map(|g| g.members.iter())
+                                .find(|m| m.name == n && !m.is_group)
+                                .map(places::place)
+                        })
+                    };
+                    let fastest = !exit.subscription && exit.exit.is_none() && exit.fastest;
+                    exits.push(ExitMenu {
+                        id: kind,
+                        title: kind.title(),
+                        place: if exit.subscription {
+                            kairo_core::tr!("tray.exit.subscription")
+                        } else {
+                            place.as_ref().map(label_of).unwrap_or_else(|| "—".into())
+                        },
+                        fastest: Some(fastest),
+                        choices: countries(if fastest { None } else { place.as_ref() }),
+                    });
+                }
             }
         }
         let status = match &state.core {
@@ -314,6 +373,45 @@ pub(crate) mod act {
     /// The AI exit: a server.
     pub fn ai_exit(svc: &Service, name: String) {
         svc.fire(svc.set_ai_exit(name));
+    }
+    /// A kind's exit: a server.
+    pub fn pick(svc: &Service, kind: ExitId, name: String) {
+        match kind {
+            ExitId::Other => locate(svc, name),
+            ExitId::Ai => ai_exit(svc, name),
+            k => svc.fire(svc.set_kind_exit(k, name)),
+        }
+    }
+    /// A kind's exit back on the fastest server.
+    pub fn fastest(svc: &Service, kind: ExitId) {
+        match kind {
+            ExitId::Other => locate(svc, String::new()),
+            ExitId::Ai => {}
+            k => svc.fire(svc.kind_follow_fastest(k)),
+        }
+    }
+    /// An item of an exit's submenu (see [`exit_item`]): Windows and macOS
+    /// number their items; Linux's menu calls back each item's own action.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    pub fn exit_item(svc: &Service, model: &Model, id: usize) -> bool {
+        let Some((kind, slot)) = exit_of_item(id) else {
+            return false;
+        };
+        match slot {
+            None => fastest(svc, kind),
+            Some(i) => {
+                let name = model
+                    .exits
+                    .iter()
+                    .find(|e| e.id == kind)
+                    .and_then(|e| e.choices.get(i))
+                    .map(|c| c.name.clone());
+                if let Some(name) = name {
+                    pick(svc, kind, name);
+                }
+            }
+        }
+        true
     }
     pub fn test_again(svc: &Service) {
         svc.fire(svc.test_places());

@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
 use crate::places;
-use crate::routes::{self, Route};
 
 pub use crate::downloads::KAIRO_DOWNLOADS_GROUP;
 
@@ -238,7 +237,8 @@ pub struct AiExit {
     pub since: i64,
 }
 
-/// The settings of the AI layer.
+/// The AI layer's settings in a schema 1 settings file: read once, by
+/// [`crate::settings::migrate_v1`], and never written.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AiSettings {
@@ -276,8 +276,10 @@ pub struct Applied {
     pub adopted: bool,
     /// The group of locations (where "All Traffic" goes).
     pub main: Option<String>,
-    /// The hidden group downloads go to.
+    /// The group downloads go to (`None`: as the subscription routes them).
     pub downloads: Option<String>,
+    /// The group of every kind Kairo routes (AI's too).
+    pub kind_groups: std::collections::BTreeMap<crate::kinds::Kind, String>,
     /// Routes left out because their exit is not in the config (ids).
     pub skipped_routes: Vec<String>,
 }
@@ -399,12 +401,6 @@ fn proxy_names(config: &Mapping) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn suffix_rules(out: &mut Vec<Value>, suffixes: &[&str], target: &str) {
-    for s in suffixes {
-        out.push(Value::from(format!("DOMAIN-SUFFIX,{s},{target}")));
-    }
-}
-
 /// A hidden selector of Kairo's own: the Location first (until something else
 /// is chosen it follows it), then every node, so any can be picked. Left as
 /// it is when the config already has a group of that name.
@@ -446,36 +442,45 @@ pub fn has_node(config: &Mapping, name: &str) -> bool {
         .is_some_and(|s| s.iter().filter_map(name_of).any(|n| n == name))
 }
 
-/// Adds Kairo's AI rules (and, when the subscription has no AI group, one) to
-/// the profile's config. `all_traffic` is the "All Traffic" route: not
-/// mihomo's global mode (which ignores rules, and so would let AI traffic
-/// follow the Location) but every site through the Location, with AI still on
-/// its own exit. Returns what it did; `None` when there is nothing to route
-/// through (no nodes) or the layer is off.
-pub fn apply(
-    config: &mut Mapping,
-    ai: &AiSettings,
-    preferred_main: &str,
-    all_traffic: bool,
-) -> Option<Applied> {
-    apply_with(config, ai, &[], preferred_main, all_traffic)
+/// The groups of the config, as `(name, is a selector)`.
+fn group_list(config: &Mapping) -> Vec<(String, bool)> {
+    groups(config)
+        .into_iter()
+        .filter(|g| !hidden(g))
+        .filter_map(|g| Some((g.get("name")?.as_str()?.to_owned(), is_select(g))))
+        .collect()
 }
 
-/// [`apply`], with the person's routes: their rules go in after the local
-/// block (what stays on this machine is never sent elsewhere), before the
-/// rest of the layer's rules and the profile's own. When the layer does
-/// nothing (`None`), the routes still apply: see [`apply_routes`].
-pub fn apply_with(
+/// Adds Kairo's rules for apps by kind to the profile's config: what stays
+/// on this machine first, then every app on its kind's exit or its own (see
+/// [`crate::kinds::rules`]), each kind on a group: the AI group (the
+/// subscription's own, or `Kairo AI`), `Kairo Downloads`, and for Streaming,
+/// Games and Dev tools the subscription's group for that kind or one of
+/// Kairo's, once the person points the kind somewhere. A kind that goes as
+/// the subscription routes it gets no rule and no group.
+///
+/// `all_traffic` is the "All Traffic" route: not mihomo's global mode (which
+/// ignores rules, and so would let AI traffic follow the Location) but every
+/// site through the Location, with the kinds still on their exits.
+///
+/// With `kinds_off` only the apps the person gave an exit of their own are
+/// routed (another kind's exit is the Location then), as the routes were
+/// with the AI layer off. `None`: there is nothing to route through (no
+/// nodes), or the kinds are off.
+pub fn apply(
     config: &mut Mapping,
-    ai: &AiSettings,
-    user_routes: &[Route],
+    kinds: &crate::kinds::Kinds,
+    apps: &[crate::kinds::AppChoice],
+    kinds_off: bool,
     preferred_main: &str,
     all_traffic: bool,
 ) -> Option<Applied> {
-    if !ai.enabled || proxy_names(config).is_empty() && get(config, "proxy-providers").is_none() {
+    use crate::kinds::{Kind, Targets};
+    if kinds_off || proxy_names(config).is_empty() && get(config, "proxy-providers").is_none() {
         return None;
     }
     let main = main_group_name(config, preferred_main);
+    let listed = group_list(config);
     let (group, adopted) = match adopted_group(config, main.as_deref()) {
         Some(g) => (g, true),
         None => {
@@ -483,8 +488,25 @@ pub fn apply_with(
             (KAIRO_AI_GROUP.to_owned(), false)
         }
     };
-    add_group(config, KAIRO_DOWNLOADS_GROUP, main.as_deref());
-    let downloads = KAIRO_DOWNLOADS_GROUP.to_owned();
+    let mut targets = Targets {
+        kinds: Default::default(),
+        everything: main.clone(),
+    };
+    targets.kinds.insert(Kind::Ai, group.clone());
+    for kind in Kind::ROUTED {
+        let exit = kinds.exit(kind).expect("a routed kind");
+        if exit.subscription {
+            continue;
+        }
+        let g = match (kind, crate::kinds::adoptable_group(&listed, kind, main.as_deref())) {
+            (Kind::Downloads, _) | (_, None) => {
+                add_group(config, kind.group(), main.as_deref());
+                kind.group().to_owned()
+            }
+            (_, Some(adopted)) => adopted,
+        };
+        targets.kinds.insert(kind, g);
+    }
 
     let mut rules: Vec<Value> = vec![];
     // Local models and the LAN stay on this machine.
@@ -493,28 +515,8 @@ pub fn apply_with(
     }
     rules.push(Value::from("DOMAIN-SUFFIX,local,DIRECT"));
     rules.push(Value::from("DOMAIN,localhost,DIRECT"));
-    // The person's own choices for apps and sites.
-    let generated = routes::rules(
-        user_routes,
-        &routes::Targets {
-            ai: Some(&group),
-            everything: main.as_deref(),
-            downloads: Some(&downloads),
-        },
-        &|n| has_node(config, n),
-    );
+    let generated = crate::kinds::rules(apps, &targets, all_traffic, false, &|n| has_node(config, n));
     rules.extend(generated.rules.into_iter().map(Value::from));
-    if ai.domestic_direct && !all_traffic {
-        for (_, sfx) in DOMESTIC {
-            suffix_rules(&mut rules, sfx, "DIRECT");
-        }
-    }
-    if ai.downloads {
-        suffix_rules(&mut rules, DOWNLOADS, &downloads);
-    }
-    for s in SERVICES {
-        suffix_rules(&mut rules, s.suffixes, &group);
-    }
 
     if all_traffic {
         // Everything else through the Location; the subscription's own
@@ -532,33 +534,29 @@ pub fn apply_with(
         group,
         adopted,
         main,
-        downloads: Some(downloads),
+        downloads: targets.kinds.get(&Kind::Downloads).cloned(),
+        kind_groups: targets.kinds,
         skipped_routes: generated.skipped,
     })
 }
 
-/// The routes for a config the AI layer did not touch (it is off, or there
-/// is nothing to route through): put in front of the profile's rules. `Ai`
-/// and `Downloads` go where the Location does. The ids of the routes left
-/// out.
-pub fn apply_routes(
+/// The apps' own exits for a config the kinds do not route (they are off,
+/// or there is nothing to route through): put in front of the profile's
+/// rules; another kind's exit is the Location. The ids of the apps left out.
+pub fn apply_own(
     config: &mut Mapping,
-    user_routes: &[Route],
+    apps: &[crate::kinds::AppChoice],
     preferred_main: &str,
 ) -> Vec<String> {
-    if user_routes.is_empty() {
+    if apps.is_empty() {
         return vec![];
     }
     let main = main_group_name(config, preferred_main);
-    let generated = routes::rules(
-        user_routes,
-        &routes::Targets {
-            ai: None,
-            everything: main.as_deref(),
-            downloads: None,
-        },
-        &|n| has_node(config, n),
-    );
+    let targets = crate::kinds::Targets {
+        kinds: Default::default(),
+        everything: main,
+    };
+    let generated = crate::kinds::rules(apps, &targets, false, true, &|n| has_node(config, n));
     if !generated.rules.is_empty() {
         prepend(
             config,
@@ -684,6 +682,8 @@ pub fn want(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kinds::{AppChoice, AppExit, Kind, Kind as K, KindExit, Kinds};
+    use crate::routes::RouteKind;
 
     fn cfg(text: &str) -> Mapping {
         crate::config::parse_mapping(text).unwrap()
@@ -752,7 +752,7 @@ rules:
     #[test]
     fn makes_its_own_group_when_the_subscription_has_none() {
         let mut c = cfg(PLAIN);
-        let done = apply(&mut c, &AiSettings::default(), "", false).unwrap();
+        let done = apply(&mut c, &Kinds::default(), &[], false, "", false).unwrap();
         assert_eq!(done.group, KAIRO_AI_GROUP);
         assert!(!done.adopted);
         assert_eq!(done.main.as_deref(), Some("Proxies"));
@@ -772,7 +772,7 @@ rules:
     fn adopts_the_subscriptions_ai_group_and_leaves_its_members() {
         let mut c = cfg(WITH_AI);
         let before = groups(&c).len();
-        let done = apply(&mut c, &AiSettings::default(), "", false).unwrap();
+        let done = apply(&mut c, &Kinds::default(), &[], false, "", false).unwrap();
         assert_eq!(done.group, "AI");
         assert!(done.adopted);
         // Only the Downloads group is added; the subscription's AI group is its own.
@@ -788,59 +788,94 @@ rules:
         // openai.com pointing at the Location group is no AI group of its own.
         let text = WITH_AI.replace("openai.com,AI", "openai.com,Proxies");
         let mut c = cfg(&text);
-        let done = apply(&mut c, &AiSettings::default(), "", false).unwrap();
+        let done = apply(&mut c, &Kinds::default(), &[], false, "", false).unwrap();
         assert_eq!(done.group, KAIRO_AI_GROUP);
     }
 
     #[test]
     fn rules_come_first_in_this_order() {
         let mut c = cfg(PLAIN);
-        apply(&mut c, &AiSettings::default(), "", false).unwrap();
+        apply(&mut c, &Kinds::default(), &[], false, "", false).unwrap();
         let r = rules(&c);
         let pos = |needle: &str| r.iter().position(|x| x == needle).unwrap();
         assert_eq!(pos("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve"), 0);
         assert!(pos("DOMAIN-SUFFIX,deepseek.com,DIRECT") > pos("DOMAIN,localhost,DIRECT"));
+        // An app's own exit (domestic AI goes direct) comes before the kinds.
+        assert!(pos("DOMAIN-SUFFIX,claude.ai,Kairo AI") > pos("DOMAIN-SUFFIX,deepseek.com,DIRECT"));
+        // Between equally long sites the catalog's order holds: AI first.
         assert!(
             pos("DOMAIN-SUFFIX,huggingface.co,Kairo Downloads")
-                > pos("DOMAIN-SUFFIX,deepseek.com,DIRECT")
+                > pos("DOMAIN-SUFFIX,claude.ai,Kairo AI")
         );
-        assert!(
-            pos("DOMAIN-SUFFIX,claude.ai,Kairo AI")
-                > pos("DOMAIN-SUFFIX,huggingface.co,Kairo Downloads")
-        );
+        // Kinds left to the subscription write nothing.
+        assert!(!r.iter().any(|x| x.contains("netflix.com") || x.contains("Kairo Streaming")));
         // The mirror goes the way Hugging Face does.
         assert!(r.contains(&"DOMAIN-SUFFIX,hf-mirror.com,Kairo Downloads".to_owned()));
         // The subscription's own rules are untouched, after ours.
-        assert!(pos("DOMAIN-SUFFIX,example.org,Proxies") > pos("DOMAIN-SUFFIX,claude.ai,Kairo AI"));
+        assert!(
+            pos("DOMAIN-SUFFIX,example.org,Proxies")
+                > pos("DOMAIN-SUFFIX,huggingface.co,Kairo Downloads")
+        );
         assert_eq!(r.last().unwrap(), "MATCH,Proxies");
     }
 
     #[test]
-    fn switches_turn_parts_off() {
+    fn choices_turn_parts_off() {
         let mut c = cfg(PLAIN);
-        let ai = AiSettings {
-            domestic_direct: false,
-            downloads: false,
+        let kinds = Kinds {
+            downloads: KindExit::SUBSCRIPTION,
             ..Default::default()
         };
-        apply(&mut c, &ai, "", false).unwrap();
+        let apps: Vec<AppChoice> = crate::kinds::catalog()
+            .iter()
+            .filter(|a| a.direct)
+            .map(|a| AppChoice { id: a.id.into(), kind: a.kind, matcher: None, exit: AppExit::Subscription })
+            .collect();
+        let done = apply(&mut c, &kinds, &apps, false, "", false).unwrap();
+        assert_eq!(done.downloads, None);
         let r = rules(&c);
         assert!(!r.iter().any(|x| x.contains("deepseek.com")));
         assert!(!r.iter().any(|x| x.contains("huggingface.co")));
         assert!(r.iter().any(|x| x.contains("claude.ai")));
+        assert!(group_named(&c, KAIRO_DOWNLOADS_GROUP).is_none());
         let mut off = cfg(PLAIN);
-        let ai = AiSettings {
-            enabled: false,
+        assert!(apply(&mut off, &Kinds::default(), &[], true, "", false).is_none());
+        assert_eq!(off, cfg(PLAIN));
+    }
+
+    #[test]
+    fn a_kind_pointed_somewhere_gets_a_group_or_adopts_the_subscriptions() {
+        let kinds = Kinds {
+            streaming: KindExit::FASTEST,
+            games: KindExit::LOCATION,
             ..Default::default()
         };
-        assert!(apply(&mut off, &ai, "", false).is_none());
-        assert_eq!(off, cfg(PLAIN));
+        // PLAIN has a "Netflix" group, which is an app's, not the kind's: Kairo makes its own.
+        let mut c = cfg(PLAIN);
+        let done = apply(&mut c, &kinds, &[], false, "", false).unwrap();
+        assert_eq!(done.kind_groups.get(&Kind::Streaming).map(String::as_str), Some("Kairo Streaming"));
+        assert_eq!(done.kind_groups.get(&Kind::Games).map(String::as_str), Some("Kairo Games"));
+        assert!(!done.kind_groups.contains_key(&Kind::DevTools));
+        assert_eq!(members(group_named(&c, "Kairo Streaming").unwrap())[0], "Proxies");
+        let r = rules(&c);
+        assert!(r.contains(&"DOMAIN-SUFFIX,netflix.com,Kairo Streaming".to_owned()));
+        assert!(r.contains(&"PROCESS-NAME,steam,Kairo Games".to_owned()));
+        assert!(!r.iter().any(|x| x.contains("github.com")));
+        // A subscription with a group for the kind: that one is used.
+        let mut sub = cfg(&PLAIN.replace("  - {name: Netflix", "  - {name: 🎬 Streaming, type: select, proxies: [Proxies, DIRECT]}\n  - {name: Netflix"));
+        let done = apply(&mut sub, &kinds, &[], false, "", false).unwrap();
+        assert_eq!(done.kind_groups.get(&Kind::Streaming).map(String::as_str), Some("🎬 Streaming"));
+        assert!(group_named(&sub, "Kairo Streaming").is_none());
+        // Untouched kinds leave the subscription's rules as they were.
+        let mut plain = cfg(PLAIN);
+        apply(&mut plain, &Kinds::default(), &[], false, "", false).unwrap();
+        assert!(!rules(&plain).iter().any(|x| x.contains("netflix.com") || x.contains("steam")));
     }
 
     #[test]
     fn all_traffic_is_rules_with_the_location_as_the_rest() {
         let mut c = cfg(PLAIN);
-        apply(&mut c, &AiSettings::default(), "", true).unwrap();
+        apply(&mut c, &Kinds::default(), &[], false, "", true).unwrap();
         let r = rules(&c);
         assert_eq!(r.last().unwrap(), "MATCH,Proxies");
         // Local still direct, AI still on its own exit, the profile's rules set aside.
@@ -854,7 +889,7 @@ rules:
     #[test]
     fn nothing_to_route_through_leaves_the_config_alone() {
         let mut c = cfg("proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n");
-        assert!(apply(&mut c, &AiSettings::default(), "", false).is_none());
+        assert!(apply(&mut c, &Kinds::default(), &[], false, "", false).is_none());
         assert_eq!(rules(&c), ["MATCH,DIRECT"]);
     }
 
@@ -1000,7 +1035,7 @@ rules:
         // With locations, All Traffic is rules.
         let out = crate::config::build(PLAIN, "", &s).unwrap();
         assert_eq!(cfg(&out).get("mode").and_then(Value::as_str), Some("rule"));
-        s.ai.enabled = false;
+        s.kinds_off = true;
         let out = crate::config::build(PLAIN, "", &s).unwrap();
         assert_eq!(
             cfg(&out).get("mode").and_then(Value::as_str),
@@ -1017,7 +1052,7 @@ rules:
     #[test]
     fn downloads_get_a_group_of_their_own_built_like_the_ai_group() {
         let mut c = cfg(PLAIN);
-        let done = apply(&mut c, &AiSettings::default(), "", false).unwrap();
+        let done = apply(&mut c, &Kinds::default(), &[], false, "", false).unwrap();
         assert_eq!(done.downloads.as_deref(), Some("Kairo Downloads"));
         let g = group_named(&c, KAIRO_DOWNLOADS_GROUP).unwrap();
         assert_eq!(members(g), ["Proxies", "🇯🇵 Tokyo 03", "🇯🇵 Tokyo 07"]);
@@ -1027,7 +1062,7 @@ rules:
         let mut p = cfg(
             "proxy-providers:\n  sub: {type: http, url: 'http://x', path: ./x.yaml}\nproxy-groups:\n  - {name: Proxies, type: select, use: [sub]}\nrules:\n  - MATCH,Proxies\n",
         );
-        apply(&mut p, &AiSettings::default(), "", false).unwrap();
+        apply(&mut p, &Kinds::default(), &[], false, "", false).unwrap();
         for name in [KAIRO_AI_GROUP, KAIRO_DOWNLOADS_GROUP] {
             let g = group_named(&p, name).unwrap();
             assert_eq!(
@@ -1044,18 +1079,18 @@ rules:
                 .any(|x| x.contains("huggingface") && x.ends_with(",Proxies"))
         );
         let mut off = cfg(PLAIN);
-        let ai = AiSettings {
-            downloads: false,
+        let kinds = Kinds {
+            downloads: KindExit::SUBSCRIPTION,
             ..Default::default()
         };
-        apply(&mut off, &ai, "", false).unwrap();
+        apply(&mut off, &kinds, &[], false, "", false).unwrap();
         assert!(!rules(&off).iter().any(|x| x.contains("huggingface")));
         // A group of that name the subscription already has is not made twice.
         let mut twice = cfg(&PLAIN.replace(
             "  - {name: Netflix",
             "  - {name: Kairo Downloads, type: select, proxies: [Proxies]}\n  - {name: Netflix",
         ));
-        apply(&mut twice, &AiSettings::default(), "", false).unwrap();
+        apply(&mut twice, &Kinds::default(), &[], false, "", false).unwrap();
         assert_eq!(
             groups(&twice)
                 .iter()
@@ -1065,33 +1100,33 @@ rules:
         );
     }
 
-    fn site(domain: &str, exit: crate::routes::RouteExit) -> Route {
-        Route::new(crate::routes::RouteKind::site(domain), exit).unwrap()
+    fn site(domain: &str, exit: AppExit) -> AppChoice {
+        AppChoice::custom(RouteKind::site(domain), Kind::Other, exit).unwrap()
     }
 
-    fn app(name: &str, exit: crate::routes::RouteExit) -> Route {
-        Route::new(crate::routes::RouteKind::app(name), exit).unwrap()
+    fn app(name: &str, exit: AppExit) -> AppChoice {
+        AppChoice::custom(RouteKind::app(name), Kind::Other, exit).unwrap()
     }
 
     #[test]
-    fn routes_sit_after_the_local_block_and_before_the_rest_of_the_layer() {
-        use crate::routes::RouteExit::*;
+    fn own_exits_sit_after_the_local_block_and_before_the_kinds() {
+        use AppExit::*;
         let mut c = cfg(PLAIN);
-        let routes = vec![
+        let apps = vec![
             app("claude", Direct),
             site("example.org", Block),
             site("internal.example.net", Node("🇯🇵 Tokyo 03".into())),
-            site("models.example.com", Downloads),
-            site("chat.example.com", Ai),
+            site("models.example.com", Of(K::Downloads)),
+            site("chat.example.com", Of(K::Ai)),
             site("shop.example.com", Everything),
         ];
-        let done = apply_with(&mut c, &AiSettings::default(), &routes, "", false).unwrap();
+        let done = apply(&mut c, &Kinds::default(), &apps, false, "", false).unwrap();
         assert!(done.skipped_routes.is_empty());
         let r = rules(&c);
         let pos = |needle: &str| r.iter().position(|x| x == needle).unwrap();
-        // The never-proxied local block stays first, the routes follow it.
+        // The never-proxied local block stays first, the own exits follow it.
         let local_end = pos("DOMAIN,localhost,DIRECT");
-        let first_layer = pos("DOMAIN-SUFFIX,deepseek.com,DIRECT");
+        let first_kind = pos("DOMAIN-SUFFIX,claude.ai,Kairo AI");
         for rule in [
             "PROCESS-NAME,claude,DIRECT",
             "DOMAIN-SUFFIX,example.org,REJECT",
@@ -1100,58 +1135,37 @@ rules:
             "DOMAIN-SUFFIX,chat.example.com,Kairo AI",
             "DOMAIN-SUFFIX,shop.example.com,Proxies",
         ] {
-            assert!(pos(rule) > local_end && pos(rule) < first_layer, "{rule}");
+            assert!(pos(rule) > local_end && pos(rule) < first_kind, "{rule}");
         }
-        // Before the AI rules and the subscription's own.
-        assert!(
-            pos("DOMAIN-SUFFIX,shop.example.com,Proxies") < pos("DOMAIN-SUFFIX,claude.ai,Kairo AI")
-        );
-        assert!(
-            pos("DOMAIN-SUFFIX,shop.example.com,Proxies")
-                < pos("DOMAIN-SUFFIX,example.org,Proxies")
-        );
+        // Before the subscription's own.
+        assert!(pos("DOMAIN-SUFFIX,shop.example.com,Proxies") < pos("DOMAIN-SUFFIX,example.org,Proxies"));
         assert_eq!(r.last().unwrap(), "MATCH,Proxies");
         // "All Traffic": still before the MATCH that replaces the profile's rules.
         let mut all = cfg(PLAIN);
-        apply_with(&mut all, &AiSettings::default(), &routes, "", true).unwrap();
+        apply(&mut all, &Kinds::default(), &apps, false, "", true).unwrap();
         let r = rules(&all);
-        assert!(
-            r.iter()
-                .position(|x| x == "PROCESS-NAME,claude,DIRECT")
-                .unwrap()
-                < r.len() - 1
-        );
+        assert!(r.iter().position(|x| x == "PROCESS-NAME,claude,DIRECT").unwrap() < r.len() - 1);
         assert_eq!(r.last().unwrap(), "MATCH,Proxies");
     }
 
     #[test]
-    fn a_route_to_a_node_the_subscription_lost_is_left_out_and_the_config_stands() {
-        use crate::routes::RouteExit::*;
-        let routes = vec![
+    fn an_app_on_a_node_the_subscription_lost_is_left_out_and_the_config_stands() {
+        use AppExit::*;
+        let apps = vec![
             site("gone.example.com", Node("🇯🇵 Tokyo 99".into())),
             site("kept.example.com", Node("🇯🇵 Tokyo 07".into())),
             // A name is a node only if it is a proxy: a group is not one.
             site("group.example.com", Node("Netflix".into())),
         ];
         let mut c = cfg(PLAIN);
-        let done = apply_with(&mut c, &AiSettings::default(), &routes, "", false).unwrap();
-        assert_eq!(
-            done.skipped_routes,
-            ["site:gone.example.com", "site:group.example.com"]
-        );
+        let done = apply(&mut c, &Kinds::default(), &apps, false, "", false).unwrap();
+        assert_eq!(done.skipped_routes, ["site:gone.example.com", "site:group.example.com"]);
         let r = rules(&c);
         assert!(r.contains(&"DOMAIN-SUFFIX,kept.example.com,🇯🇵 Tokyo 07".to_owned()));
-        assert!(
-            !r.iter()
-                .any(|x| x.contains("gone.example.com") || x.contains("group.example.com"))
-        );
+        assert!(!r.iter().any(|x| x.contains("gone.example.com") || x.contains("group.example.com")));
         // Every rule's target is something the config has.
         let mut names: Vec<String> = proxy_names(&c);
-        names.extend(
-            groups(&c)
-                .iter()
-                .filter_map(|g| g.get("name")?.as_str().map(str::to_owned)),
-        );
+        names.extend(groups(&c).iter().filter_map(|g| g.get("name")?.as_str().map(str::to_owned)));
         names.extend(["DIRECT".into(), "REJECT".into()]);
         for rule in r.iter().filter(|x| !x.starts_with("MATCH,")) {
             let target = rule.split(',').nth(2).unwrap();
@@ -1160,60 +1174,48 @@ rules:
     }
 
     #[test]
-    fn routes_apply_when_the_layer_is_off_or_has_nothing_to_route_through() {
-        use crate::routes::RouteExit::*;
-        let routes = vec![
-            site("a.example.com", Ai),
-            site("b.example.com", Downloads),
+    fn own_exits_apply_when_the_kinds_are_off_or_there_is_nothing_to_route_through() {
+        use AppExit::*;
+        let apps = vec![
+            site("a.example.com", Of(K::Ai)),
+            site("b.example.com", Of(K::Downloads)),
             site("c.example.com", Block),
             site("d.example.com", Everything),
         ];
-        let off = AiSettings {
-            enabled: false,
-            ..Default::default()
-        };
         let mut c = cfg(PLAIN);
-        assert!(apply_with(&mut c, &off, &routes, "", false).is_none());
-        // The layer did nothing; the routes are the caller's to apply.
+        assert!(apply(&mut c, &Kinds::default(), &apps, true, "", false).is_none());
+        // The kinds did nothing; the own exits are the caller's to apply.
         assert_eq!(rules(&c), rules(&cfg(PLAIN)));
-        let skipped = apply_routes(&mut c, &routes, "");
+        let skipped = apply_own(&mut c, &apps, "");
         assert!(skipped.is_empty());
         let r = rules(&c);
-        assert_eq!(
-            r[..4],
-            [
-                "DOMAIN-SUFFIX,a.example.com,Proxies",
-                "DOMAIN-SUFFIX,b.example.com,Proxies",
-                "DOMAIN-SUFFIX,c.example.com,REJECT",
-                "DOMAIN-SUFFIX,d.example.com,Proxies",
-            ]
-        );
+        for rule in [
+            "DOMAIN-SUFFIX,a.example.com,Proxies",
+            "DOMAIN-SUFFIX,b.example.com,Proxies",
+            "DOMAIN-SUFFIX,c.example.com,REJECT",
+            "DOMAIN-SUFFIX,d.example.com,Proxies",
+        ] {
+            assert!(r[..4].contains(&rule.to_owned()), "{rule}");
+        }
+        // Nothing of the catalog: no domestic Direct, no AI rules.
+        assert!(!r.iter().any(|x| x.contains("deepseek") || x.contains("claude.ai")));
         assert_eq!(r.last().unwrap(), "MATCH,Proxies");
         assert!(group_named(&c, KAIRO_AI_GROUP).is_none());
         assert!(group_named(&c, KAIRO_DOWNLOADS_GROUP).is_none());
         // No profile yet: direct and block still apply, a location does not exist.
         let mut bare = cfg("proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n");
-        let skipped = apply_routes(&mut bare, &routes, "");
-        assert_eq!(
-            skipped,
-            [
-                "site:a.example.com",
-                "site:b.example.com",
-                "site:d.example.com"
-            ]
-        );
-        assert_eq!(
-            rules(&bare),
-            ["DOMAIN-SUFFIX,c.example.com,REJECT", "MATCH,DIRECT"]
-        );
-        assert!(apply_routes(&mut bare, &[], "").is_empty());
+        let mut skipped = apply_own(&mut bare, &apps, "");
+        skipped.sort();
+        assert_eq!(skipped, ["site:a.example.com", "site:b.example.com", "site:d.example.com"]);
+        assert_eq!(rules(&bare), ["DOMAIN-SUFFIX,c.example.com,REJECT", "MATCH,DIRECT"]);
+        assert!(apply_own(&mut bare, &[], "").is_empty());
     }
 
     #[test]
-    fn the_users_override_still_wins_over_routes_and_a_stale_route_still_builds() {
-        use crate::routes::RouteExit::*;
+    fn the_users_override_still_wins_over_apps_and_a_stale_choice_still_builds() {
+        use AppExit::*;
         let s = crate::settings::Settings {
-            routes: vec![
+            apps: vec![
                 site("example.org", Block),
                 site("old.example.com", Node("🇯🇵 Tokyo 99".into())),
                 app("curl", Direct),
@@ -1231,9 +1233,9 @@ rules:
         assert!(!text.contains("old.example.com"));
         let built = crate::config::build_full(PLAIN, "", &s, &|_| false).unwrap();
         assert_eq!(built.skipped_routes, ["site:old.example.com"]);
-        // With the layer off, the same routes still build.
+        // With the kinds off, the same own exits still build.
         let mut off = s.clone();
-        off.ai.enabled = false;
+        off.kinds_off = true;
         let built = crate::config::build_full(PLAIN, "", &off, &|_| false).unwrap();
         assert_eq!(built.skipped_routes, ["site:old.example.com"]);
         assert!(rules(&cfg(&built.text)).contains(&"PROCESS-NAME,curl,DIRECT".to_owned()));
@@ -1246,19 +1248,25 @@ rules:
         let Some(core) = std::env::var_os("KAIRO_TEST_CORE").map(std::path::PathBuf::from) else {
             return;
         };
-        use crate::routes::RouteExit::*;
+        use AppExit::*;
         let routes = vec![
             app("claude", Direct),
-            app("Google Chrome", Ai),
+            app("Google Chrome", Of(K::Ai)),
             site("example.org", Block),
-            site("a.example.net", Downloads),
+            site("a.example.net", Of(K::Downloads)),
             site("b.example.net", Everything),
         ];
+        let kinds = Kinds {
+            streaming: KindExit::FASTEST,
+            games: KindExit::LOCATION,
+            dev_tools: KindExit::FASTEST,
+            ..Default::default()
+        };
         let with_provider = "proxy-providers:\n  sub: {type: http, url: 'http://127.0.0.1:1/x', path: ./sub.yaml, interval: 3600}\nproxy-groups:\n  - {name: Proxies, type: select, use: [sub]}\nrules:\n  - MATCH,Proxies\n";
         for text in [PLAIN, WITH_AI, with_provider] {
             for all in [false, true] {
                 let mut c = cfg(text);
-                apply_with(&mut c, &AiSettings::default(), &routes, "", all).unwrap();
+                apply(&mut c, &kinds, &routes, false, "", all).unwrap();
                 let dir = tempfile::tempdir().unwrap();
                 let file = dir.path().join("config.yaml");
                 std::fs::write(&file, serde_yaml::to_string(&Value::Mapping(c)).unwrap()).unwrap();

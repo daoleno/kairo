@@ -17,7 +17,6 @@ const SIDEBAR_WIDTH: f32 = 212.0;
 fn page_icon(page: Page) -> Icon {
     match page {
         Page::Overview => Icon::Overview,
-        Page::Exits => Icon::Globe,
         Page::Activity => Icon::Connections,
         Page::Apps => Icon::Layers,
         Page::Profiles => Icon::Profiles,
@@ -136,9 +135,8 @@ fn speed(glyph: Icon, value: impl Fn() -> u64 + 'static) -> impl IntoElement {
 fn sidebar() -> impl IntoElement {
     let groups: [&[Page]; 1] = [&[
         Page::Overview,
-        Page::Exits,
-        Page::Activity,
         Page::Apps,
+        Page::Activity,
         Page::Profiles,
     ]];
     let glass = crate::chrome::glass_sidebar();
@@ -236,9 +234,8 @@ fn current_page(store: crate::store::Store) -> impl IntoElement {
         let page = store.page.get();
         untracked(|| match page {
             Page::Overview => pages::home::page().into_element(),
-            Page::Exits => pages::exits::page().into_element(),
             Page::Activity => pages::activity::page().into_element(),
-            Page::Apps => pages::apps::page().into_element(),
+            Page::Apps => pages::exits::page().into_element(),
             Page::Proxies => pages::proxies::page().into_element(),
             Page::Profiles => pages::profiles::page().into_element(),
             Page::Rules => pages::rules::page().into_element(),
@@ -257,9 +254,8 @@ fn phone_shell() -> impl IntoElement {
     let store = store();
     let tabs = [
         Page::Overview,
-        Page::Exits,
-        Page::Activity,
         Page::Apps,
+        Page::Activity,
         Page::Profiles,
     ];
     view()

@@ -39,7 +39,8 @@ const SAMPLE_BYTES: u64 = 512 * 1024;
 /// Less than this is no measurement of a download.
 const MIN_BYTES: u64 = 64 * 1024;
 
-/// The settings of the Downloads exit.
+/// The Downloads exit in a schema 1 settings file: read once, by
+/// [`crate::settings::migrate_v1`], and never written.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct DownloadsSettings {
@@ -85,15 +86,9 @@ impl MirrorTest {
     }
 }
 
-/// What the UI reads of the Downloads exit.
+/// What the UI reads of the Downloads kind besides its exit: the mirror's test.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct DownloadsInfo {
-    /// The group, once the config has it (empty while the AI layer is off).
-    pub group: String,
-    /// The node downloads go through now.
-    pub node: Option<String>,
-    pub fastest: bool,
-    pub mirror: bool,
     pub mirror_test: MirrorTest,
 }
 
@@ -285,13 +280,6 @@ mod tests {
         assert!(s.fastest && !s.mirror && s.exit.is_none());
         let d = DownloadsSettings::default();
         assert!(d.fastest && !d.mirror);
-        // A settings file from before Downloads has no such key (and the old
-        // `ai.downloads` bool is still read).
-        let all: crate::settings::Settings =
-            serde_json::from_str(r#"{"mixedPort": 1234, "ai": {"downloads": false}}"#).unwrap();
-        assert_eq!(all.downloads, DownloadsSettings::default());
-        assert!(!all.ai.downloads);
-        assert!(all.routes.is_empty());
         let pinned = DownloadsSettings {
             exit: Some(AiExit {
                 name: "x".into(),

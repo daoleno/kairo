@@ -144,18 +144,22 @@ pub async fn run(ctx: &Ctx, session: &SessionKey, cmd: Command) -> Result<Value,
             svc.clear_stats();
             done()
         }
-        Command::SetRoute { kind, exit } => json(svc.set_route(kind, exit).await),
-        Command::RemoveRoute { id } => json(svc.remove_route(id).await),
+        Command::SetApp { id, matcher, kind, exit } => json(svc.set_app(id, matcher, kind, exit).await),
+        Command::RemoveApp { id } => json(svc.remove_app(id).await),
+        Command::SetKindsOff { off } => json(svc.set_kinds_off(off).await),
+        Command::SetKindExit { kind, name } => json(svc.set_kind_exit(kind, name).await),
+        Command::KindFollowFastest { kind } => json(svc.kind_follow_fastest(kind).await),
+        Command::KindFollowLocation { kind } => json(svc.kind_follow_location(kind).await),
+        Command::KindToSubscription { kind } => json(svc.kind_to_subscription(kind).await),
+        Command::CheckApps => json(svc.check_apps().await),
+        Command::CheckApp { id } => json(svc.check_app(id).await),
         Command::SetAiExit { name } => json(svc.set_ai_exit(name).await),
         Command::AiFollowLocation => json(svc.ai_follow_location().await),
         Command::DismissAiAlert => {
             svc.dismiss_ai_alert();
             done()
         }
-        Command::UpdateAi { ai } => json(svc.update_ai(*ai).await),
         Command::CheckAi => json(svc.check_ai().await),
-        Command::SetDownloadsExit { name } => json(svc.set_downloads_exit(name).await),
-        Command::DownloadsFollowFastest => json(svc.downloads_follow_fastest().await),
         Command::TestMirror => json(svc.test_mirror().await),
         Command::SetMirror { on } => json(svc.set_mirror(on).await),
         Command::Icon { kind, name } => json(Ok(icon(svc, kind, &name))),

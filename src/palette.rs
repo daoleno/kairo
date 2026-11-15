@@ -63,15 +63,39 @@ fn commands(store: Store) -> Vec<Command> {
             },
         ));
     }
+    if has_profile && running {
+        out.push(cmd(t!("palette.check_apps"), Page::Apps.title(), Icon::Activity, |s| {
+            s.run(s.svc().check_ai());
+            s.run(s.svc().check_apps())
+        }));
+    }
+    // The kinds, and the apps in use: each opens where it is chosen.
+    for kind in kairo_core::kinds::Kind::ALL {
+        out.push(cmd(kind.title(), t!("palette.group.kind"), Icon::Layers, move |_| {
+            crate::pages::kinds::open_kind(kind)
+        }));
+    }
+    let apps = {
+        let week = crate::pages::kinds::week(store);
+        store.state.with(|s| store.activity.with(|a| crate::pages::kinds::rows(s, &a.0, &week, 0)))
+    };
+    for r in apps {
+        let id = r.id.clone();
+        out.push(cmd(r.name.clone(), t!("palette.app", kind = r.kind.title()), Icon::Layers, move |s| {
+            crate::pages::exits::select(None);
+            s.page.set(Page::Apps);
+            s.app_sheet.set(Some(id.clone()))
+        }));
+    }
     out.push(cmd(
         t!("palette.rest_fastest"),
-        Page::Exits.title(),
+        Page::Apps.title(),
         Icon::Bolt,
         |s| s.run(s.svc().set_location(None)),
     ));
     out.push(cmd(
         t!("palette.test_exits"),
-        Page::Exits.title(),
+        Page::Apps.title(),
         Icon::Bolt,
         |s| s.run(s.svc().test_places()),
     ));
@@ -145,7 +169,7 @@ fn commands(store: Store) -> Vec<Command> {
     // Every place, by delay.
     let ai_on = store
         .state
-        .with(|s| s.settings.ai.enabled && !s.ai.group.is_empty());
+        .with(|s| !s.settings.kinds_off && !s.ai.group.is_empty());
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
     let mut list = store.proxies.with(|p| {
         places::main_group(&p.0.groups, &preferred)

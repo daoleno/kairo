@@ -147,16 +147,10 @@ settings.permission.unavailable:
   en: Unavailable
   zh: 不可用
 
-# Settings › General › AI.
-settings.ai.title:
-  en: AI
-  zh: AI
-settings.ai.one_exit:
-  en: AI tools use one exit
-  zh: AI 工具使用同一出口
-settings.ai.domestic_direct:
-  en: Domestic AI goes direct
-  zh: 国内 AI 直连
+# Settings › Advanced: the kinds and their rules (or the subscription's only).
+settings.kinds_off:
+  en: "Use the subscription's rules only"
+  zh: 只使用订阅的规则
 
 # Settings › General › Signed-in browsers (a server's page).
 settings.sessions.title:

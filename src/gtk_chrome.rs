@@ -19,7 +19,7 @@ use nsh_platform_linux::gtk4 as gtk;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-const PAGES: [Page; 6] = Page::SIDEBAR;
+const PAGES: [Page; 5] = Page::SIDEBAR;
 /// Where Settings sits apart.
 const SETTINGS_AT: i32 = 5;
 
@@ -28,11 +28,6 @@ const SETTINGS_AT: i32 = 5;
 fn icons(page: Page) -> &'static [&'static str] {
     match page {
         Page::Overview => &["go-home-symbolic", "user-home-symbolic"],
-        Page::Exits => &[
-            "globe-symbolic",
-            "web-browser-symbolic",
-            "network-workgroup-symbolic",
-        ],
         Page::Activity => &[
             "network-transmit-receive-symbolic",
             "utilities-system-monitor-symbolic",

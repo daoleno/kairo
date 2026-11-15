@@ -15,7 +15,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSData, NSSize, NSString};
 
-use crate::{ExitId, Hooks, Model, act};
+use crate::{Hooks, Model, act};
 
 const TAG_MODE: isize = 1; // + index
 const TAG_CORE: isize = 20;
@@ -24,9 +24,7 @@ const TAG_QUIT: isize = 22;
 const TAG_ALL: isize = 23;
 const TAG_TEST: isize = 24;
 const TAG_SETTINGS: isize = 25;
-const TAG_FASTEST: isize = 26;
-const TAG_REST: isize = 1000; // + index
-const TAG_AI: isize = 2000; // + index
+// The exits' items: crate::exit_item (from crate::EXIT_IDS).
 
 pub struct Ivars {
     svc: Service,
@@ -47,32 +45,16 @@ define_class!(
             let tag = item.tag();
             let iv = self.ivars();
             let model = iv.model.borrow().clone();
-            let choice = |id: ExitId, i: isize| {
-                model
-                    .exits
-                    .iter()
-                    .find(|e| e.id == id)
-                    .and_then(|e| e.choices.get(i as usize))
-                    .map(|c| c.name.clone())
-            };
             match tag {
                 t if (TAG_MODE..TAG_MODE + 3).contains(&t) => act::mode(&iv.svc, Mode::ALL[(t - TAG_MODE) as usize]),
                 TAG_CORE => act::connect(&iv.svc, !model.running),
                 TAG_SHOW => (iv.hooks.show)(),
                 TAG_QUIT => (iv.hooks.quit)(),
-                TAG_ALL => (iv.hooks.page)("exits"),
+                TAG_ALL => (iv.hooks.page)("apps"),
                 TAG_SETTINGS => (iv.hooks.page)("settings"),
                 TAG_TEST => act::test_again(&iv.svc),
-                TAG_FASTEST => act::locate(&iv.svc, String::new()),
-                t if t >= TAG_AI => {
-                    if let Some(name) = choice(ExitId::Ai, t - TAG_AI) {
-                        act::ai_exit(&iv.svc, name);
-                    }
-                }
-                t if t >= TAG_REST => {
-                    if let Some(name) = choice(ExitId::Rest, t - TAG_REST) {
-                        act::locate(&iv.svc, name);
-                    }
+                t if t >= 0 => {
+                    act::exit_item(&iv.svc, &model, t as usize);
                 }
                 _ => {}
             }
@@ -171,18 +153,17 @@ fn build(target: &Target, menu: &NSMenu, m: &Model) {
         sub.setAutoenablesItems(false);
         if let Some(on) = e.fastest {
             sub.addItem(&symbol(
-                item(target, mtm, &kairo_core::tr!("tray.fastest"), TAG_FASTEST, true, Some(on)),
+                item(target, mtm, &kairo_core::tr!("tray.fastest"), crate::exit_item(e.id, None) as isize, true, Some(on)),
                 "bolt",
             ));
             sub.addItem(&NSMenuItem::separatorItem(mtm));
         }
-        let base = if e.id == ExitId::Ai { TAG_AI } else { TAG_REST };
         for (i, c) in e.choices.iter().enumerate() {
             sub.addItem(&item(
                 target,
                 mtm,
                 &Model::choice_label(c),
-                base + i as isize,
+                crate::exit_item(e.id, Some(i)) as isize,
                 true,
                 Some(c.checked),
             ));

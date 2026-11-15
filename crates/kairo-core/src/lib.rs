@@ -12,6 +12,8 @@ pub mod downloads;
 pub mod geo;
 pub mod i18n;
 pub mod icons;
+pub mod kind_check;
+pub mod kinds;
 pub mod model;
 pub mod paths;
 pub mod places;

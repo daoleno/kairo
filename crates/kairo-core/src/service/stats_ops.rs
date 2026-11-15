@@ -159,7 +159,7 @@ impl Service {
             let p = self.0.proxies.borrow();
             crate::places::current(&p.groups, &m).map(|c| c.name)
         });
-        [self.ai_node(), rest, self.downloads_node()]
+        [self.ai_node(), rest, self.kind_node(crate::kinds::Kind::Downloads)]
     }
 
     /// Looks at where the exits are (a change is a switch) and, every ten

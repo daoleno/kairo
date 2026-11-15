@@ -13,13 +13,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use kairo_core::activity::Tally;
-use kairo_core::ai::AiSettings;
+use kairo_core::kinds::{AppExit, Kind};
 use kairo_core::model::{Connections, DnsResponse, LogEntry, Rule, RuleProvider};
 use kairo_core::paths::Paths;
 use kairo_core::protocol::{
     ClientMsg, Command, Hello, IconInfo, IconKind, ServerMsg, SessionInfo,
 };
-use kairo_core::routes::{RouteExit, RouteKind};
+use kairo_core::routes::RouteKind;
 use kairo_core::stats::Store as Stats;
 use kairo_core::tokio::sync::{oneshot, watch};
 use kairo_core::{Live, Mode, Proxies, Settings, State};
@@ -519,16 +519,48 @@ impl Backend {
         tell!(self, |s| s.clear_stats(), Command::ClearStats)
     }
 
-    pub fn set_route(&self, kind: RouteKind, exit: RouteExit) -> Fut<()> {
+    pub fn set_app(&self, id: String, matcher: Option<RouteKind>, kind: Kind, exit: AppExit) -> Fut<()> {
         call!(
             self,
-            |s| s.set_route(kind.clone(), exit.clone()),
-            Command::SetRoute { kind, exit }
+            |s| s.set_app(id.clone(), matcher.clone(), kind, exit.clone()),
+            Command::SetApp { id, matcher, kind, exit }
         )
     }
 
-    pub fn remove_route(&self, id: String) -> Fut<()> {
-        call!(self, |s| s.remove_route(id.clone()), Command::RemoveRoute { id })
+    pub fn remove_app(&self, id: String) -> Fut<()> {
+        call!(self, |s| s.remove_app(id.clone()), Command::RemoveApp { id })
+    }
+
+    pub fn set_kinds_off(&self, off: bool) -> Fut<()> {
+        call!(self, |s| s.set_kinds_off(off), Command::SetKindsOff { off })
+    }
+
+    pub fn set_kind_exit(&self, kind: Kind, name: String) -> Fut<()> {
+        call!(
+            self,
+            |s| s.set_kind_exit(kind, name.clone()),
+            Command::SetKindExit { kind, name }
+        )
+    }
+
+    pub fn kind_follow_fastest(&self, kind: Kind) -> Fut<()> {
+        call!(self, |s| s.kind_follow_fastest(kind), Command::KindFollowFastest { kind })
+    }
+
+    pub fn kind_follow_location(&self, kind: Kind) -> Fut<()> {
+        call!(self, |s| s.kind_follow_location(kind), Command::KindFollowLocation { kind })
+    }
+
+    pub fn kind_to_subscription(&self, kind: Kind) -> Fut<()> {
+        call!(self, |s| s.kind_to_subscription(kind), Command::KindToSubscription { kind })
+    }
+
+    pub fn check_apps(&self) -> Fut<()> {
+        call!(self, |s| s.check_apps(), Command::CheckApps)
+    }
+
+    pub fn check_app(&self, id: String) -> Fut<()> {
+        call!(self, |s| s.check_app(id.clone()), Command::CheckApp { id })
     }
 
     pub fn set_ai_exit(&self, name: String) -> Fut<()> {
@@ -543,28 +575,8 @@ impl Backend {
         tell!(self, |s| s.dismiss_ai_alert(), Command::DismissAiAlert)
     }
 
-    pub fn update_ai(&self, next: AiSettings) -> Fut<()> {
-        call!(
-            self,
-            |s| s.update_ai(next.clone()),
-            Command::UpdateAi { ai: Box::new(next) }
-        )
-    }
-
     pub fn check_ai(&self) -> Fut<()> {
         call!(self, |s| s.check_ai(), Command::CheckAi)
-    }
-
-    pub fn set_downloads_exit(&self, name: String) -> Fut<()> {
-        call!(
-            self,
-            |s| s.set_downloads_exit(name.clone()),
-            Command::SetDownloadsExit { name }
-        )
-    }
-
-    pub fn downloads_follow_fastest(&self) -> Fut<()> {
-        call!(self, |s| s.downloads_follow_fastest(), Command::DownloadsFollowFastest)
     }
 
     pub fn test_mirror(&self) -> Fut<()> {

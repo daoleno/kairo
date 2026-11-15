@@ -1,46 +1,23 @@
-//! Exits: where traffic leaves. Three exits, each a place: AI (pinned, never
-//! switched under an open session), Everything else (the Location, the
-//! fastest by itself unless chosen) and Downloads. A card per exit on the left;
-//! the selected exit's picker on the right: countries first, a server one level
-//! deeper. Latency reads Good / OK / Slow; milliseconds only show in the list
-//! of servers.
+//! Apps: where each kind of app leaves, and every app. A card per kind on
+//! the left (All apps first); the selected kind's picker on the right,
+//! countries first and a server one level deeper, with the kind's apps under
+//! it. All apps lists every app in use by kind, each with its exit, and what
+//! Kairo saw but could not sort. Latency reads Good / OK / Slow;
+//! milliseconds only show in the list of servers.
 
+use kairo_core::kinds::{AppExit, Kind};
 use kairo_core::places::{self, Place};
+use kairo_core::routes::RouteKind;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::i18n::plural;
+use crate::pages::kinds::{self as k, AppRow};
 use crate::store::{Page, store};
 use crate::ui::toolbar;
-use crate::ui::{self, Icon, icon, size};
+use crate::ui::{self, Icon, Variant, icon, size};
 
-/// The three exits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Exit {
-    Ai,
-    Rest,
-    Downloads,
-}
-
-impl Exit {
-    pub const ALL: [Exit; 3] = [Exit::Ai, Exit::Rest, Exit::Downloads];
-
-    pub fn title(self) -> String {
-        kairo_core::tr!(match self {
-            Exit::Ai => "exits.title.ai",
-            Exit::Rest => "exits.title.rest",
-            Exit::Downloads => "exits.title.downloads",
-        })
-    }
-
-    /// Whether Kairo can keep it on the fastest place by itself. The AI exit
-    /// is never switched automatically: a switch would cut a running session.
-    pub fn has_fastest(self) -> bool {
-        !matches!(self, Exit::Ai)
-    }
-}
-
-// --- What an exit is now ---------------------------------------------------------------
+// --- How a kind's exit is doing ------------------------------------------------------
 
 /// How a delay reads: never as a number outside the server list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,126 +71,59 @@ impl Health {
     }
 }
 
-/// The place `exit` goes through now.
-pub fn place_of(exit: Exit) -> Option<Place> {
-    let store = store();
-    match exit {
-        Exit::Ai => crate::pages::ai::exit_place(),
-        Exit::Rest => {
-            let preferred = store.state.with(|s| s.settings.tray_group.clone());
-            store.proxies.with(|p| {
-                let g = places::main_group(&p.0.groups, &preferred)?;
-                places::current(&p.0.groups, g)
-            })
-        }
-        Exit::Downloads => crate::pages::ai::downloads_place(),
+
+/// The stats slot of a kind's quality line, for the kinds that keep one.
+fn stats_slot(kind: Kind) -> Option<usize> {
+    match kind {
+        Kind::Ai => Some(0),
+        Kind::Other => Some(1),
+        Kind::Downloads => Some(2),
+        _ => None,
     }
 }
 
-/// The line under an exit's country: which server, and why it is there.
-pub fn subtitle(exit: Exit) -> String {
-    let store = store();
-    let place = place_of(exit);
-    let node = place
-        .as_ref()
-        .map(|p| p.title.clone())
-        .unwrap_or_else(|| "—".into());
-    use kairo_core::tr;
-    let how = |fastest: bool| {
-        if fastest {
-            tr!("exits.subtitle.fastest", node = node)
-        } else {
-            tr!("exits.subtitle.chosen", node = node)
-        }
-    };
-    match exit {
-        Exit::Ai => {
-            let pinned = store
-                .state
-                .with(|s| s.settings.ai.exit.as_ref().map(|e| e.since));
-            match pinned {
-                Some(since) if pin_days(since) == 0 => tr!("exits.subtitle.pinned_today", node = node),
-                Some(since) => tr!("exits.subtitle.pinned", node = node, when = pinned_for(since)),
-                None => tr!("exits.subtitle.follows", node = node),
-            }
-        }
-        Exit::Rest => how(store.state.with(|s| s.settings.auto_location)),
-        Exit::Downloads => how(crate::pages::ai::downloads_fastest()),
-    }
+/// How the kind's exit is doing now.
+fn health_of(kind: Kind) -> Health {
+    Health::of(k::place_of(kind).and_then(|p| p.delay))
 }
 
-/// Whole days since a pin was made.
-fn pin_days(since: i64) -> i64 {
-    (kairo_core::unix() - since).max(0) / 86400
-}
-
-/// "today", "2 days", "3 weeks": how long ago a pin was made.
-pub fn pinned_for(since: i64) -> String {
-    let days = pin_days(since);
-    match days {
-        0 => kairo_core::tr!("exits.pinned_for.today"),
-        1..=13 => kairo_core::tr!(&plural("exits.pinned_for.days", days as u64), count = days),
-        _ => kairo_core::tr!("exits.pinned_for.weeks", count = days / 7),
-    }
-}
-
-/// An exit's card: used on Home and on Exits.
+/// A kind's card: on Apps' rail, and on a phone above the picker.
 pub fn card(
-    exit: Exit,
+    kind: Kind,
+    count: impl Fn() -> usize + Copy + 'static,
     selected: impl Fn() -> bool + Copy + 'static,
     press: impl Fn() + 'static,
-) -> impl IntoElement {
-    card_with(exit, selected, press, false)
-}
-
-/// The card, with a small line of how the exit has been doing (Home's).
-pub fn card_with(
-    exit: Exit,
-    selected: impl Fn() -> bool + Copy + 'static,
-    press: impl Fn() + 'static,
-    spark: bool,
 ) -> impl IntoElement {
     let store = store();
     let place = computed(move || {
-        // Follow what the place is made of.
         store.state.with(|_| ());
         store.proxies.with(|_| ());
-        place_of(exit)
+        k::place_of(kind)
     });
     let health = move || place.with(|p| Health::of(p.as_ref().and_then(|p| p.delay)));
     nsh_base::button()
         .w_full()
-        .accessibility_label(exit.title())
+        .accessibility_label(kind.title())
         .selected(selected)
         .on_press(press)
-        .gap_1p5()
+        .gap_1()
         .px_4()
         .py_3()
-        .rounded(px(20.0))
+        .rounded(px(18.0))
         .cursor_pointer()
         .bg(move || theme().muted)
         .hover(|s| s.bg(move || theme().accent))
-        .style_when(selected, |s| {
-            s.outline(px(2.0)).outline_color(move || theme().primary)
-        })
+        .style_when(selected, |s| s.outline(px(2.0)).outline_color(move || theme().primary))
         .focus(|s| s.outline(px(3.0)).outline_color(move || theme().ring))
         .child(
             view()
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(
-                    ui::muted(exit.title())
-                        .font_weight(FontWeight::MEDIUM)
-                        .flex_1()
-                        .number_of_lines(1),
-                )
-                .child(when(move || exit == Exit::Ai, move || ui::badge(t!("exits.badge.stable"))))
+                .child(ui::muted(kind.title()).font_weight(FontWeight::MEDIUM).flex_1().number_of_lines(1))
+                .child(when(move || kind == Kind::Ai, move || ui::badge(t!("exits.badge.stable"))))
                 .child(ui::dot(move || health().tone()))
-                .child(
-                    ui::muted(move || -> SharedString { health().word().into() })
-                        .text_size(px(size::small())),
-                ),
+                .child(ui::muted(move || -> SharedString { health().word().into() }).text_size(px(size::small()))),
         )
         .child(
             view()
@@ -224,127 +134,493 @@ pub fn card_with(
                     let f = place
                         .with(|p| p.as_ref().and_then(|p| p.flag.clone()))
                         .unwrap_or_else(|| "◎".into());
-                    untracked(move || ui::flag(f, size::large() + 3.0))
+                    untracked(move || ui::flag(f, size::large() + 1.0))
                 }))
                 .child(
                     text(move || -> SharedString {
                         place
-                            .with(|p| p.as_ref().map(|p| place_country(p)))
+                            .with(|p| p.as_ref().map(k::place_country))
                             .unwrap_or_else(|| "—".into())
                             .into()
                     })
-                    .text_size(px(size::large() + 2.0))
+                    .text_size(px(size::large()))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .number_of_lines(if ui::phone() { 2 } else { 1 })
+                    .number_of_lines(1)
                     .flex_1(),
-                )
-                .child(when(
-                    move || spark,
-                    move || {
-                        crate::pages::stats::home_spark(match exit {
-                            Exit::Ai => 0,
-                            Exit::Rest => 1,
-                            Exit::Downloads => 2,
-                        })
-                    },
-                )),
+                ),
         )
         .child(
             ui::muted(move || -> SharedString {
                 store.state.with(|_| ());
                 store.proxies.with(|_| ());
-                subtitle(exit).into()
+                let n = count();
+                let apps = t!(&plural("apps.count", n as u64), count = n);
+                format!("{} · {apps}", k::subtitle(kind)).into()
             })
+            .text_size(px(size::small()))
             .number_of_lines(if ui::phone() { 2 } else { 1 }),
         )
 }
 
-/// The country a place is in, in words ("Hong Kong"), from its region.
-pub fn place_country(p: &Place) -> String {
-    if p.region == "Other" {
-        p.title.clone()
-    } else {
-        places::region_title(p.region)
-    }
-}
-
 // --- The page --------------------------------------------------------------------------
 
+/// The content's width (beside the sidebar) below which Apps puts its cards
+/// above the kind: the rail's 270 and a list that keeps its exit menus.
+const STACK_BELOW: f32 = 820.0;
+
 thread_local! {
-    static SELECTED: std::cell::Cell<Exit> = const { std::cell::Cell::new(Exit::Rest) };
+    /// The kind shown (None: All apps).
+    static SELECTED: std::cell::Cell<Option<Kind>> = const { std::cell::Cell::new(None) };
 }
 
-/// The exit the page opens on (a card on Home).
-pub fn select(exit: Exit) {
-    SELECTED.with(|s| s.set(exit));
+/// The kind the page opens on (None: All apps).
+pub fn select(kind: Option<Kind>) {
+    SELECTED.with(|s| s.set(kind));
 }
 
 pub fn page() -> impl IntoElement {
     let which = signal(SELECTED.with(|s| s.get()));
     effect(move || SELECTED.with(|s| s.set(which.get())));
+    let query = signal(String::new());
+    let adding = signal(false);
+    let rows = k::all_rows(0);
+    // Rebuilt only when the window crosses the width, not at every pixel.
+    let stack = computed(move || ui::phone() || window().width.0 < STACK_BELOW);
+    let count = move |kind: Option<Kind>| rows.with(|r| r.iter().filter(|a| kind.is_none_or(|k| a.kind == k)).count());
     view()
         .flex_1()
         .child(toolbar::floating(
-            Page::Exits,
-            || t!("exits.page.subtitle"),
-            vec![],
+            Page::Apps,
+            move || match which.get() {
+                Some(_) => t!("apps.page.subtitle"),
+                None => {
+                    let n = count(None);
+                    t!(&plural("apps.count", n as u64), count = n)
+                }
+            },
+            vec![toolbar::search("apps.search", t!("apps.search_placeholder"), query)],
         ))
-        .child(
-            scroll().flex_1().child({
-                let phone = ui::phone();
-                let page = view()
-                    .px(px(if phone { 16.0 } else { 24.0 }))
-                    .pt(toolbar::scroll_top(20.0))
-                    .pb_8()
-                    .w_full()
-                    .max_w(px(1040.0))
-                    .self_center()
-                    .gap_4();
-                // Cards beside the picker; on a phone, the cards above it.
-                let page = if phone { page } else { page.flex_row().items_start() };
-                page
-                    .child({
-                        let cards = view().flex_shrink_0().gap_3();
-                        if phone { cards.w_full() } else { cards.w(px(280.0)) }
-                    }.children(
-                        Exit::ALL.into_iter().map(move |e| {
-                            card(e, move || which.get() == e, move || which.set(e)).into_element()
-                        }),
+        // Below this width the cards go above the kind (in rows), not beside it.
+        .child(scroll().flex_1().child(dynamic(move || {
+            let phone = stack.get();
+            untracked(move || {
+            let page = view()
+                .px(px(if phone { 16.0 } else { 24.0 }))
+                .pt(toolbar::scroll_top(20.0))
+                .pb_8()
+                .w_full()
+                .max_w(px(1040.0))
+                .self_center()
+                .gap_4();
+            let page = if phone { page } else { page.flex_row().items_start() };
+            page.child({
+                let cards = view().flex_shrink_0().gap_2p5();
+                let cards = if phone { cards.w_full().flex_row().flex_wrap() } else { cards.w(px(270.0)) };
+                // In rows, three cards a row.
+                let slot = move |e: AnyElement| -> AnyElement {
+                    if phone { view().w(percentage(0.32)).child(e).into_element() } else { e }
+                };
+                cards
+                    .child(slot(
+                        nsh_base::button()
+                            .accessibility_label(t!("apps.all"))
+                            .selected(move || which.get().is_none())
+                            .on_press(move || which.set(None))
+                            .flex_row()
+                            .items_center()
+                            .px_4()
+                            .h(px(ui::touch_h(44.0)))
+                            .rounded(px(18.0))
+                            .cursor_pointer()
+                            .bg(move || theme().muted)
+                            .hover(|s| s.bg(move || theme().accent))
+                            .style_when(move || which.get().is_none(), |s| {
+                                s.outline(px(2.0)).outline_color(move || theme().primary)
+                            })
+                            .child(ui::body(t!("apps.all")).font_weight(FontWeight::SEMIBOLD).flex_1())
+                            .child(ui::muted(move || -> SharedString { count(None).to_string().into() }))
+                            .into_element(),
                     ))
+                    .children(Kind::ALL.into_iter().map(move |kind| {
+                        slot(
+                            card(kind, move || count(Some(kind)), move || which.get() == Some(kind), move || which.set(Some(kind)))
+                                .into_element(),
+                        )
+                    }))
+            })
+            .child(view().flex_1().min_w(px(0.0)).gap_4().child(dynamic(move || {
+                let sel = which.get();
+                untracked(move || match sel {
+                    Some(kind) => kind_view(kind, rows).into_element(),
+                    None => all_view(rows, query, adding).into_element(),
+                })
+            })))
+            .into_element()
+            })
+        })))
+        .child(dynamic(move || {
+            let open = adding.get();
+            untracked(move || if open { add_sheet(adding).into_element() } else { view().into_element() })
+        }))
+        .child(k::sheet_host())
+        .text_color(move || theme().foreground)
+}
+
+/// A kind: its picker, what goes with it, and its apps.
+fn kind_view(kind: Kind, rows: Memo<Vec<AppRow>>) -> impl IntoElement {
+    let store = store();
+    let tun = move || store.state.with(|s| s.settings.tun);
+    view()
+        .gap_4()
+        .child(picker(kind))
+        .child(when(move || kind == Kind::Downloads, mirror_card))
+        .child(when(
+            move || kind == Kind::Games && !tun(),
+            move || {
+                ui::card()
+                    .rounded(px(22.0))
                     .child(
                         view()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .gap_4()
-                            .child(dynamic(move || {
-                                let e = which.get();
-                                untracked(move || picker(e).into_element())
-                            }))
-                            .child(when(move || which.get() == Exit::Downloads, mirror_card))
-                            .child(dynamic(move || {
-                                let e = which.get();
-                                untracked(move || quality_card(e).into_element())
-                            })),
+                            .flex_row()
+                            .items_center()
+                            .gap_3()
+                            .px_4()
+                            .py_3()
+                            .when(ui::phone(), |v| v.flex_wrap())
+                            .child(
+                                view()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .gap_0p5()
+                                    .child(ui::body(t!("apps.games.title")))
+                                    .child(ui::muted(t!("apps.games.body"))),
+                            )
+                            .child(
+                                ui::capsule(t!("kinds.fix.every_app"), true)
+                                    .h(px(30.0))
+                                    .px_4()
+                                    .on_press(|| crate::pages::home::set_via(crate::pages::home::Via::Tun)),
+                            ),
                     )
-            }),
+            },
+        ))
+        .child(dynamic(move || {
+            let list: Vec<AppRow> = rows.with(|r| r.iter().filter(|a| a.kind == kind).cloned().collect());
+            untracked(move || {
+                if list.is_empty() {
+                    return ui::muted(t!("apps.kind.none", kind = kind.title()))
+                        .px_1()
+                        .into_element();
+                }
+                view()
+                    .gap_2()
+                    .child(ui::section_label(t!("apps.kind.section", kind = kind.title())).px_1())
+                    .child(ui::rows(list.into_iter().map(k::app_row).collect()))
+                    .into_element()
+            })
+        }))
+        .child(stats_slot(kind).map(quality_card))
+}
+
+/// Every app, by kind; what was seen and not sorted; the subscription's groups.
+fn all_view(rows: Memo<Vec<AppRow>>, query: Signal<String>, adding: Signal<bool>) -> impl IntoElement {
+    let store = store();
+    view()
+        .gap_4()
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .child(view().flex_1())
+                .child(ui::capsule(t!("apps.add_app"), false).h(px(ui::touch_h(30.0))).px_4().on_press(move || adding.set(true))),
+        )
+        .child(dynamic(move || {
+            let q = query.get().to_lowercase();
+            let all = rows.get();
+            untracked(move || {
+                let keep = |r: &AppRow| {
+                    q.is_empty()
+                        || r.name.to_lowercase().contains(&q)
+                        || r.id.to_lowercase().contains(&q)
+                        || r.programs.iter().any(|p| p.to_lowercase().contains(&q))
+                };
+                let mut out = view().gap_4();
+                let mut any = false;
+                for kind in Kind::ALL {
+                    let list: Vec<AppRow> = all.iter().filter(|r| r.kind == kind && keep(r)).cloned().collect();
+                    if list.is_empty() {
+                        continue;
+                    }
+                    any = true;
+                    out = out.child(
+                        view()
+                            .gap_2()
+                            .child(ui::section_label(kind.title()).px_1())
+                            .child(ui::rows(list.into_iter().map(k::app_row).collect())),
+                    );
+                }
+                if !any {
+                    out = out.child(ui::empty_state(Icon::Layers, t!("apps.empty"), None));
+                }
+                out.into_element()
+            })
+        }))
+        .child(unsorted())
+        .child(subscription_row())
+        .child(when(
+            move || store.state.with(|s| s.settings.kinds_off),
+            || ui::muted(t!("apps.kinds_off")).px_1(),
+        ))
+}
+
+/// Sites no app claims, with enough traffic: a kind makes one an app.
+fn unsorted() -> impl IntoElement {
+    let store = store();
+    let seen = computed(move || {
+        store.activity.with(|a| {
+            a.0.unsorted(kairo_core::kinds::USED_BYTES)
+                .into_iter()
+                .take(8)
+                .map(|(n, b)| (n.to_owned(), b))
+                .collect::<Vec<_>>()
+        })
+    });
+    dynamic(move || {
+        let list = seen.get();
+        untracked(move || {
+            if list.is_empty() {
+                return view().into_element();
+            }
+            view()
+                .gap_2()
+                .child(ui::section_label(t!("apps.unsorted")).px_1())
+                .child(ui::rows(
+                    list.into_iter()
+                        .map(|(site, bytes)| {
+                            let domain = stored(site.clone());
+                            ui::row_view()
+                                .child(k::logo_of(&site, &site, Some(&RouteKind::Site { domain: site.clone() }), 24.0))
+                                .child(ui::body(site.clone()).number_of_lines(1).flex_1())
+                                .child(ui::muted(t!("apps.so_far", bytes = kairo_core::bytes(bytes))))
+                                .child(ui::popup_button(
+                                    || {
+                                        std::iter::once((None, t!("apps.sort_as")))
+                                            .chain(Kind::ALL.into_iter().map(|k| (Some(k), k.title().to_owned())))
+                                            .collect()
+                                    },
+                                    || None,
+                                    move |k: Option<Kind>| {
+                                        if let Some(kind) = k {
+                                            k::set_app(
+                                                String::new(),
+                                                Some(RouteKind::Site { domain: domain.with(|d| d.clone()) }),
+                                                kind,
+                                                AppExit::Kind,
+                                            )
+                                        }
+                                    },
+                                ))
+                                .into_element()
+                        })
+                        .collect(),
+                ))
+                .into_element()
+        })
+    })
+}
+
+/// The subscription's own per-app groups: a line, and the way to them.
+fn subscription_row() -> impl IntoElement {
+    let store = store();
+    let summary = move || -> String {
+        let preferred = store.state.with(|s| s.settings.tray_group.clone());
+        store.proxies.with(|p| {
+            let Some(main) = places::main_group(&p.0.groups, &preferred) else {
+                return String::new();
+            };
+            let apps = crate::pages::ai::without_ai(places::app_choices(&p.0.groups, &main.name));
+            if apps.is_empty() {
+                return String::new();
+            }
+            let names: Vec<&str> = apps.iter().take(3).map(|a| a.group.as_str()).collect();
+            let more = apps.len().saturating_sub(3);
+            if more == 0 {
+                names.join(", ")
+            } else {
+                t!("apps.subscription.more", names = names.join(", "), count = more)
+            }
+        })
+    };
+    when(
+        move || !summary().is_empty(),
+        move || {
+            view()
+                .gap_2()
+                .child(ui::section_label(t!("apps.subscription.title")).px_1())
+                .child(ui::rows(vec![
+                    ui::row_view()
+                        .child(
+                            view()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .child(ui::body(move || -> SharedString { summary().into() }).number_of_lines(1)),
+                        )
+                        .child(ui::capsule(t!("apps.subscription.groups"), false).h(px(30.0)).px_4().on_press(move || store.page.set(Page::Proxies)))
+                        .into_element(),
+                ]))
+        },
+    )
+}
+
+// --- Adding ----------------------------------------------------------------------------
+
+/// Add App: a program or a site, its kind and its exit.
+fn add_sheet(adding: Signal<bool>) -> impl IntoElement {
+    let close = move || adding.set(false);
+    view()
+        .absolute()
+        .inset_0()
+        .child(
+            overlay()
+                .absolute()
+                .inset_0()
+                .bg(move || theme().foreground.opacity(0.28))
+                .on_press(close),
+        )
+        .child(
+            overlay()
+                .absolute()
+                .inset_0()
+                .items_center()
+                .justify_center()
+                .px_4()
+                .pointer_events(nsh_core::PointerEvents::BoxNone)
+                .on_cancel(close)
+                .child(add_card(adding)),
         )
 }
 
-/// How the selected exit has been doing: response time, failed tests, switches.
-fn quality_card(exit: Exit) -> impl IntoElement {
-    let idx = match exit {
-        Exit::Ai => 0,
-        Exit::Rest => 1,
-        Exit::Downloads => 2,
+fn add_card(adding: Signal<bool>) -> impl IntoElement {
+    let store = store();
+    let value = signal(String::new());
+    let site = signal(false);
+    let kind = signal(Kind::Other);
+    let exit = signal(AppExit::Kind);
+    let problem = signal(None::<String>);
+    let go = move || {
+        let v = value.get_untracked().trim().to_owned();
+        if v.is_empty() {
+            problem.set(Some(t!("apps.add.name_first")));
+            return;
+        }
+        // A name with a dot and no spaces is a site, else a program.
+        let m = if site.get_untracked() {
+            RouteKind::Site { domain: v }
+        } else {
+            RouteKind::App { name: v }
+        };
+        let svc = store.svc();
+        let (kd, ex) = (kind.get_untracked(), exit.get_untracked());
+        spawn(async move {
+            match svc.set_app(String::new(), Some(m), kd, ex).await {
+                Ok(()) => adding.set(false),
+                Err(e) => problem.set(Some(e)),
+            }
+        });
     };
-    ui::card()
-        .rounded(px(22.0))
+    // Programs Activity has seen, to pick from (no browser: a browser is never an app).
+    let seen = computed(move || {
+        store.activity.with(|a| {
+            a.0.apps()
+                .into_iter()
+                .map(|(n, _)| n.to_owned())
+                .filter(|n| n != "Unknown" && !kairo_core::kinds::is_browser(n))
+                .take(8)
+                .collect::<Vec<_>>()
+        })
+    });
+    view()
+        .w_full()
+        .max_w(px(480.0))
+        .p_5()
+        .gap_3()
+        .rounded(px(16.0))
+        .bg(move || theme().background)
+        .border_1()
+        .border_color(move || theme().border)
+        .child(
+            text(t!("apps.add.app_title"))
+                .text_size(px(size::large() + 3.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .role(AccessibilityRole::Header),
+        )
+        .child(ui::segmented(
+            vec![(false, "A program"), (true, "A site")],
+            move || site.get(),
+            move |v| site.set(v),
+        ))
+        .child(
+            ui::field(value, t!("apps.add.placeholder"))
+                .auto_focus(true)
+                .on_submit(move |_: &str| go()),
+        )
+        .child(when(
+            move || !site.get() && !seen.with(|s| s.is_empty()),
+            move || {
+                view().flex_row().flex_wrap().gap_2().children(seen.get().into_iter().map(move |n| {
+                    let name = n.clone();
+                    ui::btn(n, Variant::Secondary).h(px(26.0)).on_press(move || value.set(name.clone()))
+                }))
+            },
+        ))
         .child(
             view()
-                .px_4()
-                .py_3()
-                .child(ui::body(t!("exits.quality")).font_weight(FontWeight::SEMIBOLD)),
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(ui::muted(t!("kinds.sheet.kind")))
+                .child(view().flex_1())
+                .child(ui::popup_button(
+                    || Kind::ALL.into_iter().map(|k| (k, k.title().to_owned())).collect(),
+                    move || kind.get(),
+                    move |k| kind.set(k),
+                )),
         )
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(ui::muted(t!("kinds.sheet.exit")))
+                .child(view().flex_1())
+                .child(ui::popup_button(
+                    move || k::exit_choices(kind.get(), &AppExit::Kind),
+                    move || exit.get(),
+                    move |e| exit.set(e),
+                )),
+        )
+        .child(when(
+            move || problem.with(|p| p.is_some()),
+            move || {
+                ui::muted(move || -> SharedString { problem.get().unwrap_or_default().into() })
+                    .text_color(move || theme().destructive)
+            },
+        ))
+        .child(
+            view()
+                .flex_row()
+                .gap_2()
+                .justify_end()
+                .child(ui::btn(t!("apps.add.cancel"), Variant::Secondary).on_press(move || adding.set(false)))
+                .child(ui::btn(t!("apps.add.add"), Variant::Primary).on_press(go)),
+        )
+}
+
+/// How the selected kind has been doing: response time, failed tests, switches.
+fn quality_card(idx: usize) -> impl IntoElement {
+    ui::card()
+        .rounded(px(22.0))
+        .child(view().px_4().py_3().child(ui::body(t!("exits.quality")).font_weight(FontWeight::SEMIBOLD)))
         .child(ui::divider())
         .child(crate::pages::stats::quality(idx))
 }
@@ -374,10 +650,10 @@ pub fn mirror_text(test: &kairo_core::downloads::MirrorTest) -> String {
 /// The mirror switch, under the Downloads exit: off until a speed test passes.
 fn mirror_card() -> impl IntoElement {
     let store = store();
-    let info = computed(move || store.state.with(|s| s.downloads.clone()));
+    let info = computed(move || store.state.with(|s| (s.downloads.clone(), s.settings.kinds.mirror)));
     let running =
-        move || info.with(|d| matches!(d.mirror_test, kairo_core::downloads::MirrorTest::Running));
-    let can_switch = move || info.with(|d| d.mirror_test.passed());
+        move || info.with(|(d, _)| matches!(d.mirror_test, kairo_core::downloads::MirrorTest::Running));
+    let can_switch = move || info.with(|(d, _)| d.mirror_test.passed());
     ui::card()
         .rounded(px(22.0))
         .child(
@@ -394,7 +670,7 @@ fn mirror_card() -> impl IntoElement {
                         .gap_0p5()
                         .child(ui::body(t!("exits.mirror.title")))
                         .child(ui::muted(move || -> SharedString {
-                            info.with(|d| mirror_text(&d.mirror_test)).into()
+                            info.with(|(d, _)| mirror_text(&d.mirror_test)).into()
                         })),
                 )
                 .child(
@@ -403,9 +679,9 @@ fn mirror_card() -> impl IntoElement {
                         .on_press(move || store.run(store.svc().test_mirror())),
                 )
                 .child(
-                    view().opacity(move || if can_switch() || info.with(|d| d.mirror) { 1.0_f32 } else { 0.4_f32 }).child(
+                    view().opacity(move || if can_switch() || info.with(|(_, on)| *on) { 1.0_f32 } else { 0.4_f32 }).child(
                         ui::toggle(
-                            move || info.with(|d| d.mirror),
+                            move || info.with(|(_, on)| *on),
                             t!("exits.mirror.use"),
                             move |on| {
                                 if can_switch() || !on {
@@ -419,7 +695,7 @@ fn mirror_card() -> impl IntoElement {
                 ),
         )
         .child(when(
-            move || info.with(|d| d.mirror),
+            move || info.with(|(_, on)| *on),
             move || {
                 let lines = kairo_core::downloads::mirror_env_lines().join("\n");
                 let copy = lines.clone();
@@ -459,15 +735,16 @@ impl Country {
     }
 }
 
-fn countries(exit: Exit) -> Vec<Country> {
+
+fn countries(kind: Kind) -> Vec<Country> {
     let store = store();
     let preferred = store.state.with(|s| s.settings.tray_group.clone());
+    let here = k::place_of(kind).map(|p| p.region);
     store.proxies.with(|p| {
         let Some(g) = places::main_group(&p.0.groups, &preferred) else {
             return vec![];
         };
         let all = places::places(&p.0.groups, g);
-        let here = place_of(exit).map(|p| p.region);
         let mut list: Vec<Country> = places::by_region(&all)
             .into_iter()
             .map(|(region, servers)| Country {
@@ -495,56 +772,27 @@ fn countries(exit: Exit) -> Vec<Country> {
     })
 }
 
-/// Picks `name` for `exit`.
-fn pick(exit: Exit, name: String) {
-    let store = store();
-    match exit {
-        Exit::Ai => store.run(store.svc().set_ai_exit(name)),
-        Exit::Rest => store.run(store.svc().set_location(Some(name))),
-        Exit::Downloads => crate::pages::ai::set_downloads(name),
-    }
-}
-
-/// "Fastest" for the exits that have it.
-fn use_fastest(exit: Exit) {
-    let store = store();
-    match exit {
-        Exit::Ai => {}
-        Exit::Rest => store.run(store.svc().set_location(None)),
-        Exit::Downloads => crate::pages::ai::downloads_to_fastest(),
-    }
-}
-
-/// Whether `exit` is on "Fastest" now.
-fn on_fastest(exit: Exit) -> bool {
-    let store = store();
-    match exit {
-        Exit::Ai => false,
-        Exit::Rest => store.state.with(|s| s.settings.auto_location),
-        Exit::Downloads => crate::pages::ai::downloads_fastest(),
-    }
-}
-
-fn picker(exit: Exit) -> impl IntoElement {
+fn picker(kind: Kind) -> impl IntoElement {
     let store = store();
     let open = signal(None::<&'static str>);
     let all = signal(false);
     let list = computed(move || {
         store.proxies.with(|_| ());
-        countries(exit)
+        countries(kind)
     });
     let testing = move || store.proxies.with(|p| !p.0.testing.is_empty());
-    // The exit's server now, to check it in the list.
     let current = move || {
         store.state.with(|_| ());
         store.proxies.with(|_| ());
-        place_of(exit).map(|p| p.name)
+        k::place_of(kind).map(|p| p.name)
     };
-    // Open the country the exit is in, once it is known.
+    let sub = move || store.state.with(|s| k::on_subscription(s, kind));
+    let fastest = move || store.state.with(|s| k::on_fastest(s, kind));
+    let follows = move || store.state.with(|s| k::follows_location(s, kind));
     effect(move || {
         store.state.with(|_| ());
         store.proxies.with(|_| ());
-        let here = place_of(exit);
+        let here = k::place_of(kind);
         untracked(move || {
             if open.get().is_none()
                 && let Some(p) = here
@@ -553,15 +801,13 @@ fn picker(exit: Exit) -> impl IntoElement {
             }
         });
     });
-    // On a phone the title and the button wrap instead of pushing the button off the card,
-    // and the one-line description (no room for it) is left out.
     let phone = ui::phone();
     let head = view().flex_row().items_center().gap_2().px_4().py_3();
     let head = if phone { head.flex_wrap() } else { head };
     ui::card()
         .rounded(px(22.0))
         .child(
-            head.child(ui::body(exit.title()).font_weight(FontWeight::SEMIBOLD))
+            head.child(ui::body(kind.title()).font_weight(FontWeight::SEMIBOLD))
                 .child(view().flex_1())
                 .child(
                     ui::btn_icon(Icon::Bolt, t!("exits.test_again"), Variant::Secondary)
@@ -573,38 +819,54 @@ fn picker(exit: Exit) -> impl IntoElement {
         )
         .child(ui::divider())
         .child(when(
-            move || exit.has_fastest(),
+            move || Kind::ROUTED.contains(&kind),
             move || {
                 row_button(
-                    move || on_fastest(exit),
-                    move || use_fastest(exit),
-                    icon(Icon::Bolt, 15.0)
-                        .text_color(move || theme().primary)
-                        .into_element(),
-                    ui::body(t!("exits.fastest.title")).font_weight(FontWeight::MEDIUM),
+                    sub,
+                    move || k::to_subscription(kind),
+                    icon(Icon::Layers, 15.0).text_color(move || theme().muted_foreground).into_element(),
+                    ui::body(t!("kinds.as_subscription")),
                     ui::muted(move || -> SharedString {
-                        store.state.with(|_| ());
-                        store.proxies.with(|_| ());
-                        match place_of(exit) {
-                            Some(p) if on_fastest(exit) => t!("exits.fastest.now", node = p.title).into(),
-                            _ => t!("exits.fastest.automatic").into(),
+                        if sub() {
+                            k::place_of(kind).map(|p| t!("exits.fastest.now", node = p.title)).unwrap_or_default().into()
+                        } else {
+                            t!("apps.picker.no_rule").into()
                         }
                     }),
                     None,
-                    Some(move || Health::of(place_of(exit).and_then(|p| p.delay))),
+                    None::<fn() -> Health>,
                 )
             },
         ))
         .child(when(
-            move || exit == Exit::Ai && store.state.with(|s| s.settings.ai.exit.is_some()),
+            move || kind != Kind::Ai,
             move || {
                 row_button(
-                    move || false,
-                    move || store.run(store.svc().ai_follow_location()),
-                    icon(Icon::Globe, 15.0)
-                        .text_color(move || theme().muted_foreground)
-                        .into_element(),
-                    ui::body(t!("exits.follow_rest")),
+                    move || fastest() && !sub(),
+                    move || k::use_fastest(kind),
+                    icon(Icon::Bolt, 15.0).text_color(move || theme().primary).into_element(),
+                    ui::body(t!("exits.fastest.title")).font_weight(FontWeight::MEDIUM),
+                    ui::muted(move || -> SharedString {
+                        store.state.with(|_| ());
+                        store.proxies.with(|_| ());
+                        match k::place_of(kind) {
+                            Some(p) if fastest() && !sub() => t!("exits.fastest.now", node = p.title).into(),
+                            _ => t!("exits.fastest.automatic").into(),
+                        }
+                    }),
+                    None,
+                    Some(move || health_of(kind)),
+                )
+            },
+        ))
+        .child(when(
+            move || kind != Kind::Other,
+            move || {
+                row_button(
+                    move || follows() && !sub(),
+                    move || k::follow_location(kind),
+                    icon(Icon::Globe, 15.0).text_color(move || theme().muted_foreground).into_element(),
+                    ui::body(t!("kinds.exit.same_as", kind = Kind::Other.title())),
                     ui::muted(""),
                     None,
                     None::<fn() -> Health>,
@@ -616,7 +878,7 @@ fn picker(exit: Exit) -> impl IntoElement {
             let now = current();
             let expand_all = all.get();
             let open_now = open.get();
-            let manual = !on_fastest(exit);
+            let manual = !fastest() && !sub() && !follows();
             untracked(move || {
                 view()
                     .children(countries.into_iter().map(move |c| {
@@ -624,22 +886,13 @@ fn picker(exit: Exit) -> impl IntoElement {
                         let region = c.region;
                         let health = c.health();
                         let count = c.servers.len();
-                        let holds_now = manual
-                            && now
-                                .as_deref()
-                                .is_some_and(|n| c.servers.iter().any(|s| s.name == n));
+                        let holds_now = manual && now.as_deref().is_some_and(|n| c.servers.iter().any(|s| s.name == n));
                         let servers = c.servers.clone();
                         let now = now.clone();
                         view()
                             .child(row_button(
                                 move || holds_now && !is_open,
-                                move || {
-                                    open.set(if is_open && !expand_all {
-                                        None
-                                    } else {
-                                        Some(region)
-                                    })
-                                },
+                                move || open.set(if is_open && !expand_all { None } else { Some(region) }),
                                 ui::flag(c.flag.clone(), size::large()),
                                 ui::body(places::region_title(region)).font_weight(FontWeight::MEDIUM),
                                 ui::muted(format!("{count}")),
@@ -652,11 +905,9 @@ fn picker(exit: Exit) -> impl IntoElement {
                                     let servers = servers.clone();
                                     let now = now.clone();
                                     view().pb_1().children(servers.into_iter().map(move |s| {
-                                        let chosen =
-                                            manual && now.as_deref() == Some(s.name.as_str());
+                                        let chosen = manual && now.as_deref() == Some(s.name.as_str());
                                         let name = s.name.clone();
-                                        server_row(s, chosen)
-                                            .on_press(move || pick(exit, name.clone()))
+                                        server_row(s, chosen).on_press(move || k::pick(kind, name.clone()))
                                     }))
                                 },
                             ))
@@ -675,16 +926,10 @@ fn picker(exit: Exit) -> impl IntoElement {
                 .cursor_pointer()
                 .hover(|s| s.bg(move || theme().accent))
                 .child(ui::muted(move || -> SharedString {
-                    if all.get() {
-                        t!("exits.servers.fewer").into()
-                    } else {
-                        t!("exits.servers.all").into()
-                    }
+                    if all.get() { t!("exits.servers.fewer").into() } else { t!("exits.servers.all").into() }
                 })),
         )
 }
-
-use crate::ui::Variant;
 
 /// A row of the picker: a leading mark, a title, a count or note, the health
 /// of what it stands for, and a chevron when it opens.
@@ -798,13 +1043,5 @@ mod tests {
             ..c.clone()
         };
         assert_eq!(none.health(), Health::Untested);
-    }
-
-    #[test]
-    fn a_pin_is_dated_in_days() {
-        let now = kairo_core::unix();
-        assert_eq!(pinned_for(now), "today");
-        assert_eq!(pinned_for(now - 5 * 86400), "5 days");
-        assert_eq!(pinned_for(now - 21 * 86400), "3 weeks");
     }
 }

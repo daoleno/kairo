@@ -237,7 +237,7 @@ rules:
     settings.test_timeout_ms = 3000;
     // This test is the core and the service without the AI layer (which sends
     // loopback traffic direct); the AI layer has a test of its own below.
-    settings.ai.enabled = false;
+    settings.kinds_off = true;
     settings.save(&paths).unwrap();
     let mixed = settings.mixed_port;
 
@@ -816,21 +816,21 @@ rules:
     settings.save(&paths).unwrap();
     let text = std::fs::read_to_string(paths.settings()).unwrap();
     let mut json: serde_json::Value = serde_json::from_str(&text).unwrap();
-    json.as_object_mut().unwrap().remove("ai");
+    json.as_object_mut().unwrap().remove("kinds");
     std::fs::write(paths.settings(), serde_json::to_string(&json).unwrap()).unwrap();
 
     let svc = Service::start(paths.clone());
     let state = svc.state();
     core_up("the core", || state.borrow().core.clone()).await;
     assert!(
-        state.borrow().settings.ai.enabled,
-        "the layer is on by default"
+        !state.borrow().settings.kinds_off,
+        "the kinds are on by default"
     );
     svc.add_remote(format!("http://{origin_addr}/sub"), None)
         .await
         .expect("add the subscription");
     let pinned = wait_for("an exit pinned", Duration::from_secs(30), || {
-        state.borrow().settings.ai.exit.clone()
+        state.borrow().settings.kinds.ai.exit.clone()
     })
     .await;
     assert_eq!(pinned.name, expect, "the exit is where AI already went");
@@ -942,7 +942,7 @@ rules:
     })
     .await;
     let pinned = wait_for("an exit pinned", Duration::from_secs(30), || {
-        state.borrow().settings.ai.exit.clone()
+        state.borrow().settings.kinds.ai.exit.clone()
     })
     .await;
     assert!(pinned.name.starts_with("node-"), "{pinned:?}");
@@ -1051,7 +1051,7 @@ rules:
         .expect("pin another exit");
     assert_eq!(svc.ai_node().as_deref(), Some(other));
     assert_eq!(
-        state.borrow().settings.ai.exit.as_ref().unwrap().name,
+        state.borrow().settings.kinds.ai.exit.as_ref().unwrap().name,
         other
     );
     assert!(
@@ -1102,15 +1102,27 @@ rules:
 
     // Following the Location is a choice too.
     svc.ai_follow_location().await.expect("follow");
-    assert!(state.borrow().settings.ai.exit.is_none());
+    assert!(state.borrow().settings.kinds.ai.exit.is_none());
     let groups = proxies.borrow().groups.clone();
     let ai = groups.iter().find(|g| g.name == "Kairo AI").unwrap();
     assert_eq!(ai.now.as_deref(), Some("Proxy"));
 
-    // Turning the layer off puts the subscription's own rules back.
-    let mut next = svc.settings().ai;
-    next.enabled = false;
-    svc.update_ai(next).await.expect("off");
+    // A kind that went as the subscription routes it, pointed somewhere:
+    // its rules and its group appear; pinned, it goes to that node.
+    use kairo_core::kinds::Kind;
+    let rules = svc.rules().await.expect("rules");
+    assert!(!rules.iter().any(|r| r.payload == "netflix.com"), "untouched kinds have no rule");
+    svc.kind_follow_location(Kind::Streaming).await.expect("streaming follows the location");
+    let rules = svc.rules().await.expect("rules");
+    assert!(rules.iter().any(|r| r.payload == "netflix.com" && r.proxy == "Kairo Streaming"));
+    svc.set_kind_exit(Kind::Streaming, other.into()).await.expect("pin streaming");
+    assert_eq!(svc.kind_node(Kind::Streaming).as_deref(), Some(other));
+    svc.kind_to_subscription(Kind::Streaming).await.expect("back to the subscription");
+    let rules = svc.rules().await.expect("rules");
+    assert!(!rules.iter().any(|r| r.payload == "netflix.com"));
+
+    // Turning the kinds off puts the subscription's own rules back.
+    svc.set_kinds_off(true).await.expect("off");
     let rules = svc.rules().await.expect("rules");
     assert_eq!(rules.len(), 1, "{rules:?}");
 }

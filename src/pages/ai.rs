@@ -219,7 +219,7 @@ pub fn on() -> bool {
     let store = store();
     store
         .state
-        .with(|s| s.settings.ai.enabled && !s.ai.group.is_empty() && s.core.is_running())
+        .with(|s| !s.settings.kinds_off && !s.ai.group.is_empty() && s.core.is_running())
 }
 
 /// The app choices without the AI group: with the AI layer on, AI is chosen
@@ -228,7 +228,7 @@ pub fn without_ai(mut apps: Vec<places::AppChoice>) -> Vec<places::AppChoice> {
     let store = store();
     let group = store
         .state
-        .with(|s| (s.settings.ai.enabled && s.core.is_running()).then(|| s.ai.group.clone()));
+        .with(|s| (!s.settings.kinds_off && s.core.is_running()).then(|| s.ai.group.clone()));
     if let Some(g) = group.filter(|g| !g.is_empty()) {
         apps.retain(|a| a.group != g);
     }
@@ -249,36 +249,6 @@ pub fn exit_place() -> Option<places::Place> {
             .find(|m| m.name == name && !m.is_group)
             .map(places::place)
     })
-}
-
-/// The place Downloads go through now.
-pub fn downloads_place() -> Option<places::Place> {
-    let store = store();
-    store.state.with(|_| ());
-    store.proxies.with(|_| ());
-    let name = store.state.with(|s| s.downloads.node.clone())?;
-    store.proxies.with(|p| {
-        p.0.groups
-            .iter()
-            .flat_map(|g| g.members.iter())
-            .find(|m| m.name == name && !m.is_group)
-            .map(places::place)
-    })
-}
-
-/// Downloads follow the fastest place by themselves.
-pub fn downloads_fastest() -> bool {
-    store().state.with(|s| s.downloads.fastest)
-}
-
-pub fn set_downloads(name: String) {
-    let store = store();
-    store.run(store.svc().set_downloads_exit(name));
-}
-
-pub fn downloads_to_fastest() {
-    let store = store();
-    store.run(store.svc().downloads_follow_fastest());
 }
 
 fn tone_color(t: Tone) -> AdaptiveColor {
@@ -331,30 +301,18 @@ pub fn goes_through(state: &State, service: &AiService) -> (String, bool) {
     }
 }
 
-/// The routes the user set for this service's sites in Apps & Sites.
-fn site_routes<'a>(state: &'a State, service: &AiService) -> Vec<&'a kairo_core::routes::Route> {
-    state
-        .settings
-        .routes
-        .iter()
-        .filter(|r| match &r.kind {
-            kairo_core::routes::RouteKind::Site { domain } => service
-                .suffixes
-                .iter()
-                .any(|s| domain.as_str() == *s || domain.ends_with(&format!(".{s}"))),
-            _ => false,
-        })
-        .collect()
-}
-
-/// What the user chose for this service's sites in Apps & Sites, if anything,
-/// in the exits' names, and whether that is the AI exit.
+/// What the person chose for this service on Apps, if anything, in the
+/// exits' names, and whether that is the AI exit.
 fn site_choice(state: &State, service: &AiService) -> Option<(String, bool)> {
-    use kairo_core::routes::RouteExit as E;
-    site_routes(state, service).first().map(|r| match &r.exit {
-        E::Ai | E::Usual => (tr!("ai.goes.ai_exit"), true),
-        E::Everything => (crate::pages::exits::Exit::Rest.title(), false),
-        E::Downloads => (crate::pages::exits::Exit::Downloads.title(), false),
+    use kairo_core::kinds::{AppExit as E, Kind};
+    let choice = state.settings.apps.iter().find(|a| a.id == service.id)?;
+    Some(match &choice.exit {
+        E::Kind if choice.kind == Kind::Ai => (tr!("ai.goes.ai_exit"), true),
+        E::Of(Kind::Ai) => (tr!("ai.goes.ai_exit"), true),
+        E::Kind => (choice.kind.title(), false),
+        E::Of(Kind::Other) | E::Everything => (Kind::Other.title(), false),
+        E::Of(k) => (k.title(), false),
+        E::Subscription => (tr!("ai.goes.subscription"), false),
         E::Direct => (tr!("ai.goes.direct"), false),
         E::Block => (tr!("ai.goes.blocked"), false),
         E::Node(n) => (places::split_flag(n).1.trim().to_owned(), false),
@@ -500,7 +458,7 @@ pub fn table_summary(rows: &[Row], checking: bool) -> (String, bool) {
     (text, false)
 }
 
-/// What to show on Home under the exits: the AI services, one row each.
+/// The AI card of Home's apps: the AI services in use, one row each.
 pub fn board() -> impl IntoElement {
     let store = store();
     let selected = signal(None::<&'static str>);
@@ -517,36 +475,33 @@ pub fn board() -> impl IntoElement {
                         .px_5()
                         .pt_4()
                         .pb_2()
-                        .child(ui::body(t!("ai.board.title")).font_weight(FontWeight::SEMIBOLD))
+                        .child(ui::body("AI").font_weight(FontWeight::SEMIBOLD))
+                        .child(dynamic(move || {
+                            let f = crate::pages::kinds::place_of(kairo_core::kinds::Kind::Ai)
+                                .and_then(|p| p.flag)
+                                .unwrap_or_else(|| "◎".into());
+                            untracked(move || ui::flag(f, size::body() + 2.0))
+                        }))
+                        .child(
+                            ui::muted(move || -> SharedString {
+                                crate::pages::kinds::subtitle(kairo_core::kinds::Kind::Ai).into()
+                            })
+                            .text_size(px(size::small()))
+                            .number_of_lines(1)
+                            .flex_1(),
+                        )
                         .child(
                             text(move || -> SharedString {
                                 table_summary(&rows.get(), checking()).0.into()
                             })
-                            .text_size(px(size::body()))
+                            .text_size(px(size::small()))
                             .text_color(move || {
                                 if table_summary(&rows.get(), checking()).1 {
                                     ui::warning()
                                 } else {
                                     theme().muted_foreground
                                 }
-                            })
-                            .flex_1(),
-                        )
-                        .child(
-                            ui::capsule(
-                                move || -> SharedString {
-                                    if checking() {
-                                        t!("ai.checking").into()
-                                    } else {
-                                        t!("ai.check_now").into()
-                                    }
-                                },
-                                false,
-                            )
-                            .h(px(30.0))
-                            .px_4()
-                            .disabled(checking)
-                            .on_press(move || store.run(store.svc().check_ai())),
+                            }),
                         ),
                 )
                 .child(when(|| !ui::phone(), header_row))
@@ -593,7 +548,7 @@ fn header_row() -> impl IntoElement {
         .items_center()
         .px_5()
         .h(px(28.0))
-        .child(head(0, t!("ai.column.service")))
+        .child(head(0, t!("ai.column.app")))
         .child(head(1, t!("ai.column.status")))
         .child(head(2, t!("ai.column.sees")))
         .child(head(3, t!("ai.column.goes")))
@@ -779,21 +734,10 @@ fn apply_fix(store: crate::store::Store, id: &'static str, fix: Fix) {
     }
 }
 
-/// Sends the service's sites to the AI exit (drops the choices that took it
+/// Sends the service back to the AI exit (drops the choice that took it
 /// elsewhere).
 fn use_ai_exit(store: crate::store::Store, id: &'static str) {
-    let Some(service) = ai::SERVICES.iter().find(|s| s.id == id) else {
-        return;
-    };
-    let ids: Vec<String> = store.state.with_untracked(|s| {
-        site_routes(s, service)
-            .into_iter()
-            .map(|r| r.id.clone())
-            .collect()
-    });
-    for rid in ids {
-        store.run(store.svc().remove_route(rid));
-    }
+    store.run(store.svc().remove_app(id.to_owned()));
 }
 
 /// What happened to the exit, and the route being Direct.
@@ -827,7 +771,7 @@ fn alerts() -> impl IntoElement {
                         // A sentence has no room for a flag picture: the name alone.
                         p.title.clone()
                     })
-                    .unwrap_or_else(|| crate::pages::exits::Exit::Rest.title());
+                    .unwrap_or_else(|| kairo_core::kinds::Kind::Other.title());
                 let pin = place.map(|p| p.name);
                 out = out.child(banner(
                     t!("ai.alert.exit_gone", node = was),
@@ -883,12 +827,34 @@ pub fn mono(id: &'static str, s: &'static str) -> AnyElement {
 fn lanes() -> impl IntoElement {
     let store = store();
     dynamic(move || {
-        let domestic = store.state.with(|s| s.settings.ai.domestic_direct);
+        // The AI apps that go direct (the domestic ones, unless chosen otherwise).
+        let direct: Vec<String> = store.state.with(|s| {
+            kairo_core::kinds::catalog()
+                .iter()
+                .filter(|a| a.kind == kairo_core::kinds::Kind::Ai)
+                .filter(|a| {
+                    let exit = s
+                        .settings
+                        .apps
+                        .iter()
+                        .find(|c| c.id == a.id)
+                        .map(|c| c.exit.clone())
+                        .unwrap_or_else(|| kairo_core::kinds::default_exit(a));
+                    exit == kairo_core::kinds::AppExit::Direct
+                })
+                .map(|a| kairo_core::ai::domestic_title(a.name))
+                .collect()
+        });
         untracked(move || {
-            // Only what is so: the domestic services go direct while that is on.
-            if !domestic {
+            // Only what is so: the AI apps that go direct now.
+            if direct.is_empty() {
                 return view().into_element();
             }
+            let shown = if direct.len() > 4 {
+                tr!("ai.lanes.direct_more", names = direct[..4].join(tr!("ai.lanes.sep").as_str()), count = direct.len() - 4)
+            } else {
+                tr!("ai.lanes.direct", names = direct.join(tr!("ai.lanes.sep").as_str()))
+            };
             view()
                 .flex_row()
                 .items_center()
@@ -897,7 +863,11 @@ fn lanes() -> impl IntoElement {
                 .h(px(36.0))
                 .border_t_1()
                 .border_color(move || theme().border.opacity(0.7))
-                .child(ui::muted(t!("ai.lanes.direct")).flex_1().number_of_lines(1))
+                .child(
+                    ui::muted(shown)
+                        .flex_1()
+                        .number_of_lines(1),
+                )
                 .into_element()
         })
     })
