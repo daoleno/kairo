@@ -51,6 +51,16 @@ pub fn is_builtin(name: &str) -> bool {
     )
 }
 
+/// mihomo's own outbounds as a person reads them: a group the subscription
+/// set to DIRECT reads "Direct" (直连), as the exit menus and the tray say it.
+pub fn builtin_title(name: &str) -> Option<String> {
+    match name {
+        "DIRECT" => Some(crate::tr!("model.places.direct")),
+        "REJECT" | "REJECT-DROP" => Some(crate::tr!("model.places.block")),
+        _ => None,
+    }
+}
+
 /// A node that is the provider's note rather than a place: "Traffic Reset:
 /// 15 Days Left", "Expire Date: 2027/01/26", "282.21 G | 500.00 G",
 /// "剩余流量：…", "官网 …".
@@ -209,7 +219,7 @@ pub fn place(node: &Node) -> Place {
         .unwrap_or("Other");
     Place {
         name: node.name.clone(),
-        title: rest.trim().to_owned(),
+        title: builtin_title(&node.name).unwrap_or_else(|| rest.trim().to_owned()),
         flag,
         region,
         delay: node.delay,
@@ -522,6 +532,30 @@ mod tests {
         assert_eq!(find_flag("Tokyo 01"), ("Tokyo 01", None, ""));
         // One regional indicator alone is not a flag.
         assert_eq!(find_flag("a 🇯 b"), ("a 🇯 b", None, ""));
+    }
+
+    /// A kind the subscription sends DIRECT (a Games group set to DIRECT)
+    /// shows the word the exit menus and the tray use, in both languages,
+    /// never mihomo's DIRECT.
+    #[test]
+    fn mihomo_outbounds_read_as_words_where_a_place_is_shown() {
+        for (name, key) in [("DIRECT", "model.places.direct"), ("REJECT", "model.places.block"), ("REJECT-DROP", "model.places.block")] {
+            let p = place(&node(name, None));
+            assert_eq!(p.name, name, "the name stays the key");
+            assert_eq!(p.title, crate::i18n::translate(key, &[]));
+            assert_ne!(p.title, name);
+        }
+        assert_eq!(crate::i18n::text_in("zh", "model.places.direct", &[]), "直连");
+        assert_eq!(crate::i18n::text_in("en", "model.places.direct", &[]), "Direct");
+        // The same words as the menus' Direct and Block.
+        for lang in ["en", "zh"] {
+            let t = |k| crate::i18n::text_in(lang, k, &[]);
+            assert_eq!(t("model.places.direct"), t("kinds.exit.direct"), "{lang}");
+            assert_eq!(t("model.places.block"), t("kinds.exit.block"), "{lang}");
+            assert_eq!(t("model.places.direct"), t("tray.mode.direct"), "{lang}");
+        }
+        // A server keeps its own name.
+        assert_eq!(place(&node("🇯🇵 Tokyo 02", None)).title, "Tokyo 02");
     }
 
     fn node(name: &str, delay: Option<u32>) -> Node {

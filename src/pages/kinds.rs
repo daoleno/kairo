@@ -469,7 +469,8 @@ pub fn node_title(name: &str) -> String {
     .region;
     let flag = p.0.or_else(|| places::region_flag(country)).unwrap_or_default();
     if country == "Other" {
-        format!("{flag} {}", p.1.trim()).trim().to_owned()
+        let title = places::builtin_title(name).unwrap_or_else(|| p.1.trim().to_owned());
+        format!("{flag} {title}").trim().to_owned()
     } else {
         format!("{flag} {}", places::region_title(country)).trim().to_owned()
     }

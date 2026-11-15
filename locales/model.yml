@@ -94,6 +94,13 @@ model.places.cn:
 model.places.other:
   en: "Other"
   zh: "其他"
+# mihomo's DIRECT and REJECT where a place is shown (a kind's card, a menu).
+model.places.direct:
+  en: "Direct"
+  zh: "直连"
+model.places.block:
+  en: "Block"
+  zh: "拦截"
 
 # AI services that go by another name in Chinese.
 model.ai.domestic.doubao:
