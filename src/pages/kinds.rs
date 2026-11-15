@@ -592,7 +592,8 @@ pub fn program_menu(name: String, show: impl Fn() + 'static) {
     use crate::ui::menu::{self, Choice};
     let store = store();
     let mut items = Vec::new();
-    if !kinds::is_browser(&name) {
+    // "Unknown" is the tally's name for traffic of no known program: no program to choose for.
+    if !kinds::is_browser(&name) && name != "Unknown" {
         let n = stored(name.clone());
         let set = move |kind: Kind, exit: AppExit| {
             move || {

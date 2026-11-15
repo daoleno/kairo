@@ -221,3 +221,4 @@ crates/kairo-core/src/kinds.rs	GitHub Packages	an app's own name in the catalog,
 crates/kairo-core/src/kinds.rs	GitHub Releases	an app's own name in the catalog, the same in every language
 crates/kairo-core/src/kinds.rs	Go modules	an app's own name in the catalog, the same in every language
 crates/kairo-core/src/kinds.rs	VS Code Marketplace	an app's own name in the catalog, the same in every language
+src/pages/kinds.rs	Unknown	the process name the activity tally gives a connection the core could not name, compared in code (no program menu for it)
