@@ -40,6 +40,9 @@ log = "0.4"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 serde_yaml = "0.9"
+# The app's `locales/` (the files NSH's `t!` reads in the window), for the text
+# Kairo says outside it: the tray, notifications, the engine's messages.
+rust-i18n = "4.2.4"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 tokio-tungstenite = { version = "0.28", optional = true }
 futures-util = { version = "0.3", optional = true }

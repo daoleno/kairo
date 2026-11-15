@@ -15,6 +15,34 @@ pub enum Theme {
     Dark,
 }
 
+/// The language Kairo shows: the system's, or one picked in Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Language {
+    #[serde(rename = "en")]
+    English,
+    /// Simplified Chinese.
+    #[serde(rename = "zh-Hans")]
+    Chinese,
+    /// The system's (the first of the person's languages Kairo has, else
+    /// English); also what a value this Kairo does not know reads as.
+    #[default]
+    #[serde(rename = "system", other)]
+    System,
+}
+
+impl Language {
+    pub const ALL: [Language; 3] = [Language::System, Language::English, Language::Chinese];
+
+    /// The BCP 47 tag picked; none for the system's.
+    pub fn tag(self) -> Option<&'static str> {
+        match self {
+            Language::System => None,
+            Language::English => Some("en"),
+            Language::Chinese => Some("zh-Hans"),
+        }
+    }
+}
+
 /// mihomo's routing mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -110,6 +138,8 @@ pub struct Settings {
     /// The TUN stack: `mixed`, `gvisor` or `system`.
     pub tun_stack: String,
     pub theme: Theme,
+    /// The language of Kairo's text (a value it does not know reads as the system's).
+    pub language: Language,
     pub launch_at_login: bool,
     pub start_minimized: bool,
     /// Start the core when the app starts.
@@ -153,6 +183,7 @@ impl Default for Settings {
             tun: cfg!(target_os = "android"),
             tun_stack: "mixed".into(),
             theme: Theme::System,
+            language: Language::System,
             launch_at_login: false,
             start_minimized: false,
             auto_start_core: true,
@@ -283,6 +314,17 @@ pub fn new_secret() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn languages_are_tags_and_an_unknown_one_is_the_systems() {
+        let s: Settings = serde_json::from_str(r#"{"language": "zh-Hans"}"#).unwrap();
+        assert_eq!(s.language, Language::Chinese);
+        let s: Settings = serde_json::from_str(r#"{"language": "ja"}"#).unwrap();
+        assert_eq!(s.language, Language::System);
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.language, Language::System);
+        assert_eq!(serde_json::to_value(Language::English).unwrap(), "en");
+    }
 
     #[test]
     fn defaults_fill_missing_keys() {

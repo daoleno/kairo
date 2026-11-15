@@ -311,9 +311,9 @@ pub fn btn_icon_dyn(
 }
 
 /// An icon-only button; `label` names it for screen readers and tests.
-pub fn icon_btn(glyph: Icon, label: &'static str) -> Button {
+pub fn icon_btn(glyph: Icon, label: impl Into<SharedString>) -> Button {
     button()
-        .accessibility_label(label)
+        .accessibility_label(label.into())
         .items_center()
         .justify_center()
         .size(px(touch_h(28.0)))
@@ -387,9 +387,10 @@ pub fn update_button(b: crate::chrome::UpdateButton, on_press: impl Fn() + 'stat
 /// An on/off switch in the platform's proportions.
 pub fn toggle(
     checked: impl Fn() -> bool + 'static,
-    label: &'static str,
+    label: impl Into<SharedString>,
     on_change: impl Fn(bool) + 'static,
 ) -> AnyElement {
+    let label: SharedString = label.into();
     if crate::chrome::native_controls() {
         // NSSwitch has no title: its label is the row's text beside it.
         let _ = label;
@@ -431,17 +432,17 @@ pub fn toggle(
 }
 
 /// A segmented control: one of `options`, the selected one raised.
-pub fn segmented<T: Copy + PartialEq + 'static>(
-    options: Vec<(T, &'static str)>,
+pub fn segmented<T: Copy + PartialEq + 'static, L: AsRef<str>>(
+    options: Vec<(T, L)>,
     selected: impl Fn() -> T + Copy + 'static,
     on_select: impl Fn(T) + Copy + 'static,
 ) -> View {
     if crate::chrome::native_controls() {
         let values: Vec<T> = options.iter().map(|o| o.0).collect();
-        let labels: Vec<JsonValue> = options.iter().map(|o| JsonValue::from(o.1)).collect();
+        let labels: Vec<JsonValue> = options.iter().map(|o| JsonValue::from(o.1.as_ref())).collect();
         let width = options
             .iter()
-            .map(|o| o.1.len() as f32 * 7.5 + 26.0)
+            .map(|o| text_width(o.1.as_ref()) + 26.0)
             .sum::<f32>()
             + 4.0;
         let index = {
@@ -478,6 +479,7 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
     let track_view = if phone { track_view.w_full().min_w(px(0.0)) } else { track_view.flex_shrink_0() };
     track_view
         .children(options.into_iter().map(move |(value, label)| {
+            let label = SharedString::from(label.as_ref().to_owned());
             let is = move || selected() == value;
             button()
                 .selected(is)
@@ -509,13 +511,14 @@ pub fn segmented<T: Copy + PartialEq + 'static>(
 }
 
 /// A single-line text field bound to `value`.
-pub fn field(value: Signal<String>, placeholder: &'static str) -> Input {
+pub fn field(value: Signal<String>, placeholder: impl Into<String>) -> Input {
     shaped_field(value, placeholder, str::to_owned)
 }
 
 /// A single-line text field bound to `value` that keeps what is typed in
 /// the shape `shape` gives it (shown so as the person types).
-pub fn shaped_field(value: Signal<String>, placeholder: &'static str, shape: fn(&str) -> String) -> Input {
+pub fn shaped_field(value: Signal<String>, placeholder: impl Into<String>, shape: fn(&str) -> String) -> Input {
+    let placeholder: String = placeholder.into();
     input()
         .value(move || value.get())
         .on_change(move |t: &str| {
@@ -531,7 +534,7 @@ pub fn shaped_field(value: Signal<String>, placeholder: &'static str, shape: fn(
             value.set(t.to_owned());
             spawn(async move { value.set(shape(&value.get_untracked())) });
         })
-        .placeholder(placeholder)
+        .placeholder(move || placeholder.clone())
         .placeholder_color(|| color(theme().muted_foreground))
         .caret_color(|| color(theme().primary))
         .h(px(28.0))
@@ -545,7 +548,8 @@ pub fn shaped_field(value: Signal<String>, placeholder: &'static str, shape: fn(
 }
 
 /// A search field with its glyph.
-pub fn search_field(value: Signal<String>, placeholder: &'static str) -> View {
+pub fn search_field(value: Signal<String>, placeholder: impl Into<String>) -> View {
+    let placeholder: String = placeholder.into();
     view()
         .flex_row()
         .items_center()
@@ -562,7 +566,7 @@ pub fn search_field(value: Signal<String>, placeholder: &'static str) -> View {
             input()
                 .value(move || value.get())
                 .on_change(move |t: &str| value.set(t.to_owned()))
-                .placeholder(placeholder)
+                .placeholder(move || placeholder.clone())
                 .placeholder_color(|| color(theme().muted_foreground))
                 .caret_color(|| color(theme().primary))
                 .flex_1()
@@ -702,6 +706,24 @@ pub fn menu_text(title: String) -> String {
     }
 }
 
+/// About how wide `text` is at the body size (points): a CJK character
+/// takes about two Latin ones' room. For controls the platform sizes from
+/// a width given ahead (macOS's segmented control).
+pub fn text_width(text: &str) -> f32 {
+    text.chars()
+        .map(|c| if is_wide(c) { 13.5 } else { 7.5 })
+        .sum()
+}
+
+/// A character set as wide as it is tall (CJK ideographs, kana, hangul,
+/// full-width forms and punctuation).
+pub fn is_wide(c: char) -> bool {
+    matches!(c as u32,
+        0x1100..=0x115F | 0x2E80..=0x303E | 0x3041..=0x33FF | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF | 0xA000..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6)
+}
+
 /// A hairline separator.
 pub fn divider() -> View {
     view().h(px(1.0)).bg(move || theme().border)
@@ -710,7 +732,7 @@ pub fn divider() -> View {
 /// A row of a settings group: title and description on the left, a control on the right.
 pub fn setting_row(
     label: impl IntoReactive<SharedString>,
-    detail: Option<&'static str>,
+    detail: Option<SharedString>,
     control: impl IntoElement,
 ) -> View {
     let phone = phone();
@@ -762,8 +784,8 @@ pub fn setting_row_dyn(
 }
 
 /// A settings group: a label above a card of rows separated by hairlines.
-pub fn group(label: Option<&'static str>, rows: Vec<AnyElement>) -> View {
-    group_titled(label.map(SharedString::from), rows)
+pub fn group(label: Option<impl Into<SharedString>>, rows: Vec<AnyElement>) -> View {
+    group_titled(label.map(Into::into), rows)
 }
 
 /// A settings group whose label is made at run time.

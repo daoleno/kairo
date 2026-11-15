@@ -5,6 +5,7 @@ pub mod accent;
 pub mod backend;
 pub mod chrome;
 mod flags;
+pub mod i18n;
 pub mod logos;
 mod logos_table;
 mod pages;
@@ -52,6 +53,13 @@ pub fn main_view(backend: backend::Backend) -> impl IntoElement {
     let store = Store::new(backend);
     provide_context(store);
 
+    // The language follows the setting (System: the person's languages).
+    let language = computed(move || store.state.with(|s| s.settings.language));
+    effect(move || {
+        nsh_core::i18n::set_locale(language.get().tag().and_then(nsh_core::platform::Locale::parse))
+    });
+    let shown = i18n::shown();
+
     // The app's appearance follows the setting (System follows the desktop).
     let chosen = computed(move || store.state.with(|s| s.settings.theme));
     effect(move || {
@@ -82,7 +90,11 @@ pub fn main_view(backend: backend::Backend) -> impl IntoElement {
         .flex_1()
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
-        .child(shell::shell())
+        // A new language builds the window again: every label is read anew.
+        .child(dynamic(move || {
+            let _ = shown.get();
+            untracked(|| shell::shell().into_element())
+        }))
 }
 
 /// The pages ⌘1… open, in the sidebar's order.

@@ -1,0 +1,42 @@
+_version: 2
+
+# The pages (the sidebar, the window's title, the phone's tab bar).
+page.home:
+  en: Home
+  zh: 首页
+page.exits:
+  en: Exits
+  zh: 出口
+page.activity:
+  en: Activity
+  zh: 活动
+page.apps:
+  en: Apps & Sites
+  zh: 应用与网站
+page.apps.tab:
+  en: Apps
+  zh: 应用
+page.profiles:
+  en: Subscriptions
+  zh: 订阅
+page.profiles.tab:
+  en: Subs
+  zh: 订阅
+page.settings:
+  en: Settings
+  zh: 设置
+page.groups:
+  en: Groups
+  zh: 策略组
+page.rules:
+  en: Rules
+  zh: 规则
+page.diagnostics:
+  en: Diagnostics
+  zh: 诊断
+page.dns:
+  en: DNS
+  zh: DNS
+page.ai_service:
+  en: AI Service
+  zh: AI 服务

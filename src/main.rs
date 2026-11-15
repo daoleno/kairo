@@ -25,10 +25,14 @@ fn root() -> nsh_engine_root::Root {
     if nsh_app_kairo::chrome::native() {
         let theme = nsh_app_kairo::accent::apply(&mac_theme::theme_json(nsh_app_kairo::THEME));
         if let Ok(tokens) = nsh_base::tokens_of(Some(&theme)) {
-            return nsh_engine_root::Root::of::<nsh_app_kairo::App>().tokens(tokens);
+            return nsh_engine_root::Root::of::<nsh_app_kairo::App>()
+                .tokens(tokens)
+                .translations(nsh_app_kairo::i18n::translations());
         }
     }
-    nsh_engine_root::Root::of::<nsh_app_kairo::App>().tokens(nsh_app_kairo::tokens())
+    nsh_engine_root::Root::of::<nsh_app_kairo::App>()
+        .tokens(nsh_app_kairo::tokens())
+        .translations(nsh_app_kairo::i18n::translations())
 }
 
 #[cfg(target_os = "linux")]
@@ -384,6 +388,8 @@ fn start_primary() -> Service {
     #[cfg(any(unix, windows))]
     guardian::spawn();
     let svc = Service::global();
+    // What Kairo says (the tray first) before the window says which language it shows.
+    kairo_core::i18n::start(svc.settings().language);
     emergency_handlers(&svc);
     svc
 }

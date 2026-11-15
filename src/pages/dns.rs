@@ -5,6 +5,7 @@ use kairo_core::model::{DnsAnswer, dns_type_name};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
+use crate::i18n::plural;
 use crate::store::{Page, store};
 use crate::ui::{self, Icon, Variant, size};
 
@@ -105,7 +106,7 @@ pub fn page() -> impl IntoElement {
                         ui::card()
                             .p_4()
                             .gap_3()
-                            .child(ui::section_label("Look Up"))
+                            .child(ui::section_label(t!("dns.look_up")))
                             .child(
                                 view()
                                     .flex_row()
@@ -116,13 +117,13 @@ pub fn page() -> impl IntoElement {
                                     .child(ui::field(name, "example.com").flex_1().on_submit(move |_: &str| query()))
                                     .child(view().when(ui::phone(), |v| v.w_full()).child(ui::segmented(KINDS.iter().map(|k| (*k, *k)).collect(), move || kind.get(), move |k| kind.set(k))))
                                     .child(
-                                        ui::btn_icon(Icon::Search, "Query", Variant::Primary)
+                                        ui::btn_icon(Icon::Search, t!("dns.query"), Variant::Primary)
                                             .when(ui::phone(), |b| b.w_full())
                                             .disabled(move || busy.get() || !running.get() || name.with(|n| n.trim().is_empty()))
                                             .on_press(query),
                                     ),
                             )
-                            .child(when(move || !running.get(), || ui::muted("The core is not running"))),
+                            .child(when(move || !running.get(), || ui::muted(t!("dns.core_not_running")))),
                     )
                     .child(each(
                         move || history.get(),
@@ -131,15 +132,15 @@ pub fn page() -> impl IntoElement {
                     ))
                     .child(
                         ui::group(
-                            Some("Fake-IP"),
+                            Some(t!("dns.fake_ip")),
                             vec![
                                 ui::setting_row(
-                                    "Flush the fake-IP cache",
+                                    t!("dns.flush_fake_ip"),
                                     None,
-                                    ui::btn("Flush", Variant::Secondary).disabled(move || !running.get()).on_press(move || {
+                                    ui::btn(t!("dns.flush"), Variant::Secondary).disabled(move || !running.get()).on_press(move || {
                                         store.run_then(store.svc().flush_fakeip(), move |r| {
                                             if r.is_ok() {
-                                                store.info("Fake-IP cache flushed");
+                                                store.info(t!("dns.flushed"));
                                             }
                                         })
                                     }),
@@ -156,16 +157,11 @@ fn result_card(l: Lookup) -> impl IntoElement {
     let ok = l.error.is_none() && l.status == 0;
     let summary = match &l.error {
         Some(e) => e.clone(),
-        None => format!(
-            "{} · {} {} · {} ms",
-            status_name(l.status),
-            l.answers.len(),
-            if l.answers.len() == 1 {
-                "answer"
-            } else {
-                "answers"
-            },
-            l.millis
+        None => t!(
+            &plural("dns.summary", l.answers.len() as u64),
+            status = status_name(l.status),
+            count = l.answers.len(),
+            ms = l.millis
         ),
     };
     let mut card = ui::card().child(
@@ -200,10 +196,10 @@ fn result_card(l: Lookup) -> impl IntoElement {
                 .py_1p5()
                 .style_when(ui::phone, |s| s.hidden())
                 .bg(move || ui::subtle())
-                .child(col_head("Name", None))
-                .child(col_head("Type", Some(64.0)))
-                .child(col_head("TTL", Some(64.0)))
-                .child(col_head("Data", None)),
+                .child(col_head(t!("dns.column.name"), None))
+                .child(col_head(t!("dns.column.type"), Some(64.0)))
+                .child(col_head(t!("dns.column.ttl"), Some(64.0)))
+                .child(col_head(t!("dns.column.data"), None)),
         );
         for a in l.answers {
             if ui::phone() {
@@ -262,7 +258,7 @@ fn result_card(l: Lookup) -> impl IntoElement {
     card
 }
 
-fn col_head(label: &'static str, w: Option<f32>) -> Text {
+fn col_head(label: String, w: Option<f32>) -> Text {
     let t = text(label)
         .text_size(px(size::small()))
         .font_weight(FontWeight::MEDIUM)
