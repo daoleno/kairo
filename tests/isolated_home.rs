@@ -15,7 +15,7 @@ fn a_runner_that_never_claims_is_isolated_and_refused_the_real_home() {
     assert!(isolated(), "a process that never claims the real home is isolated");
 
     let real = HomeEnv::current().real_home();
-    // SAFETY: one test in this binary; nothing else reads the environment meanwhile.
+    // SAFETY: the only test in this binary that reads or sets the environment.
     unsafe { std::env::remove_var("KAIRO_HOME") };
     let home = Paths::default_home();
     assert_eq!(home, std::env::temp_dir().join(format!("kairo-isolated-{}", std::process::id())));
@@ -36,4 +36,16 @@ fn a_runner_that_never_claims_is_isolated_and_refused_the_real_home() {
     let b = kairo_core::sysproxy::backends();
     assert!(!b.gnome && b.kde.is_none() && !b.mac && !b.windows, "{b:?}");
     assert!(PathBuf::from(&home).starts_with(std::env::temp_dir()));
+}
+
+/// The desktop app is Kairo itself: its `main` claims the real home before
+/// anything reads a path (the logs folder is the first). Without that, people
+/// would get an empty scratch home on every launch. (kairo-server's claim is
+/// checked by running it: crates/kairo-server/tests/real_home.rs.)
+#[test]
+fn the_desktop_app_claims_the_real_home_first() {
+    let src = include_str!("../src/main.rs");
+    let main = &src[src.find("\nfn main() {").expect("fn main in src/main.rs") + 1..];
+    let body = main.lines().skip(1).map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("//"));
+    assert_eq!(body.clone().next(), Some("kairo_core::paths::claim_real_home();"), "the first line of main");
 }
