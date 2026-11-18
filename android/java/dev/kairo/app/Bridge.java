@@ -187,10 +187,15 @@ public final class Bridge {
         new android.os.Handler(android.os.Looper.getMainLooper()).post(KairoTile::refreshShown);
     }
 
-    /** Whether Settings offers to add the tile: Android 13+ (the system's own request) and not added yet. */
+    /**
+     * Whether Settings offers to add the tile: Android 13+ (the system's own request),
+     * not added yet, and not asked before (offered once, whatever the answer).
+     */
     public static boolean tileOffered() {
+        android.content.SharedPreferences prefs = app.getSharedPreferences("kairo", Context.MODE_PRIVATE);
         return android.os.Build.VERSION.SDK_INT >= 33
-                && !app.getSharedPreferences("kairo", Context.MODE_PRIVATE).getBoolean("tile_added", false);
+                && !prefs.getBoolean("tile_added", false)
+                && !prefs.getBoolean("tile_asked", false);
     }
 
     static void tileAdded(boolean added) {
@@ -202,6 +207,7 @@ public final class Bridge {
         if (android.os.Build.VERSION.SDK_INT < 33) {
             return;
         }
+        app.getSharedPreferences("kairo", Context.MODE_PRIVATE).edit().putBoolean("tile_asked", true).apply();
         new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
             try {
                 android.app.StatusBarManager sb = app.getSystemService(android.app.StatusBarManager.class);

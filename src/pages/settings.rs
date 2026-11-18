@@ -371,14 +371,27 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
     }
 }
 
-/// "Quick Settings · Add": Android shows its own dialog to add Kairo's tile; the
-/// row is gone once the tile is there.
+/// "Quick Settings · Add": Android shows its own dialog to add Kairo's tile.
+/// Offered once: after the answer the button is spent, and the row is gone.
 #[cfg(target_os = "android")]
 fn tile_row() -> AnyElement {
+    let asked = signal(false);
     ui::setting_row(
         t!("settings.tile.title"),
         None,
-        ui::btn(t!("settings.tile.add"), Variant::Secondary).on_press(kairo_core::android::request_tile),
+        dynamic(move || {
+            let button = ui::btn(t!("settings.tile.add"), Variant::Secondary);
+            if asked.get() {
+                button.disabled(true).into_element()
+            } else {
+                button
+                    .on_press(move || {
+                        asked.set(true);
+                        kairo_core::android::request_tile();
+                    })
+                    .into_element()
+            }
+        }),
     )
     .into_element()
 }
