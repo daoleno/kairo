@@ -4,6 +4,12 @@ _version: 2
 settings.language.title:
   en: Language
   zh: 语言
+settings.tile.title:
+  en: Quick Settings
+  zh: 快捷设置
+settings.tile.add:
+  en: Add
+  zh: 添加
 settings.language.system:
   en: System
   zh: 跟随系统

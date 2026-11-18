@@ -358,10 +358,29 @@ fn general_rows(settings: Memo<Settings>, mac: bool) -> Vec<AnyElement> {
     // A phone has no login items, tray or window to close: only the look and
     // the language. Nor has the page of a server (the server starts with the machine).
     if phone || store.svc().is_remote() {
-        rows.into_iter().take(2).collect()
+        #[allow(unused_mut)]
+        let mut rows: Vec<AnyElement> = rows.into_iter().take(2).collect();
+        // Android 13+: Kairo's Quick Settings tile, through Android's own request.
+        #[cfg(target_os = "android")]
+        if !store.svc().is_remote() && kairo_core::android::tile_offered() {
+            rows.push(tile_row());
+        }
+        rows
     } else {
         rows
     }
+}
+
+/// "Quick Settings · Add": Android shows its own dialog to add Kairo's tile; the
+/// row is gone once the tile is there.
+#[cfg(target_os = "android")]
+fn tile_row() -> AnyElement {
+    ui::setting_row(
+        t!("settings.tile.title"),
+        None,
+        ui::btn(t!("settings.tile.add"), Variant::Secondary).on_press(kairo_core::android::request_tile),
+    )
+    .into_element()
 }
 
 /// A language as its readers name it ("English", "简体中文"); the system's in
