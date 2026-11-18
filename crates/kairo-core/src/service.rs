@@ -593,6 +593,9 @@ impl Service {
                         CoreCmd::Start(reply) => {
                             want = true;
                             let r = if process.is_some() { Ok(()) } else { self.launch(&mut process, &mut streams).await };
+                            if r.is_err() {
+                                Self::vpn_down();
+                            }
                             let _ = reply.send(r);
                         }
                         CoreCmd::Stop(reply) => {
@@ -604,6 +607,9 @@ impl Service {
                             want = true;
                             self.halt(&mut process, &mut streams).await;
                             let r = self.launch(&mut process, &mut streams).await;
+                            if r.is_err() {
+                                Self::vpn_down();
+                            }
                             let _ = reply.send(r);
                         }
                     }
@@ -629,14 +635,23 @@ impl Service {
                         tokio::time::sleep(Duration::from_millis(500 * crashes.len() as u64)).await;
                         if let Err(e) = self.launch(&mut process, &mut streams).await {
                             log::warn!("restart failed: {e}");
+                            Self::vpn_down();
                         }
                     } else {
                         want = false;
+                        Self::vpn_down();
                         self.set_core(CoreStatus::Failed { message: reason });
                     }
                 }
             }
         }
+    }
+
+    /// Android: no core, so no VPN. A tun with nothing behind it takes the
+    /// phone's network with it (the core did not start, or gave up).
+    fn vpn_down() {
+        #[cfg(target_os = "android")]
+        crate::android::teardown();
     }
 
     async fn launch(
