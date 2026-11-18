@@ -3,14 +3,16 @@
 # Kairo on Android stays on without its screen: after the app is swiped away, after
 # Android kills its process (as a low-memory kill does), and after a restart of the
 # phone; and the Quick Settings tile turns it off and on, also with the app's
-# process gone (`cmd statusbar click-tile` is a tap on the tile). Each check is a real request from the device through the VPN: the host
+# process gone (a real tap on the tile in the shade). Each check is a real request
+# from the device through the VPN: the host
 # kairo-probe.test only resolves and answers through Kairo's core (the fixture's
 # proxies map *.test to its origin), so a pass is traffic through the tunnel.
 #
 # Needs: one device or emulator on adb (ANDROID_SERIAL picks one) with a debug build
 # of Kairo (scripts/package-android.sh, for run-as) that is connected with the
 # fixture's subscription, http://127.0.0.1:18080/sub (added once in the app; the
-# VPN permission given once). The fixture runs here and the device reaches it
+# VPN permission given once; for `tile`, the tile added to Quick Settings: Kairo's
+# Settings > Quick Settings > Add). The fixture runs here and the device reaches it
 # through `adb reverse`, which this script sets up (again after a reboot).
 #
 #   python3 -I scripts/fixture.py --port 18080 &   # started here if not running
@@ -98,25 +100,47 @@ fi
 
 if [ "$what" = tile ] || [ "$what" = all ]; then
   tile=$pkg/.KairoTile
-  adb shell cmd statusbar add-tile $tile >/dev/null 2>&1 || true
-  adb shell cmd statusbar collapse >/dev/null 2>&1 || true
-  adb shell cmd statusbar click-tile $tile
-  sleep 3
+  # A real tap on the tile in the expanded shade, found by its label (paging
+  # through the panel); `cmd statusbar click-tile` does not reach the tile.
+  tap_tile() {
+    adb shell cmd statusbar expand-settings >/dev/null 2>&1
+    sleep 2
+    for page in 1 2 3 4 5; do
+      adb shell uiautomator dump /sdcard/kairo-ui.xml >/dev/null 2>&1
+      at=$(adb shell cat /sdcard/kairo-ui.xml | tr '>' '\n' | grep 'text="Kairo, ' | head -1 \
+        | sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p')
+      if [ -n "$at" ]; then
+        set -- $at
+        adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+        sleep 1
+        adb shell cmd statusbar collapse >/dev/null 2>&1
+        return 0
+      fi
+      adb shell input swipe 900 1000 150 1000 300
+      sleep 1
+    done
+    echo "no Kairo tile in Quick Settings (add it: Settings > Quick Settings > Add)" >&2
+    adb shell cmd statusbar collapse >/dev/null 2>&1
+    return 1
+  }
+  tap_tile
+  sleep 2
   if probe; then check "tile off: still through the tunnel" fail; else check "tile off: no tunnel" ok; fi
-  adb shell cmd statusbar click-tile $tile
+  tap_tile
   if s=$(until_through 20); then check "tile on: through the tunnel in ${s}s" ok; else check "tile on: no tunnel within 20s" fail; fi
   # Off, then the process gone (nothing restarts it: Kairo is off): the tile starts it alone.
-  adb shell cmd statusbar click-tile $tile
-  sleep 3
+  tap_tile
+  sleep 2
+  if probe; then check "tile off again: still through the tunnel" fail; fi
   before=$(pid)
   [ -z "$before" ] || adb shell run-as $pkg kill -9 "$before"
   sleep 2
-  adb shell cmd statusbar click-tile $tile
+  tap_tile
   if s=$(until_through 30); then
     if adb shell dumpsys activity activities | grep -E "topResumedActivity|ResumedActivity:" | grep -q $pkg; then
       check "tile on with the app's process gone: it opened Kairo" fail
     fi
-    check "tile on with the app's process gone: through the tunnel in ${s}s, no screen opened" ok
+    check "tile on with the app's process gone (pid $before): through the tunnel in ${s}s, no screen opened" ok
   else
     check "tile on with the app's process gone: no tunnel within 30s" fail
   fi
