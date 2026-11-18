@@ -386,6 +386,19 @@ engine.android.dup_failed:
 engine.android.installer_failed:
   en: "The installer failed"
   zh: "安装程序失败"
+engine.android.vpn_needs_app:
+  en: "Open Kairo to allow the VPN"
+  zh: "打开 Kairo 以允许 VPN"
+# The Quick Settings tile's subtitle (KairoTile.java): the state.
+engine.android.tile_on:
+  en: "On"
+  zh: "开启"
+engine.android.tile_off:
+  en: "Off"
+  zh: "关闭"
+engine.android.tile_unavailable:
+  en: "Unavailable"
+  zh: "不可用"
 
 # The core's controller (controller.rs).
 engine.controller.unreachable:

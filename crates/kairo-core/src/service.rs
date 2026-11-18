@@ -505,12 +505,11 @@ impl Service {
         }
         match (version, seeded) {
             (Some(_), _) => {
-                // Android: the VPN (and its permission screen) waits for a
-                // subscription to connect with, not the first launch.
-                let waits_for_profile =
-                    cfg!(target_os = "android") && self.0.state.borrow().profiles.active.is_none();
-                if self.settings().auto_start_core
-                    && !waits_for_profile
+                // Android: the engine starts with the process, whatever started
+                // it; whoever started it connects (`android::connect`): the app
+                // opening, the VPN service restarting, Always-on VPN, the tile.
+                if !cfg!(target_os = "android")
+                    && self.settings().auto_start_core
                     && let Err(e) = self.start_core().await
                 {
                     log::warn!("start: {e}");
@@ -523,6 +522,8 @@ impl Service {
                 message: crate::tr!("engine.service.core_does_not_run", path = core.display()),
             }),
         }
+        #[cfg(target_os = "android")]
+        crate::android::booted();
         crate::update::spawn_checks(self.clone());
     }
 

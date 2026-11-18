@@ -22,8 +22,24 @@ public final class Bridge {
 
     static Application app;
 
-    /** Rust: the app's files directory and native library directory. */
-    static native void nativeInit(String filesDir, String nativeLibraryDir);
+    /** Rust: the app's files directory, native library directory and the device's language (a BCP 47 tag). */
+    static native void nativeInit(String filesDir, String nativeLibraryDir, String locale);
+
+    /** Rust: starts the engine (once per process; it does not connect by itself). */
+    static native void nativeStart();
+
+    /** Rust: turns Kairo on or off, as the switch in the app does. */
+    static native void nativeConnect(boolean on);
+
+    /** Rust: on again if Kairo was on (its subscription and the wish to be on are kept); false when it stays off. */
+    static native boolean nativeRestore();
+
+    /** Rust: whether Kairo was on (and has a subscription to be on with). */
+    static native boolean nativeWantsOn();
+
+    static boolean wantsOn() {
+        return nativeWantsOn();
+    }
 
     /** Rust: the VPN was taken away (the user switched it off in Settings, or another VPN took over). */
     static native void nativeRevoked();
@@ -36,7 +52,48 @@ public final class Bridge {
 
     static void init(Application a) {
         app = a;
-        nativeInit(a.getFilesDir().getAbsolutePath(), a.getApplicationInfo().nativeLibraryDir);
+        nativeInit(a.getFilesDir().getAbsolutePath(), a.getApplicationInfo().nativeLibraryDir,
+                java.util.Locale.getDefault().toLanguageTag());
+        nativeStart();
+    }
+
+    /** Kairo's mark (the tile, the notification). */
+    static int mark(Context c) {
+        return c.getResources().getIdentifier("ic_kairo", "drawable", c.getPackageName());
+    }
+
+    // --- Kairo's screens -------------------------------------------------------------
+
+    /** How many of Kairo's activities are started (on screen): only then may it show Android's dialogs. */
+    private static final java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** The tile opened Kairo to connect (the VPN permission is asked over it). */
+    static volatile boolean connectWhenOpen;
+
+    static void activityStarted() {
+        synchronized (started) {
+            started.incrementAndGet();
+            started.notifyAll();
+        }
+    }
+
+    static void activityStopped() {
+        started.decrementAndGet();
+    }
+
+    /** Whether a Kairo screen is up, waiting up to `ms` for one (the tile has just opened Kairo). */
+    private static boolean onScreen(long ms) {
+        long end = System.currentTimeMillis() + ms;
+        synchronized (started) {
+            while (started.get() <= 0) {
+                long left = end - System.currentTimeMillis();
+                if (left <= 0) {
+                    return false;
+                }
+                try { started.wait(left); } catch (InterruptedException e) { return false; }
+            }
+            return true;
+        }
     }
 
     /** Waited on by {@link #establish()} while the consent screen is up. */
@@ -45,12 +102,19 @@ public final class Bridge {
     /**
      * Brings the VPN up (asking for permission the first time) and returns a file
      * descriptor of its tun device: -1 when the user said no, -2 when Android could
-     * not set the VPN up. Blocks; called off the UI thread.
+     * not set the VPN up, -3 when the permission is missing and no Kairo screen is
+     * up to ask for it (Kairo connects without one: after a restart, from the tile).
+     * Blocks; called off the UI thread.
      */
     public static int establish() {
         try {
-            askForNotifications();
+            if (onScreen(0)) {
+                askForNotifications();
+            }
             if (VpnService.prepare(app) != null) {
+                if (!onScreen(5000)) {
+                    return -3;
+                }
                 CompletableFuture<Boolean> f = new CompletableFuture<>();
                 consent = f;
                 Intent i = new Intent(app, VpnConsentActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -59,12 +123,18 @@ public final class Bridge {
                     return -1;
                 }
             }
+            // Started already (the tile, a restart, Always-on): its tun, from here.
+            int fd = KairoVpnService.establishInRunning();
+            if (fd != -3) {
+                return fd;
+            }
             CompletableFuture<Integer> up = new CompletableFuture<>();
             KairoVpnService.pending = up;
             Intent s = new Intent(app, KairoVpnService.class).setAction(KairoVpnService.START);
             app.startForegroundService(s);
             return up.get(30, TimeUnit.SECONDS);
         } catch (Exception e) {
+            android.util.Log.w("Kairo", "establish failed", e);
             return -2;
         }
     }
@@ -91,6 +161,62 @@ public final class Bridge {
         } catch (Exception ignored) {
             // Connecting matters more than the notification.
         }
+    }
+
+    // --- The Quick Settings tile ------------------------------------------------------
+
+    static final int OFF = 0, CONNECTING = 1, ON = 2, UNAVAILABLE = 3;
+    /** What the tile shows, from the engine ({@link #stateChanged}): one of the above. */
+    static volatile int state = OFF;
+    /** The tile's subtitle for each state, in Kairo's language (the engine's catalog). */
+    private static volatile String[] subtitles = {"", "", "", ""};
+    /** The tile's name ("Kairo"). */
+    static final String NAME = "Kairo";
+
+    static String subtitleOf(int s) {
+        String[] t = subtitles;
+        return s >= 0 && s < t.length ? t[s] : "";
+    }
+
+    /** Rust: the engine's state changed (or its language): the tile follows. */
+    public static void stateChanged(int s, String[] texts) {
+        if (texts != null && texts.length == 4) {
+            subtitles = texts;
+        }
+        state = s;
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(KairoTile::refreshShown);
+    }
+
+    /** Whether Settings offers to add the tile: Android 13+ (the system's own request) and not added yet. */
+    public static boolean tileOffered() {
+        return android.os.Build.VERSION.SDK_INT >= 33
+                && !app.getSharedPreferences("kairo", Context.MODE_PRIVATE).getBoolean("tile_added", false);
+    }
+
+    static void tileAdded(boolean added) {
+        app.getSharedPreferences("kairo", Context.MODE_PRIVATE).edit().putBoolean("tile_added", added).apply();
+    }
+
+    /** Settings' "Add": Android's own "Add tile" request (13+). */
+    public static void requestTile() {
+        if (android.os.Build.VERSION.SDK_INT < 33) {
+            return;
+        }
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            try {
+                android.app.StatusBarManager sb = app.getSystemService(android.app.StatusBarManager.class);
+                sb.requestAddTileService(new android.content.ComponentName(app, KairoTile.class), NAME,
+                        android.graphics.drawable.Icon.createWithResource(app, mark(app)), app.getMainExecutor(),
+                        result -> {
+                            if (result == android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED
+                                    || result == android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED) {
+                                tileAdded(true);
+                            }
+                        });
+            } catch (Exception e) {
+                android.util.Log.w("Kairo", "requestAddTileService failed", e);
+            }
+        });
     }
 
     /**
